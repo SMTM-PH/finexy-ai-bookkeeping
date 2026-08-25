@@ -130,9 +130,19 @@ if (isUserLogined() && initialRoutePath !== '/verify_email' && initialRoutePath 
 }
 
 if (isProduction()) {
+    let isReloadingForServiceWorkerUpdate = false;
+
     register('./sw.js', {
         registrationOptions: {
             scope: './'
+        },
+        updated: () => {
+            if (isReloadingForServiceWorkerUpdate) {
+                return;
+            }
+
+            isReloadingForServiceWorkerUpdate = true;
+            window.location.reload();
         }
     });
 }

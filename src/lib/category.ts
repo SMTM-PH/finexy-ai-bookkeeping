@@ -335,6 +335,18 @@ export function getFirstVisibleCategoryId(categories?: TransactionCategory[]): s
     return '';
 }
 
+export function getCategoryTypesWithoutSelectableCategories(categories: Record<number, TransactionCategory[]>): CategoryType[] {
+    const categoryTypes: CategoryType[] = [];
+
+    for (const categoryType of ALL_CATEGORY_TYPES) {
+        if (!getFirstVisibleCategoryId(categories[categoryType])) {
+            categoryTypes.push(categoryType);
+        }
+    }
+
+    return categoryTypes;
+}
+
 export function getFirstAvailableSubCategoryId(categories: TransactionCategory[], categoryId: string): string {
     if (!categories || !categories.length) {
         return '';

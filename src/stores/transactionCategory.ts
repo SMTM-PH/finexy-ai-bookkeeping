@@ -18,6 +18,7 @@ import {
 import { categorizedArrayToPlainArray, isEquals } from '@/lib/common.ts';
 import {
     getAllLocalizedTransactionDefaultCategories,
+    getCategoryTypesWithoutSelectableCategories,
     getFirstVisibleCategoryId,
     localizedPresetCategoriesToTransactionCategoryCreateWithSubCategories
 } from '@/lib/category.ts';
@@ -213,23 +214,19 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
         defaultCategoriesBackfillPromise = null;
     }
 
-    function hasNoCategories(categories: Record<number, TransactionCategory[]>): boolean {
-        for (const categoryList of values(categories)) {
-            if (categoryList.length > 0) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    function backfillDefaultCategories(): Promise<Record<number, TransactionCategory[]>> {
+    function backfillDefaultCategories(categoryTypes: CategoryType[]): Promise<Record<number, TransactionCategory[]>> {
         if (defaultCategoriesBackfillPromise) {
             return defaultCategoriesBackfillPromise;
         }
 
         const localizedCategories = getAllLocalizedTransactionDefaultCategories(0, userStore.currentUserLanguage);
-        const presetCategories = categorizedArrayToPlainArray(localizedCategories);
+        const missingLocalizedCategories: Record<number, typeof localizedCategories[string]> = {};
+
+        for (const categoryType of categoryTypes) {
+            missingLocalizedCategories[categoryType] = localizedCategories[categoryType] || [];
+        }
+
+        const presetCategories = categorizedArrayToPlainArray(missingLocalizedCategories);
         const categories = localizedPresetCategoriesToTransactionCategoryCreateWithSubCategories(presetCategories);
 
         defaultCategoriesBackfillPromise = services.addTransactionCategoryBatch({ categories }).then(response => {
@@ -290,10 +287,19 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
                     return;
                 }
 
-                if (hasNoCategories(transactionCategories)) {
-                    backfillDefaultCategories().then(backfilledCategories => {
-                        loadTransactionCategoryList(backfilledCategories);
-                        resolve(backfilledCategories);
+                const categoryTypesWithoutSelectableCategories = getCategoryTypesWithoutSelectableCategories(transactionCategories);
+
+                if (categoryTypesWithoutSelectableCategories.length > 0) {
+                    backfillDefaultCategories(categoryTypesWithoutSelectableCategories).then(createdCategories => {
+                        for (const categoryType of categoryTypesWithoutSelectableCategories) {
+                            transactionCategories[categoryType] = [
+                                ...(transactionCategories[categoryType] || []),
+                                ...(createdCategories[categoryType] || [])
+                            ];
+                        }
+
+                        loadTransactionCategoryList(transactionCategories);
+                        resolve(transactionCategories);
                     }).catch(error => {
                         updateTransactionCategoryListInvalidState(true);
                         reject(error);

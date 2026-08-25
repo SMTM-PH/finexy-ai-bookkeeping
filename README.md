@@ -58,7 +58,7 @@ Windows 包当前未进行代码签名，首次运行时 SmartScreen 可能显�
 公开镜像无需登录：
 
 ```bash
-docker pull ph97/finexy-bookkeeping:1.7.2-amd64
+docker pull ph97/finexy-bookkeeping:1.7.3-amd64
 docker pull ph97/finexy-bookkeeping:ocr-1.0-amd64
 ```
 
