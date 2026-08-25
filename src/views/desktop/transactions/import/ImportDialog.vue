@@ -621,9 +621,8 @@ const exportFileGuideDocumentUrl = computed<string | undefined>(() => {
         return undefined;
     }
 
-    const language = document.language ? document.language + '/' : '';
     const anchor = document.anchor ? '#' + document.anchor : '';
-    return `https://ezbookkeeping.mayswind.net/${language}export_and_import${anchor}`;
+    return `https://github.com/SMTM-PH/finexy-ai-bookkeeping/blob/main/README.md${anchor}`;
 });
 
 const exportFileGuideDocumentLanguageName = computed<string | undefined>(() => allSupportedImportFileTypesMap.value[fileType.value]?.document?.displayLanguageName);

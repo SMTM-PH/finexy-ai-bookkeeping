@@ -1,4 +1,4 @@
-module github.com/mayswind/ezbookkeeping
+module github.com/SMTM-PH/finexy-ai-bookkeeping
 
 go 1.26.0
 

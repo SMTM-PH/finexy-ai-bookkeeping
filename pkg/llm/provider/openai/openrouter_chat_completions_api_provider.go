@@ -3,9 +3,9 @@ package openai
 import (
 	"net/http"
 
-	"github.com/mayswind/ezbookkeeping/pkg/core"
-	"github.com/mayswind/ezbookkeeping/pkg/llm/provider"
-	"github.com/mayswind/ezbookkeeping/pkg/settings"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/core"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/llm/provider"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/settings"
 )
 
 // OpenRouterChatCompletionsAPIProvider defines the structure of OpenRouter chat completions API provider
@@ -26,7 +26,7 @@ func (p *OpenRouterChatCompletionsAPIProvider) BuildChatCompletionsHttpRequest(c
 	}
 
 	req.Header.Set("Authorization", "Bearer "+p.OpenRouterAPIKey)
-	req.Header.Set("HTTP-Referer", "https://ezbookkeeping.mayswind.net/")
+	req.Header.Set("HTTP-Referer", "https://github.com/SMTM-PH/finexy-ai-bookkeeping")
 	req.Header.Set("X-Title", core.ApplicationName)
 
 	return req, nil

@@ -113,7 +113,7 @@ const {
 
 const settingsStore = useSettingsStore();
 
-const sandboxMessageSignature: string = '#ezBookkeeping-sandbox-message#';
+const sandboxMessageSignature: string = '#Finexy-sandbox-message#';
 const sandboxBuildinScripts: string = `
 <script>
 window.TransactionType = {

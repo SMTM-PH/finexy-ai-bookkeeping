@@ -6,7 +6,7 @@ import (
 
 	"xorm.io/xorm/log"
 
-	"github.com/mayswind/ezbookkeeping/pkg/core"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/core"
 )
 
 // XOrmContextAdapter represents the context adapter for xorm

@@ -1,6 +1,6 @@
 # DeepSeek 文本记账配置
 
-项目复用 ezBookkeeping 的 OpenAI 兼容接口。DeepSeek 将自然语言转换为结构化交易；字段完整时自动正式入账，字段缺失时打开编辑窗口等待确认。
+项目复用 Finexy 的 OpenAI 兼容接口。DeepSeek 将自然语言转换为结构化交易；字段完整时自动正式入账，字段缺失时打开编辑窗口等待确认。
 
 在 `conf/ezbookkeeping.ini` 中设置：
 
