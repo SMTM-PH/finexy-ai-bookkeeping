@@ -23,7 +23,7 @@ uname -m
 
 | 服务 | 公开镜像 |
 | --- | --- |
-| Finexy 记账服务 | `ph97/finexy-bookkeeping:1.7.0-amd64` |
+| Finexy 记账服务 | `ph97/finexy-bookkeeping:1.7.1-amd64` |
 | 本地 OCR 服务 | `ph97/finexy-bookkeeping:ocr-1.0-amd64` |
 
 两个镜像位于同一个公开仓库，通过不同标签区分，任何人都可以直接拉取。
@@ -56,7 +56,7 @@ chown -R 1000:1000 data log storage
 公开镜像不需要执行 `docker login`。在 NAS SSH 中验证镜像是否可读取：
 
 ```bash
-docker manifest inspect ph97/finexy-bookkeeping:1.7.0-amd64 >/dev/null
+docker manifest inspect ph97/finexy-bookkeeping:1.7.1-amd64 >/dev/null
 docker manifest inspect ph97/finexy-bookkeeping:ocr-1.0-amd64 >/dev/null
 ```
 
@@ -99,7 +99,7 @@ chmod 600 .env
 ```yaml
 services:
   bookkeeping:
-    image: ph97/finexy-bookkeeping:1.7.0-amd64
+    image: ph97/finexy-bookkeeping:1.7.1-amd64
     platform: linux/amd64
     restart: unless-stopped
     ports:

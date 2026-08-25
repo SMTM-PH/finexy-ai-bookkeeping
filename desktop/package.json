@@ -1,6 +1,6 @@
 {
   "name": "finexy-desktop",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "Finexy personal finance desktop client for Windows",
   "main": "main.cjs",
   "author": "Finexy",

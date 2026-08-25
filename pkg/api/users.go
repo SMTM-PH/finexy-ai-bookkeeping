@@ -102,6 +102,27 @@ func (a *UsersApi) UserRegisterHandler(c *core.WebContext) (any, *errs.Error) {
 		}
 	}
 
+	presetTags := getPresetTransactionTagNames(user.Language)
+	presetTagRequests := make([]*models.TransactionTagCreateRequest, len(presetTags))
+
+	for i, name := range presetTags {
+		presetTagRequests[i] = &models.TransactionTagCreateRequest{
+			GroupId: 0,
+			Name:    name,
+		}
+	}
+
+	presetTagBatchRequest := &models.TransactionTagCreateBatchRequest{
+		Tags:       presetTagRequests,
+		GroupId:    0,
+		SkipExists: true,
+	}
+	presetTagModels := TransactionTags.createNewTagModels(user.Uid, presetTagBatchRequest, 1)
+
+	if err = TransactionTags.tags.CreateTags(c, user.Uid, presetTagModels, true); err != nil {
+		log.Warnf(c, "[users.UserRegisterHandler] failed to add preset tags for user \"uid:%d\", because %s", user.Uid, err.Error())
+	}
+
 	authResp := &models.RegisterResponse{
 		AuthResponse: models.AuthResponse{
 			Need2FA:             false,
@@ -147,6 +168,18 @@ func (a *UsersApi) UserRegisterHandler(c *core.WebContext) (any, *errs.Error) {
 	log.Infof(c, "[users.UserRegisterHandler] user \"uid:%d\" has logged in, token will be expired at %d", user.Uid, claims.ExpiresAt)
 
 	return authResp, nil
+}
+
+func getPresetTransactionTagNames(language string) []string {
+	if strings.HasPrefix(language, "zh-Hans") {
+		return []string{"必要支出", "可选消费", "待报销", "工作", "家庭", "旅行"}
+	}
+
+	if strings.HasPrefix(language, "zh-Hant") {
+		return []string{"必要支出", "可選消費", "待報銷", "工作", "家庭", "旅行"}
+	}
+
+	return []string{"Essential", "Optional", "Reimbursable", "Work", "Family", "Travel"}
 }
 
 // UserEmailVerifyHandler sets user email address verified
