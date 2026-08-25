@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mayswind/ezbookkeeping/pkg/core"
-	"github.com/mayswind/ezbookkeeping/pkg/errs"
-	"github.com/mayswind/ezbookkeeping/pkg/settings"
-	"github.com/mayswind/ezbookkeeping/pkg/utils"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/core"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/errs"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/settings"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/utils"
 )
 
 const ezbookkeepingServerSettingsGlobalVariableName = "EZBOOKKEEPING_SERVER_SETTINGS"

@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/mayswind/ezbookkeeping/pkg/converters/datatable"
-	"github.com/mayswind/ezbookkeeping/pkg/core"
-	"github.com/mayswind/ezbookkeeping/pkg/errs"
-	"github.com/mayswind/ezbookkeeping/pkg/log"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/converters/datatable"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/core"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/errs"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/log"
 )
 
 // CsvFileBasicDataTable defines the structure of csv data table

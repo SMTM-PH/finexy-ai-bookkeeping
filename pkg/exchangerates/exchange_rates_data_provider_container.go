@@ -1,10 +1,10 @@
 package exchangerates
 
 import (
-	"github.com/mayswind/ezbookkeeping/pkg/core"
-	"github.com/mayswind/ezbookkeeping/pkg/errs"
-	"github.com/mayswind/ezbookkeeping/pkg/models"
-	"github.com/mayswind/ezbookkeeping/pkg/settings"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/core"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/errs"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/models"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/settings"
 )
 
 // ExchangeRatesDataProviderContainer contains the current exchange rates data provider

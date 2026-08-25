@@ -6,13 +6,13 @@ import (
 
 	"golang.org/x/oauth2"
 
-	"github.com/mayswind/ezbookkeeping/pkg/auth/oauth2/data"
-	"github.com/mayswind/ezbookkeeping/pkg/auth/oauth2/provider"
-	"github.com/mayswind/ezbookkeeping/pkg/core"
-	"github.com/mayswind/ezbookkeeping/pkg/errs"
-	"github.com/mayswind/ezbookkeeping/pkg/httpclient"
-	"github.com/mayswind/ezbookkeeping/pkg/log"
-	"github.com/mayswind/ezbookkeeping/pkg/settings"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/auth/oauth2/data"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/auth/oauth2/provider"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/core"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/errs"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/httpclient"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/log"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/settings"
 )
 
 // CommonOAuth2Provider represents common OAuth 2.0 provider

@@ -3,12 +3,12 @@ package alipay
 import (
 	"strings"
 
-	"github.com/mayswind/ezbookkeeping/pkg/converters/datatable"
-	"github.com/mayswind/ezbookkeeping/pkg/core"
-	"github.com/mayswind/ezbookkeeping/pkg/locales"
-	"github.com/mayswind/ezbookkeeping/pkg/log"
-	"github.com/mayswind/ezbookkeeping/pkg/models"
-	"github.com/mayswind/ezbookkeeping/pkg/utils"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/converters/datatable"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/core"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/locales"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/log"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/models"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/utils"
 )
 
 const alipayTransactionDataStatusSuccessName = "交易成功"

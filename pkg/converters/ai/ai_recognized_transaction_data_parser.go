@@ -6,16 +6,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mayswind/ezbookkeeping/pkg/converters/converter"
-	"github.com/mayswind/ezbookkeeping/pkg/core"
-	"github.com/mayswind/ezbookkeeping/pkg/errs"
-	"github.com/mayswind/ezbookkeeping/pkg/llm"
-	"github.com/mayswind/ezbookkeeping/pkg/llm/data"
-	"github.com/mayswind/ezbookkeeping/pkg/log"
-	"github.com/mayswind/ezbookkeeping/pkg/models"
-	"github.com/mayswind/ezbookkeeping/pkg/settings"
-	"github.com/mayswind/ezbookkeeping/pkg/templates"
-	"github.com/mayswind/ezbookkeeping/pkg/utils"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/converters/converter"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/core"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/errs"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/llm"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/llm/data"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/log"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/models"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/settings"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/templates"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/utils"
 )
 
 // aiTransactionDataParser defines the interface for parsing transaction data using AI

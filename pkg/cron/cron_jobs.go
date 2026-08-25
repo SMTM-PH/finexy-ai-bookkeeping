@@ -3,8 +3,8 @@ package cron
 import (
 	"time"
 
-	"github.com/mayswind/ezbookkeeping/pkg/core"
-	"github.com/mayswind/ezbookkeeping/pkg/services"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/core"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/services"
 )
 
 // RemoveExpiredTokensJob represents the cron job which periodically remove expired user tokens from the database

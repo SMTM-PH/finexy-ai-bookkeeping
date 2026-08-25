@@ -7,13 +7,13 @@ import (
 	"golang.org/x/text/encoding/unicode"
 	"golang.org/x/text/transform"
 
-	"github.com/mayswind/ezbookkeeping/pkg/converters/converter"
-	"github.com/mayswind/ezbookkeeping/pkg/converters/csv"
-	"github.com/mayswind/ezbookkeeping/pkg/converters/datatable"
-	"github.com/mayswind/ezbookkeeping/pkg/core"
-	"github.com/mayswind/ezbookkeeping/pkg/errs"
-	"github.com/mayswind/ezbookkeeping/pkg/log"
-	"github.com/mayswind/ezbookkeeping/pkg/models"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/converters/converter"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/converters/csv"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/converters/datatable"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/core"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/errs"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/log"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/models"
 )
 
 // jdComFinanceTransactionDataCsvFileImporter defines the structure of jd.com finance csv importer for transaction data

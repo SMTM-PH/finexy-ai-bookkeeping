@@ -1,8 +1,8 @@
 package datatable
 
 import (
-	"github.com/mayswind/ezbookkeeping/pkg/core"
-	"github.com/mayswind/ezbookkeeping/pkg/models"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/core"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/models"
 )
 
 // mergedTransactionDataTable defines the structure of merged transaction data table which merges multiple transaction data tables

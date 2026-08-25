@@ -1,7 +1,7 @@
 # AI Bookkeeping MVP
 
-This fork uses ezBookkeeping v1.6.1 as its accounting, import, authentication,
-scheduled-transaction, and reporting foundation.
+Finexy v1.7.0 provides the accounting, import, authentication,
+scheduled-transaction, AI, and reporting foundation for this independent project.
 
 ## Fixed product decisions
 

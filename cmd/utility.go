@@ -7,17 +7,17 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/mayswind/ezbookkeeping/pkg/core"
-	"github.com/mayswind/ezbookkeeping/pkg/errs"
-	"github.com/mayswind/ezbookkeeping/pkg/mail"
-	"github.com/mayswind/ezbookkeeping/pkg/requestid"
-	"github.com/mayswind/ezbookkeeping/pkg/utils"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/core"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/errs"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/mail"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/requestid"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/utils"
 )
 
 // Utilities represents the utilities command
 var Utilities = &cli.Command{
 	Name:  "utility",
-	Usage: "ezBookkeeping utilities",
+	Usage: "Finexy utilities",
 	Commands: []*cli.Command{
 		{
 			Name:   "parse-default-request-id",
@@ -89,7 +89,7 @@ func sendTestMail(c *core.CliContext) error {
 
 	err = mail.Container.SendMail(&mail.MailMessage{
 		To:      toAddress,
-		Subject: "ezBookkeeping test e-mail",
+		Subject: "Finexy test e-mail",
 		Body:    "This is a test e-mail",
 	})
 

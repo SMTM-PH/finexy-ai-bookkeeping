@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"reflect"
 
-	"github.com/mayswind/ezbookkeeping/pkg/core"
-	"github.com/mayswind/ezbookkeeping/pkg/log"
-	"github.com/mayswind/ezbookkeeping/pkg/models"
-	"github.com/mayswind/ezbookkeeping/pkg/settings"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/core"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/log"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/models"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/settings"
 )
 
 // MCPAllQueryTransactionTagsResponse represents the response structure for querying transaction tags
@@ -26,7 +26,7 @@ func (h *mcpQueryAllTransactionTagsToolHandler) Name() string {
 
 // Description returns the description of the MCP tool
 func (h *mcpQueryAllTransactionTagsToolHandler) Description() string {
-	return "Query transaction tags for the current user in ezBookkeeping."
+	return "Query transaction tags for the current user in Finexy."
 }
 
 // InputType returns the input type for the MCP tool request

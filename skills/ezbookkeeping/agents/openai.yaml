@@ -7,7 +7,7 @@ dependencies:
   tools:
     - type: "mcp"
       value: "ezbookkeeping"
-      description: "Authenticated ezBookkeeping personal finance MCP server"
+      description: "Authenticated Finexy personal finance MCP server"
       transport: "streamable_http"
       url: "http://localhost:8080/mcp"
 

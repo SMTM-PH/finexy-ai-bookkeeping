@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/mayswind/ezbookkeeping/pkg/core"
-	"github.com/mayswind/ezbookkeeping/pkg/datastore"
-	"github.com/mayswind/ezbookkeeping/pkg/mail"
-	"github.com/mayswind/ezbookkeeping/pkg/settings"
-	"github.com/mayswind/ezbookkeeping/pkg/storage"
-	"github.com/mayswind/ezbookkeeping/pkg/utils"
-	"github.com/mayswind/ezbookkeeping/pkg/uuid"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/core"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/datastore"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/mail"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/settings"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/storage"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/utils"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/uuid"
 )
 
 // ServiceUsingDB represents a service that need to use db

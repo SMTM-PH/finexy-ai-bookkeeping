@@ -118,8 +118,8 @@ export default defineConfig(() => {
                 injectRegister: false,
                 manifestFilename: 'manifest.json',
                 manifest: {
-                    name: 'ezBookkeeping',
-                    short_name: 'ezBookkeeping',
+                    name: 'Finexy',
+                    short_name: 'Finexy',
                     description: 'A lightweight, self-hosted personal finance app with a user-friendly interface and powerful bookkeeping features.',
                     theme_color: '#C67E48',
                     background_color: '#F6F7F8',

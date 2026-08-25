@@ -42,7 +42,7 @@ const tokensStore = useTokensStore();
 const exchangeRatesStore = useExchangeRatesStore();
 
 const f7params = ref<Framework7Parameters>({
-    name: 'ezBookkeeping',
+    name: 'Finexy',
     theme: 'ios',
     colors: {
         primary: '#6758f3'

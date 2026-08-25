@@ -1124,7 +1124,7 @@
                             <p>FINEXY PERSONAL FINANCE</p>
                             <h2>清楚地记录，安心地生活。</h2>
                             <span
-                                >基于园园，为个人自托管场景提供简洁可靠的财务管理体验。</span
+                                >基于Finexy，为个人自托管场景提供简洁可靠的财务管理体验。</span
                             ><b>版本 1.6.1</b>
                         </div>
                         <div class="panel status">
@@ -3753,14 +3753,14 @@ function openAboutInfo(type: "privacy" | "license") {
             ? {
                   title: "隐私与数据",
                   paragraphs: [
-                      "所有账本数据由你部署的园园服务保存，Finexy 页面不会把财务数据发送到第三方。",
+                      "所有账本数据由你部署的Finexy服务保存，Finexy 页面不会把财务数据发送到第三方。",
                       "账号、备份和网络访问权限均由你的自托管环境控制。",
                   ],
               }
             : {
                   title: "开源许可",
                   paragraphs: [
-                      "本应用界面基于园园构建，并遵循项目所采用的开源许可。",
+                      "本应用界面基于Finexy构建，并遵循项目所采用的开源许可。",
                       "第三方组件的版权与许可信息随对应依赖包一并提供。",
                   ],
               };

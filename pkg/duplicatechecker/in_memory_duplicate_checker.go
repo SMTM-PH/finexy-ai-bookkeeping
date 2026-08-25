@@ -7,7 +7,7 @@ import (
 
 	"github.com/patrickmn/go-cache"
 
-	"github.com/mayswind/ezbookkeeping/pkg/settings"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/settings"
 )
 
 // InMemoryDuplicateChecker represents in-memory duplicate checker

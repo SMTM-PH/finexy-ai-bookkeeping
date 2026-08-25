@@ -1,7 +1,7 @@
 package httpclient
 
 import (
-	"github.com/mayswind/ezbookkeeping/pkg/core"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/core"
 )
 
 const (

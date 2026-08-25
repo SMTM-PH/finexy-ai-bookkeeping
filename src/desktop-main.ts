@@ -470,7 +470,7 @@ const vuetify = createVuetify({
         rtl: getRtlLocales(),
         adapter: ((i18nGlobal: Composer) => {
             const instance: LocaleInstance = {
-                name: 'ezBookkeeping i18n',
+                name: 'Finexy i18n',
                 decimalSeparator: ref<string>(DecimalSeparator.Default.symbol), // should never use vuetify to format numbers
                 messages: i18nGlobal.messages,
                 current: i18nGlobal.locale,
@@ -511,7 +511,7 @@ const vuetify = createVuetify({
     }
 });
 
-// key is in the original i18n text of vuetify (in vuetify/lib/locale/en.js), value is the text in the ezBookkeeping i18n files
+// key is in the original i18n text of vuetify (in vuetify/lib/locale/en.js), value is the text in the Finexy i18n files
 const vuetifyI18nTextKeyMap: Record<string, string> = {
     'open': 'Open',
     'close': 'Close'

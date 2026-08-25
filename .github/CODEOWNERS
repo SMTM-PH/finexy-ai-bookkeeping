@@ -1,0 +1,12 @@
+# Default owner and review routing
+* @SMTM-PH
+
+/.github/ @SMTM-PH
+/Dockerfile @SMTM-PH
+/compose.yaml @SMTM-PH
+/deploy/ @SMTM-PH
+/desktop/ @SMTM-PH
+/docs/ @SMTM-PH
+/ocr-service/ @SMTM-PH
+/pkg/ @SMTM-PH
+/src/ @SMTM-PH

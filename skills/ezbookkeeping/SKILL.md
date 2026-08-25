@@ -1,9 +1,9 @@
 ---
 name: ezbookkeeping
-description: Manage the self-hosted ezBookkeeping personal finance app through its MCP server or bundled API CLI. Use when Codex or another agent needs to record income, expenses, or transfers; inspect balances, accounts, categories, tags, or transactions; reconcile a natural-language bookkeeping request; or analyze personal spending. Prefer MCP tools when available and use the scripts only as a fallback.
+description: Manage the self-hosted Finexy personal finance app through its MCP server or bundled API CLI. Use when Codex or another agent needs to record income, expenses, or transfers; inspect balances, accounts, categories, tags, or transactions; reconcile a natural-language bookkeeping request; or analyze personal spending. Prefer MCP tools when available and use the scripts only as a fallback.
 ---
 
-# ezBookkeeping
+# Finexy
 
 Use the authenticated MCP server first. Its tools are the safest and most portable path across Codex, ChatGPT desktop, IDE agents, and other MCP clients.
 

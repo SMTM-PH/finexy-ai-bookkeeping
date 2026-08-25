@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mayswind/ezbookkeeping/pkg/converters/datatable"
-	"github.com/mayswind/ezbookkeeping/pkg/errs"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/converters/datatable"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/errs"
 )
 
 // defaultPlainTextDataTable defines the structure of ezbookkeeping default plain text data table

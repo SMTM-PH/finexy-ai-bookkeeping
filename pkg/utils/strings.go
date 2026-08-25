@@ -13,7 +13,7 @@ import (
 
 	"golang.org/x/crypto/pbkdf2"
 
-	"github.com/mayswind/ezbookkeeping/pkg/errs"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/errs"
 )
 
 const (

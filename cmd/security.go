@@ -5,14 +5,14 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/mayswind/ezbookkeeping/pkg/core"
-	"github.com/mayswind/ezbookkeeping/pkg/utils"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/core"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/utils"
 )
 
 // SecurityUtils represents the security command
 var SecurityUtils = &cli.Command{
 	Name:  "security",
-	Usage: "ezBookkeeping security utilities",
+	Usage: "Finexy security utilities",
 	Commands: []*cli.Command{
 		{
 			Name:   "gen-secret-key",

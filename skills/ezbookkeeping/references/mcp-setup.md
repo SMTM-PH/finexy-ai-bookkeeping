@@ -6,7 +6,7 @@ The NAS deployment exposes a Streamable HTTP MCP server at:
 http://<NAS-IP>:<PORT>/mcp
 ```
 
-Generate a dedicated MCP token in ezBookkeeping under **Settings → Security → Generate Token → MCP Token**. Use a short expiration where practical and revoke it when a client is retired.
+Generate a dedicated MCP token in Finexy under **Settings → Security → Generate Token → MCP Token**. Use a short expiration where practical and revoke it when a client is retired.
 
 ## Codex
 

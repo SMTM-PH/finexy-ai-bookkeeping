@@ -280,7 +280,7 @@ export interface LocalizedError {
 
 function replaceVisibleProductName(content: unknown): unknown {
     if (isString(content)) {
-        return content.replace(/ezbookkeeping/gi, '园园');
+        return content.replace(/ezbookkeeping/gi, 'Finexy');
     }
 
     if (Array.isArray(content)) {

@@ -1,6 +1,6 @@
 package storage
 
-import "github.com/mayswind/ezbookkeeping/pkg/core"
+import "github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/core"
 
 // ObjectStorage represents an object storage to store file object
 type ObjectStorage interface {

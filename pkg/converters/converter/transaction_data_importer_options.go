@@ -3,7 +3,7 @@ package converter
 import (
 	"strings"
 
-	"github.com/mayswind/ezbookkeeping/pkg/settings"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/settings"
 )
 
 // TransactionDataImporterOptions defines the options for transaction data importer

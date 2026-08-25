@@ -1,16 +1,16 @@
 package llm
 
 import (
-	"github.com/mayswind/ezbookkeeping/pkg/core"
-	"github.com/mayswind/ezbookkeeping/pkg/errs"
-	"github.com/mayswind/ezbookkeeping/pkg/llm/data"
-	"github.com/mayswind/ezbookkeeping/pkg/llm/provider"
-	"github.com/mayswind/ezbookkeeping/pkg/llm/provider/anthropic"
-	"github.com/mayswind/ezbookkeeping/pkg/llm/provider/googleai"
-	"github.com/mayswind/ezbookkeeping/pkg/llm/provider/lmstudio"
-	"github.com/mayswind/ezbookkeeping/pkg/llm/provider/ollama"
-	"github.com/mayswind/ezbookkeeping/pkg/llm/provider/openai"
-	"github.com/mayswind/ezbookkeeping/pkg/settings"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/core"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/errs"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/llm/data"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/llm/provider"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/llm/provider/anthropic"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/llm/provider/googleai"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/llm/provider/lmstudio"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/llm/provider/ollama"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/llm/provider/openai"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/settings"
 )
 
 // LargeLanguageModelProviderContainer contains the current large language model provider

@@ -3,16 +3,16 @@ package cmd
 import (
 	"github.com/urfave/cli/v3"
 
-	"github.com/mayswind/ezbookkeeping/pkg/core"
-	"github.com/mayswind/ezbookkeeping/pkg/datastore"
-	"github.com/mayswind/ezbookkeeping/pkg/log"
-	"github.com/mayswind/ezbookkeeping/pkg/models"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/core"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/datastore"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/log"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/models"
 )
 
 // Database represents the database command
 var Database = &cli.Command{
 	Name:  "database",
-	Usage: "ezBookkeeping database maintenance",
+	Usage: "Finexy database maintenance",
 	Commands: []*cli.Command{
 		{
 			Name:   "update",
