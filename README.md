@@ -9,6 +9,16 @@
 
 Finexy 是独立维护的自托管 AI 个人财务管理项目，提供 Web、PWA、Windows 桌面客户端、Docker 和 NAS 部署方式。项目将记账、预算、资产、AI 分析、本地 OCR 和自动化能力整合到统一工作台中。
 
+## 软件截图
+
+### 财务工作台
+
+![Finexy 财务工作台](docs/screenshots/finexy-dashboard.png)
+
+### 登录界面
+
+![Finexy 登录界面](docs/screenshots/finexy-login.png)
+
 ## 主要功能
 
 - 收入、支出、转账、账户、分类、标签与周期交易
@@ -91,6 +101,6 @@ go test ./...
 - [行为准则](CODE_OF_CONDUCT.md)
 - [项目文档](docs/AI_BOOKKEEPING_MVP.md)
 
-## 开源许可与致谢
+## 开源许可
 
-Finexy 使用 [MIT License](LICENSE)。项目包含源自 [ezBookkeeping](https://github.com/mayswind/ezbookkeeping) 的 MIT 授权代码；原版权和许可证声明保留在 `LICENSE` 中。Finexy 的仓库、发布、Issue、CI 和维护流程均由本项目独立管理。
+本项目基于 [MIT License](LICENSE) 开源。
