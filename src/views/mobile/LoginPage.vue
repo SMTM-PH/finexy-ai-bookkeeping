@@ -3,6 +3,7 @@
         <f7-login-screen-title>
             <img alt="logo" class="login-page-logo" :src="APPLICATION_LOGO_PATH" />
             <f7-block class="login-page-tile margin-vertical-half">{{ tt('global.app.title') }}</f7-block>
+            <div class="login-page-subtitle">看见每一笔钱的去向与价值</div>
         </f7-login-screen-title>
 
         <f7-list inset v-if="tips">
@@ -76,7 +77,7 @@
 
                 <div class="login-page-powered-by margin-top-half">
                     <span>Powered by</span>
-                    <f7-link @click="openExternalUrl('https://github.com/mayswind/ezbookkeeping')" target="_blank">ezBookkeeping</f7-link>
+                        <f7-link @click="openExternalUrl('https://github.com/mayswind/ezbookkeeping')" target="_blank">园园</f7-link>
                     <span>{{ version }}</span>
                 </div>
             </f7-block-footer>
@@ -87,7 +88,7 @@
 
             <div class="login-page-powered-by margin-top-half">
                 <span>Powered by</span>
-                <f7-link @click="openExternalUrl('https://github.com/mayswind/ezbookkeeping')" target="_blank">ezBookkeeping</f7-link>
+                        <f7-link @click="openExternalUrl('https://github.com/mayswind/ezbookkeeping')" target="_blank">园园</f7-link>
                 <span>{{ version }}</span>
             </div>
         </f7-toolbar>
@@ -427,6 +428,43 @@ oauth2ClientSessionId.value = generateRandomUUID();
 </script>
 
 <style>
+.login-screen .login-screen-title {
+    position: relative;
+    margin-top: 3.5rem;
+    padding-top: 2rem;
+}
+
+.login-screen .login-screen-title::before {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    width: 280px;
+    height: 180px;
+    inset: -54px 50% auto auto;
+    transform: translateX(50%);
+    border-radius: 48% 52% 62% 38%;
+    background: linear-gradient(135deg, rgba(103, 88, 243, 0.18), rgba(14, 159, 165, 0.12));
+    filter: blur(2px);
+}
+
+.login-page-subtitle {
+    color: rgba(23, 33, 59, 0.56);
+    font-size: 0.78rem;
+    letter-spacing: 0.04em;
+}
+
+.dark .login-page-subtitle {
+    color: rgba(245, 247, 255, 0.58);
+}
+
+.login-screen .list-button {
+    margin-inline: 1rem;
+    color: #fff;
+    border-radius: 14px;
+    background: linear-gradient(115deg, #6758f3, #0e9fa5);
+    box-shadow: 0 10px 26px rgba(103, 88, 243, 0.22);
+}
+
 .login-divider > .item-content {
     width: 100%;
     min-height: 0;

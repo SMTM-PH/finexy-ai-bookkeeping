@@ -1,5 +1,5 @@
 <template>
-    <v-dialog width="800" :persistent="isCategoryModified" v-model="showState">
+    <v-dialog class="finexy-dialog finexy-dialog--category" width="800" :persistent="isCategoryModified" v-model="showState">
         <v-card class="pa-sm-1 pa-md-2">
             <template #title>
                 <div class="d-flex align-center">

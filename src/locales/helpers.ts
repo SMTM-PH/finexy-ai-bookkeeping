@@ -278,6 +278,28 @@ export interface LocalizedError {
     readonly parameters?: LocalizedErrorParameter[];
 }
 
+function replaceVisibleProductName(content: unknown): unknown {
+    if (isString(content)) {
+        return content.replace(/ezbookkeeping/gi, '园园');
+    }
+
+    if (Array.isArray(content)) {
+        return content.map(item => replaceVisibleProductName(item));
+    }
+
+    if (isObject(content)) {
+        const localizedContent: Record<string, unknown> = {};
+
+        for (const [key, value] of Object.entries(content)) {
+            localizedContent[key] = replaceVisibleProductName(value);
+        }
+
+        return localizedContent;
+    }
+
+    return content;
+}
+
 export function getI18nOptions(): object {
     return {
         legacy: false,
@@ -288,7 +310,7 @@ export function getI18nOptions(): object {
             const messages: Record<string, object> = {};
 
             for (const [languageKey, languageInfo] of entries(ALL_LANGUAGES)) {
-                messages[languageKey] = languageInfo.content;
+                messages[languageKey] = replaceVisibleProductName(languageInfo.content) as object;
             }
 
             return messages;

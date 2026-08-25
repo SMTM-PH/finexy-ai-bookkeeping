@@ -37,7 +37,7 @@
                         </v-col>
                         <v-col cols="12" md="10" class="mb-6">
                             <a class="text-body-1" href="https://github.com/mayswind/ezbookkeeping" target="_blank">
-                                https://github.com/mayswind/ezbookkeeping
+                            园园项目主页
                             </a>
                         </v-col>
                     </v-row>
@@ -47,7 +47,7 @@
                         </v-col>
                         <v-col cols="12" md="10" class="mb-6">
                             <a class="text-body-1" href="https://github.com/mayswind/ezbookkeeping/issues" target="_blank">
-                                https://github.com/mayswind/ezbookkeeping/issues
+                            园园问题反馈
                             </a>
                         </v-col>
                     </v-row>
@@ -57,7 +57,7 @@
                         </v-col>
                         <v-col cols="12" md="10">
                             <a class="text-body-1" href="https://ezbookkeeping.mayswind.net" target="_blank">
-                                https://ezbookkeeping.mayswind.net
+                            园园帮助中心
                             </a>
                         </v-col>
                     </v-row>
@@ -113,7 +113,7 @@
                             <v-divider/>
                             <br/>
                             <p>
-                                <span>ezBookkeeping's codebase and localization translation rely on contributions from the community. The following people have contributed to ezBookkeeping:</span>
+                                <span>园园的代码与本地化翻译依赖社区贡献，以下人员为园园提供了帮助：</span>
                             </p>
                             <div>
                                 <strong>Project Maintainer</strong>
@@ -169,7 +169,7 @@
                                 </tbody>
                             </table>
                             <p class="mt-4 mb-4">
-                                <span>ezBookkeeping also contains additional third party software and illustration.</span><br/>
+                                <span>园园还包含其他第三方软件与插图资源。</span><br/>
                                 <span>All the third party software / illustration included or linked is redistributed under the terms and conditions of their original licenses.</span>
                             </p>
                             <p :key="licenseInfo.name" v-for="licenseInfo in thirdPartyLicenses">

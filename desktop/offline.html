@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Finexy - 连接本地服务</title>
+    <style>
+        :root{font-family:"Segoe UI Variable","Microsoft YaHei UI",sans-serif;color:#12141a;background:#eef0f4;color-scheme:light}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:32px;background:radial-gradient(circle at 80% 10%,rgba(240,85,55,.14),transparent 32%),#eef0f4}.shell{width:min(720px,100%);padding:34px;border:1px solid rgba(255,255,255,.72);border-radius:28px;background:rgba(255,255,255,.88);box-shadow:0 28px 80px rgba(18,20,26,.14);backdrop-filter:blur(20px)}.brand{display:flex;align-items:center;gap:12px;font-size:20px;font-weight:800}.logo{display:grid;width:48px;height:48px;place-items:center;border-radius:15px;color:#fff;background:linear-gradient(135deg,#f36447,#ee4e31);font-size:25px;font-style:italic}.eyebrow{margin:34px 0 8px;color:#c83f28;font-size:12px;font-weight:800;letter-spacing:.12em}.title{margin:0;font-size:34px;line-height:1.2}.copy{margin:12px 0 0;color:#475467;font-size:15px;line-height:1.7}.status{display:flex;align-items:center;gap:10px;margin-top:24px;padding:14px;border-radius:14px;background:#f5f6f8;color:#344054;font-size:14px}.status i{width:9px;height:9px;border-radius:50%;background:#f04444;box-shadow:0 0 0 5px rgba(240,68,68,.1)}label{display:grid;gap:8px;margin-top:22px;color:#344054;font-size:13px;font-weight:700}input{height:48px;padding:0 14px;border:1px solid #d9dee7;border-radius:12px;outline:0;background:#fff;font:inherit;font-size:14px}input:focus{border-color:#f05537;box-shadow:0 0 0 4px rgba(240,85,55,.1)}.actions{display:flex;gap:10px;margin-top:20px}button{height:46px;padding:0 20px;border:0;border-radius:999px;font:inherit;font-size:14px;font-weight:750;cursor:pointer}.primary{color:#fff;background:#12141a}.primary:hover{background:#f05537}.secondary{background:#eef0f4}.hint{margin:24px 0 0;padding-top:20px;border-top:1px solid #e7e9ed;color:#667085;font-size:12.5px;line-height:1.65}.busy{opacity:.65;pointer-events:none}
+    </style>
+</head>
+<body>
+    <main class="shell">
+        <div class="brand"><span class="logo">F</span><span>Finexy</span></div>
+        <p class="eyebrow">WINDOWS DESKTOP</p>
+        <h1 class="title">本地财务服务尚未就绪</h1>
+    <p class="copy">Finexy 已尝试启动 Docker Desktop 和账本容器。你可以确认 Docker 正在运行，然后重试连接；也可以填写另一台园园服务器的地址。</p>
+        <div class="status"><i></i><span>当前无法连接到账本服务</span></div>
+        <label>服务器地址<input id="server" type="url" spellcheck="false" placeholder="http://127.0.0.1:8080"></label>
+        <div class="actions"><button id="retry" class="primary">保存并重新连接</button><button id="quit" class="secondary">退出应用</button></div>
+        <p class="hint">默认地址为 http://127.0.0.1:8080。首次启动 Docker Desktop 时可能需要等待约半分钟。</p>
+    </main>
+    <script>
+        const input=document.querySelector('#server');const retry=document.querySelector('#retry');
+        window.finexyDesktop.getServerUrl().then(value=>input.value=value);
+        retry.addEventListener('click',async()=>{retry.classList.add('busy');retry.textContent='正在连接…';await window.finexyDesktop.setServerUrl(input.value);await window.finexyDesktop.retry();retry.classList.remove('busy');retry.textContent='保存并重新连接'});
+        document.querySelector('#quit').addEventListener('click',()=>window.finexyDesktop.quit());
+    </script>
+</body>
+</html>

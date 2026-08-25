@@ -1,4 +1,4 @@
-import { type NavigationGuardReturn, createRouter, createWebHashHistory } from 'vue-router';
+import { type NavigationGuardReturn, type RouteLocationNormalized, createRouter, createWebHashHistory } from 'vue-router';
 
 import { TemplateType } from '@/core/template.ts';
 import { isUserLogined, isUserUnlocked } from '@/lib/userstate.ts';
@@ -13,26 +13,7 @@ import OAuth2CallbackPage from '@/views/desktop/OAuth2CallbackPage.vue';
 import UnlockPage from '@/views/desktop/UnlockPage.vue';
 
 import HomePage from '@/views/desktop/HomePage.vue';
-
-import TransactionListPage from '@/views/desktop/transactions/ListPage.vue';
-
-import StatisticsTransactionPage from '@/views/desktop/statistics/TransactionPage.vue';
-
-import InsightsExplorerPage from '@/views/desktop/insights/ExplorerPage.vue';
-
-import AccountListPage from '@/views/desktop/accounts/ListPage.vue';
-
-import TransactionCategoryListPage from '@/views/desktop/categories/ListPage.vue';
-
-import TransactionTagListPage from '@/views/desktop/tags/ListPage.vue';
-
-import TransactionTemplateListPage from '@/views/desktop/templates/ListPage.vue';
-
-import UserSettingsPage from '@/views/desktop/user/UserSettingsPage.vue';
-import AppSettingsPage from '@/views/desktop/app/AppSettingsPage.vue';
-
-import ExchangeRatesListPage from '@/views/desktop/exchangerates/ListPage.vue';
-import AboutPage from '@/views/desktop/AboutPage.vue';
+import FinexyWorkspacePage from '@/views/desktop/FinexyWorkspacePage.vue';
 
 function checkLogin(): NavigationGuardReturn {
     if (!isUserLogined()) {
@@ -70,7 +51,11 @@ function checkLocked(): NavigationGuardReturn {
     return true;
 }
 
-function checkNotLogin(): NavigationGuardReturn {
+function checkNotLogin(to: RouteLocationNormalized): NavigationGuardReturn {
+    if (to.path === '/login' && to.query['switch'] === '1') {
+        return true;
+    }
+
     if (isUserLogined() && !isUserUnlocked()) {
         return {
             path: '/unlock',
@@ -99,12 +84,14 @@ const router = createRouter({
                 {
                     path: '',
                     component: HomePage,
-                    beforeEnter: checkLogin
+                    beforeEnter: checkLogin,
+                    meta: { finexy: true }
                 },
                 {
                     path: '/transaction/list',
-                    component: TransactionListPage,
+                    component: FinexyWorkspacePage,
                     beforeEnter: checkLogin,
+                    meta: { finexy: true },
                     props: route => ({
                         initPageType: route.query['pageType'],
                         initDateType: route.query['dateType'],
@@ -121,8 +108,9 @@ const router = createRouter({
                 },
                 {
                     path: '/statistics/transaction',
-                    component: StatisticsTransactionPage,
+                    component: FinexyWorkspacePage,
                     beforeEnter: checkLogin,
+                    meta: { finexy: true },
                     props: route => ({
                         initAnalysisType: route.query['analysisType'],
                         initChartDataType: route.query['chartDataType'],
@@ -142,8 +130,9 @@ const router = createRouter({
                 },
                 {
                     path: '/insights/explorer',
-                    component: InsightsExplorerPage,
+                    component: FinexyWorkspacePage,
                     beforeEnter: checkLogin,
+                    meta: { finexy: true },
                     props: route => ({
                         initId: route.query['id'],
                         initActiveTab: route.query['activeTab'],
@@ -154,60 +143,75 @@ const router = createRouter({
                 },
                 {
                     path: '/account/list',
-                    component: AccountListPage,
-                    beforeEnter: checkLogin
+                    component: FinexyWorkspacePage,
+                    beforeEnter: checkLogin,
+                    meta: { finexy: true }
+                },
+                {
+                    path: '/product/assets',
+                    component: FinexyWorkspacePage,
+                    beforeEnter: checkLogin,
+                    meta: { finexy: true }
                 },
                 {
                     path: '/category/list',
-                    component: TransactionCategoryListPage,
-                    beforeEnter: checkLogin
+                    component: FinexyWorkspacePage,
+                    beforeEnter: checkLogin,
+                    meta: { finexy: true }
                 },
                 {
                     path: '/tag/list',
-                    component: TransactionTagListPage,
-                    beforeEnter: checkLogin
+                    component: FinexyWorkspacePage,
+                    beforeEnter: checkLogin,
+                    meta: { finexy: true }
                 },
                 {
                     path: '/template/list',
-                    component: TransactionTemplateListPage,
+                    component: FinexyWorkspacePage,
                     beforeEnter: checkLogin,
+                    meta: { finexy: true },
                     props: {
                         initType: TemplateType.Normal.type
                     }
                 },
                 {
                     path: '/schedule/list',
-                    component: TransactionTemplateListPage,
+                    component: FinexyWorkspacePage,
                     beforeEnter: checkLogin,
+                    meta: { finexy: true },
                     props: {
                         initType: TemplateType.Schedule.type
                     }
                 },
                 {
                     path: '/exchange_rates',
-                    component: ExchangeRatesListPage,
-                    beforeEnter: checkLogin
+                    component: FinexyWorkspacePage,
+                    beforeEnter: checkLogin,
+                    meta: { finexy: true }
                 },
                 {
                     path: '/user/settings',
-                    component: UserSettingsPage,
+                    component: FinexyWorkspacePage,
                     beforeEnter: checkLogin,
+                    meta: { finexy: true },
                     props: route => ({
                         initTab: route.query['tab']
                     })
                 },
                 {
                     path: '/app/settings',
-                    component: AppSettingsPage,
+                    component: FinexyWorkspacePage,
                     beforeEnter: checkLogin,
+                    meta: { finexy: true },
                     props: route => ({
                         initTab: route.query['tab']
                     })
                 },
                 {
                     path: '/about',
-                    component: AboutPage,
-                    beforeEnter: checkLogin
+                    component: FinexyWorkspacePage,
+                    beforeEnter: checkLogin,
+                    meta: { finexy: true }
                 }
             ]
         },

@@ -59,7 +59,7 @@
                                                    :ripple="false" :icon="true" @click="showNav = !showNav">
                                                 <v-icon :icon="mdiMenu" size="24" />
                                             </v-btn>
-                                            <span>{{ tt('Transaction List') }}</span>
+                                            <span>{{ pageType === TransactionListPageType.Calendar.type ? '交易日历' : tt('Transaction List') }}</span>
                                             <v-btn class="ms-3" color="default" variant="outlined"
                                                    :disabled="loading || !canAddTransaction" @click="add()">
                                                 {{ tt('Add') }}
@@ -183,17 +183,75 @@
                                         </div>
                                     </v-card-text>
 
-                                    <v-card-text class="transaction-calendar-container pt-0" v-if="pageType === TransactionListPageType.Calendar.type">
-                                        <transaction-calendar day-has-transaction-class="font-weight-bold"
-                                                              :readonly="loading" :is-dark-mode="isDarkMode"
-                                                              :default-currency="selectedAccountDefaultCurrency"
-                                                              :min-date="transactionCalendarMinDate"
-                                                              :max-date="transactionCalendarMaxDate"
-                                                              :dailyTotalAmounts="currentMonthTransactionData?.dailyTotalAmounts"
-                                                              v-model="currentCalendarDate"></transaction-calendar>
+                                    <v-card-text class="transaction-calendar-workspace pt-0"
+                                                 :class="{ 'is-split': calendarDayFocused }"
+                                                 v-if="pageType === TransactionListPageType.Calendar.type">
+                                        <section class="transaction-calendar-stage">
+                                            <div class="calendar-stage-heading">
+                                                <div>
+                                                    <span class="calendar-stage-kicker">MONTH / FLOW</span>
+                                                    <strong>{{ calendarDayFocused ? '选择其他日期' : '点击日期，查看当天资金流' }}</strong>
+                                                </div>
+                                                <button v-if="calendarDayFocused" type="button" class="calendar-expand-button"
+                                                        @click="calendarDayFocused = false">展开日历</button>
+                                            </div>
+                                            <div class="transaction-calendar-container">
+                                                <transaction-calendar day-has-transaction-class="font-weight-bold"
+                                                                      :readonly="loading" :is-dark-mode="isDarkMode"
+                                                                      :default-currency="selectedAccountDefaultCurrency"
+                                                                      :min-date="transactionCalendarMinDate"
+                                                                      :max-date="transactionCalendarMaxDate"
+                                                                      :dailyTotalAmounts="currentMonthTransactionData?.dailyTotalAmounts"
+                                                                      v-model="currentCalendarDate"
+                                                                      @update:model-value="selectCalendarDay"></transaction-calendar>
+                                            </div>
+                                        </section>
+
+                                        <Transition name="calendar-detail-reveal">
+                                            <aside v-if="calendarDayFocused" class="calendar-day-panel" aria-live="polite">
+                                                <header>
+                                                    <div>
+                                                        <span class="calendar-stage-kicker">SELECTED / DAY</span>
+                                                        <h3>{{ selectedCalendarDateLabel }}</h3>
+                                                    </div>
+                                                    <b>{{ transactions.length }} 笔</b>
+                                                </header>
+
+                                                <div v-if="loading" class="calendar-day-loading">
+                                                    <v-skeleton-loader v-for="index in 4" :key="index" type="list-item-two-line"/>
+                                                </div>
+                                                <div v-else-if="!transactions.length" class="calendar-day-empty">
+                                                    <span aria-hidden="true">00</span>
+                                                    <strong>这一天还没有记录</strong>
+                                                    <small>可以补记一笔，或者继续选择其他日期。</small>
+                                                    <v-btn color="primary" variant="flat" @click="add()">添加交易</v-btn>
+                                                </div>
+                                                <div v-else class="calendar-day-transactions">
+                                                    <button v-for="transaction in transactions" :key="transaction.id" type="button"
+                                                            class="calendar-day-transaction" @click="show(transaction)">
+                                                        <span class="calendar-transaction-time">{{ getDisplayTime(transaction) }}</span>
+                                                        <span class="calendar-transaction-icon">
+                                                            <ItemIcon size="25px" icon-type="category"
+                                                                      :icon-id="transaction.category.icon"
+                                                                      :color="transaction.category.color"
+                                                                      v-if="transaction.category && transaction.category.color"/>
+                                                            <v-icon size="24" :icon="mdiPencilBoxOutline" v-else/>
+                                                        </span>
+                                                        <span class="calendar-transaction-copy">
+                                                            <strong>{{ transaction.category?.name || getTransactionTypeName(transaction.type, 'Transaction') }}</strong>
+                                                            <small>{{ transaction.comment || transaction.sourceAccount?.name || '未填写描述' }}</small>
+                                                        </span>
+                                                        <span class="calendar-transaction-amount"
+                                                              :class="{ expense: transaction.type === TransactionType.Expense, income: transaction.type === TransactionType.Income }">
+                                                            {{ getDisplayAmount(transaction) }}
+                                                        </span>
+                                                    </button>
+                                                </div>
+                                            </aside>
+                                        </Transition>
                                     </v-card-text>
 
-                                    <v-table class="transaction-table" :hover="!loading" v-if="pageType !== TransactionListPageType.Gallery.type">
+                                    <v-table class="transaction-table" :hover="!loading" v-if="pageType === TransactionListPageType.List.type">
                                         <thead>
                                         <tr>
                                             <th class="transaction-table-column-time text-no-wrap">
@@ -949,8 +1007,22 @@ const showCustomMonthDialog = ref<boolean>(false);
 const showFilterAccountDialog = ref<boolean>(false);
 const showFilterCategoryDialog = ref<boolean>(false);
 const showFilterTagDialog = ref<boolean>(false);
+const calendarDayFocused = ref<boolean>(false);
 
 const isDarkMode = computed<boolean>(() => theme.global.name.value === ThemeType.Dark);
+const selectedCalendarDateLabel = computed<string>(() => {
+    if (!currentCalendarDate.value) {
+        return '选择日期';
+    }
+
+    const parts = currentCalendarDate.value.split('-');
+
+    if (parts.length !== 3) {
+        return currentCalendarDate.value;
+    }
+
+    return `${parts[0]} 年 ${parseInt(parts[1] as string)} 月 ${parseInt(parts[2] as string)} 日`;
+});
 
 const allPageCounts = computed<NameNumeralValue[]>(() => {
     const pageCounts: NameNumeralValue[] = [];
@@ -1196,6 +1268,10 @@ function updateUrlWhenChanged(changed: boolean): void {
         transactionsStore.clearTransactions();
         router.push(`/transaction/list?${transactionsStore.getTransactionListPageParams(pageType.value)}`);
     }
+}
+
+function selectCalendarDay(): void {
+    calendarDayFocused.value = true;
 }
 
 function init(initProps: TransactionListProps): void {
@@ -2020,6 +2096,101 @@ init(props);
 
 .transaction-calendar-container .dp--main .dp--calendar .dp--calendar-row > .dp--calendar-item .transaction-calendar-daily-amounts > span.transaction-calendar-daily-amount {
     font-size: 0.95rem;
+}
+
+.transaction-calendar-workspace {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1rem;
+    align-items: start;
+    transition: grid-template-columns 560ms cubic-bezier(.16,1,.3,1);
+}
+
+.transaction-calendar-workspace.is-split {
+    grid-template-columns: minmax(430px, .84fr) minmax(390px, 1.16fr);
+}
+
+.transaction-calendar-stage {
+    min-width: 0;
+    padding: 1.1rem;
+    overflow: hidden;
+    border: 1px solid rgba(17,16,26,.12);
+    border-radius: 3px 26px 3px 26px;
+    background: rgba(255,255,255,.62);
+    box-shadow: 8px 10px 0 rgba(17,16,26,.045);
+    transition: padding 460ms cubic-bezier(.16,1,.3,1), transform 460ms cubic-bezier(.16,1,.3,1);
+}
+
+.calendar-stage-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: .8rem;
+    padding: .25rem .25rem .85rem;
+    border-bottom: 1px solid rgba(17,16,26,.12);
+}
+
+.calendar-stage-heading > div { display: grid; gap: .35rem; }
+.calendar-stage-heading strong { color: #171522; font-size: 1.12rem; letter-spacing: -.025em; }
+.calendar-stage-kicker { color: #6357ff; font: 900 .63rem/1 var(--quest-pixel, ui-monospace, monospace); letter-spacing: .14em; }
+.calendar-expand-button { min-height: 36px; padding: .55rem .8rem; color: #171522; border: 1px solid #171522; border-radius: 2px 10px 2px 10px; background: #d8ff45; box-shadow: 4px 4px 0 #6357ff; font-size: .75rem; font-weight: 800; cursor: pointer; transition: transform 180ms ease, box-shadow 180ms ease; }
+.calendar-expand-button:hover { transform: translate(-2px,-2px); box-shadow: 6px 6px 0 #6357ff; }
+
+.transaction-calendar-workspace.is-split .transaction-calendar-stage { padding: .85rem; }
+.transaction-calendar-workspace.is-split .transaction-calendar-container .dp--main .dp--calendar .dp--calendar-row { --dp-cell-size: 48px; }
+.transaction-calendar-workspace.is-split .transaction-calendar-container .dp--main.transaction-calendar-with-alternate-date .dp--calendar .dp--calendar-row { --dp-cell-size: 58px; }
+.transaction-calendar-workspace.is-split .transaction-calendar-container .dp--calendar-header-item { font-size: .7rem; letter-spacing: -.04em; }
+.transaction-calendar-workspace.is-split .transaction-calendar-daily-amount { font-size: .67rem !important; }
+.transaction-calendar-workspace.is-split .transaction-calendar-alternate-date { font-size: .62rem !important; }
+
+.calendar-day-panel {
+    min-width: 0;
+    min-height: 610px;
+    padding: 1.35rem;
+    overflow: hidden;
+    color: #f9f7ff;
+    border-radius: 3px 30px 3px 30px;
+    background:
+        radial-gradient(circle at 94% 4%, rgba(99,87,255,.64), transparent 14rem),
+        linear-gradient(145deg, transparent 0 67%, rgba(216,255,69,.055) 67.2% 67.5%, transparent 67.7%),
+        #11101a;
+    box-shadow: 10px 12px 0 rgba(99,87,255,.17), 0 28px 70px rgba(23,18,50,.2);
+}
+
+.calendar-day-panel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding-bottom: 1rem; border-bottom: 1px solid rgba(255,255,255,.14); }
+.calendar-day-panel header > div { display: grid; gap: .5rem; }
+.calendar-day-panel h3 { margin: 0; color: #fff; font-size: clamp(1.65rem,2.2vw,2.45rem); line-height: 1; letter-spacing: -.055em; }
+.calendar-day-panel header b { flex: 0 0 auto; padding: .45rem .65rem; color: #11101a; background: #d8ff45; font: 900 .72rem/1 var(--quest-pixel, ui-monospace, monospace); transform: rotate(2deg); }
+.calendar-day-loading { display: grid; gap: .55rem; margin-top: 1rem; }
+.calendar-day-loading .v-skeleton-loader { border-radius: 2px 14px 2px 14px; background: rgba(255,255,255,.08); }
+.calendar-day-transactions { display: grid; gap: .55rem; margin-top: 1rem; }
+.calendar-day-transaction { display: grid; grid-template-columns: 52px 42px minmax(0,1fr) auto; align-items: center; gap: .65rem; width: 100%; min-height: 72px; padding: .65rem .75rem; color: inherit; border: 1px solid rgba(255,255,255,.1); border-radius: 2px 16px 2px 16px; text-align: start; background: rgba(255,255,255,.065); cursor: pointer; transition: transform 220ms cubic-bezier(.16,1,.3,1), border-color 180ms ease, background 180ms ease; }
+.calendar-day-transaction:hover, .calendar-day-transaction:focus-visible { border-color: rgba(216,255,69,.55); background: rgba(255,255,255,.11); transform: translateX(5px); outline: none; }
+.calendar-transaction-time { color: rgba(255,255,255,.56); font: 800 .72rem/1 var(--quest-pixel, ui-monospace, monospace); }
+.calendar-transaction-icon { display: grid; place-items: center; width: 38px; height: 38px; border: 1px solid rgba(255,255,255,.16); border-radius: 50%; background: rgba(255,255,255,.08); }
+.calendar-transaction-copy { display: grid; min-width: 0; gap: .22rem; }
+.calendar-transaction-copy strong { overflow: hidden; color: #fff; font-size: .86rem; text-overflow: ellipsis; white-space: nowrap; }
+.calendar-transaction-copy small { overflow: hidden; color: rgba(255,255,255,.5); font-size: .72rem; text-overflow: ellipsis; white-space: nowrap; }
+.calendar-transaction-amount { padding-left: .6rem; color: #fff; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.calendar-transaction-amount.expense { color: #ff9c8b; }
+.calendar-transaction-amount.income { color: #80e5c3; }
+
+.calendar-day-empty { display: grid; justify-items: start; align-content: center; min-height: 470px; padding: 2rem; }
+.calendar-day-empty > span { color: transparent; font: 900 7rem/.8 system-ui,sans-serif; -webkit-text-stroke: 1px rgba(216,255,69,.34); }
+.calendar-day-empty strong { margin-top: 1.4rem; color: #fff; font-size: 1.25rem; }
+.calendar-day-empty small { margin: .45rem 0 1.2rem; color: rgba(255,255,255,.5); }
+
+.calendar-detail-reveal-enter-active, .calendar-detail-reveal-leave-active { transition: opacity 260ms ease, transform 520ms cubic-bezier(.16,1,.3,1); }
+.calendar-detail-reveal-enter-from, .calendar-detail-reveal-leave-to { opacity: 0; transform: translateX(34px) scale(.98); }
+
+@media (max-width: 1180px) {
+    .transaction-calendar-workspace.is-split { grid-template-columns: 1fr; }
+    .calendar-day-panel { min-height: 420px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .transaction-calendar-workspace, .transaction-calendar-stage, .calendar-detail-reveal-enter-active, .calendar-detail-reveal-leave-active { transition: none !important; }
 }
 
 .transaction-gallery-container {

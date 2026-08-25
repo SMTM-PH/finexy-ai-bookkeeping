@@ -151,6 +151,17 @@ dist/
 # Codex
 .codex
 .planning
+.playwright-cli/
+artifacts/
+
+# Local UI audit captures and generated release packages
+/*.png
+/*.yml
+/.electron-builder-cache/
+/release/
+__pycache__/
+*.py[cod]
+/*Destination*
 
 # Binary and build files
 ezbookkeeping

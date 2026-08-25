@@ -976,3 +976,95 @@ html[dir="rtl"] .dp--main .dp--btn.dp--arrow-btn-nav {
     border-top-right-radius: var(--f7-progressbar-border-radius);
     border-bottom-right-radius: var(--f7-progressbar-border-radius);
 }
+
+/* Liquid Ledger mobile visual system */
+:root {
+    --ledger-mobile-violet: #6758f3;
+    --ledger-mobile-cyan: #0e9fa5;
+    --ledger-mobile-ink: #17213b;
+    --ledger-mobile-canvas: #f3f5fb;
+    --ledger-mobile-panel: rgba(255, 255, 255, 0.88);
+    --f7-page-bg-color: var(--ledger-mobile-canvas);
+    --f7-navbar-bg-color: rgba(243, 245, 251, 0.78);
+    --f7-toolbar-bg-color: rgba(255, 255, 255, 0.82);
+    --f7-list-bg-color: var(--ledger-mobile-panel);
+}
+
+.dark {
+    --ledger-mobile-ink: #f5f7ff;
+    --ledger-mobile-canvas: #070b18;
+    --ledger-mobile-panel: rgba(16, 23, 43, 0.9);
+    --f7-page-bg-color: var(--ledger-mobile-canvas);
+    --f7-navbar-bg-color: rgba(7, 11, 24, 0.8);
+    --f7-toolbar-bg-color: rgba(16, 23, 43, 0.86);
+    --f7-list-bg-color: var(--ledger-mobile-panel);
+}
+
+html,
+body,
+.framework7-root {
+    font-family: "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif;
+}
+
+.page {
+    background:
+        radial-gradient(circle at 100% 0, rgba(14, 159, 165, 0.1), transparent 19rem),
+        radial-gradient(circle at 0 90%, rgba(103, 88, 243, 0.09), transparent 22rem),
+        var(--ledger-mobile-canvas);
+}
+
+.navbar,
+.toolbar {
+    backdrop-filter: blur(18px) saturate(145%);
+}
+
+.navbar::after,
+.toolbar::before {
+    opacity: 0.45;
+}
+
+.navbar .title {
+    color: var(--ledger-mobile-ink);
+    font-weight: 750;
+    letter-spacing: -0.025em;
+}
+
+.list.inset,
+.list.inset-md,
+.card {
+    overflow: hidden;
+    border: 1px solid rgba(103, 88, 243, 0.1);
+    border-radius: 20px;
+    box-shadow: 0 14px 38px rgba(45, 54, 104, 0.1);
+}
+
+.list .item-link .item-content {
+    transition: background-color 180ms ease;
+}
+
+.list .item-link:active .item-content {
+    background: rgba(103, 88, 243, 0.08);
+}
+
+.main-tabbar {
+    margin: 0 10px calc(8px + var(--f7-safe-area-bottom));
+    width: calc(100% - 20px);
+    border: 1px solid rgba(103, 88, 243, 0.12);
+    border-radius: 20px;
+    box-shadow: 0 16px 42px rgba(30, 39, 82, 0.18);
+}
+
+.main-tabbar .ebk-tarbar-big-icon {
+    color: #fff;
+    border-radius: 14px;
+    background: linear-gradient(135deg, var(--ledger-mobile-violet), var(--ledger-mobile-cyan));
+    box-shadow: 0 8px 20px rgba(103, 88, 243, 0.3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}

@@ -1,5 +1,6 @@
 # Build backend binary file
 FROM golang:1.26.4-alpine3.24 AS be-builder
+ARG GOPROXY=https://proxy.golang.org,direct
 ARG RELEASE_BUILD
 ARG BUILD_PIPELINE
 ARG BUILD_UNIXTIME
@@ -12,27 +13,30 @@ ENV BUILD_UNIXTIME=$BUILD_UNIXTIME
 ENV BUILD_DATE=$BUILD_DATE
 ENV CHECK_3RD_API=$CHECK_3RD_API
 ENV SKIP_TESTS=$SKIP_TESTS
+ENV GOPROXY=$GOPROXY
 WORKDIR /go/src/github.com/mayswind/ezbookkeeping
 COPY . .
 RUN docker/backend-build-pre-setup.sh
 RUN apk add git gcc g++ libc-dev
-RUN ./build.sh backend
+RUN if [ "$SKIP_TESTS" = "true" ]; then ./build.sh backend --no-test; else ./build.sh backend; fi
 
 # Build frontend files
-FROM --platform=$BUILDPLATFORM node:24.18.0-alpine3.24 AS fe-builder
+FROM node:24.18.0-alpine3.24 AS fe-builder
 ARG RELEASE_BUILD
 ARG BUILD_PIPELINE
 ARG BUILD_UNIXTIME
 ARG BUILD_DATE
+ARG SKIP_TESTS
 ENV RELEASE_BUILD=$RELEASE_BUILD
 ENV BUILD_PIPELINE=$BUILD_PIPELINE
 ENV BUILD_UNIXTIME=$BUILD_UNIXTIME
 ENV BUILD_DATE=$BUILD_DATE
+ENV SKIP_TESTS=$SKIP_TESTS
 WORKDIR /go/src/github.com/mayswind/ezbookkeeping
 COPY . .
 RUN docker/frontend-build-pre-setup.sh
 RUN apk add git
-RUN ./build.sh frontend
+RUN if [ "$SKIP_TESTS" = "true" ]; then ./build.sh frontend --no-test; else ./build.sh frontend; fi
 
 # Package docker image
 FROM alpine:3.24.1

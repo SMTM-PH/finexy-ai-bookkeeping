@@ -62,6 +62,13 @@ func initializeSystem(c *core.CliContext) (*settings.Config, error) {
 		log.BootWarnf(c, "[initializer.initializeSystem] \"secret_key\" in config file is not set, please change it to keep your user data safe")
 	}
 
+	if err = applyPendingFullBackupRestore(config); err != nil {
+		if !isDisableBootLog {
+			log.BootErrorf(c, "[initializer.initializeSystem] cannot apply pending full backup restore, because %s", err.Error())
+		}
+		return nil, err
+	}
+
 	settings.SetCurrentConfig(config)
 
 	err = datastore.InitializeDataStore(config)

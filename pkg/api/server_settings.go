@@ -72,6 +72,11 @@ func (a *ServerSettingsApi) ServerSettingsJavascriptHandler(c *core.WebContext) 
 		}
 	}
 
+	if config.LocalOCRServerURL != "" && config.TransactionFromAITextRecognition &&
+		config.TextRecognitionLLMConfig != nil && config.TextRecognitionLLMConfig.LLMProvider != "" {
+		a.appendBooleanSetting(builder, "ocr", true)
+	}
+
 	if config.LoginPageTips.Enabled {
 		a.appendMultiLanguageTipSetting(builder, "lpt", config.LoginPageTips)
 	}

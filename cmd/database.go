@@ -173,5 +173,37 @@ func updateAllDatabaseTablesStructure(c *core.CliContext) error {
 
 	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] insights explorer table maintained successfully")
 
+	err = datastore.Container.UserDataStore.SyncStructs(new(models.ProductAsset))
+
+	if err != nil {
+		return err
+	}
+
+	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] product asset table maintained successfully")
+
+	err = datastore.Container.UserDataStore.SyncStructs(new(models.MonthlyBudget))
+
+	if err != nil {
+		return err
+	}
+
+	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] monthly budget table maintained successfully")
+
+	err = datastore.Container.UserDataStore.SyncStructs(new(models.AiReport))
+
+	if err != nil {
+		return err
+	}
+
+	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] AI report table maintained successfully")
+
+	err = datastore.Container.UserDataStore.SyncStructs(new(models.AIReviewItem))
+
+	if err != nil {
+		return err
+	}
+
+	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] AI review item table maintained successfully")
+
 	return nil
 }

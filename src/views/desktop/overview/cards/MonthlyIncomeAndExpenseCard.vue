@@ -1,5 +1,5 @@
 <template>
-    <v-card :class="{ 'disabled': disabled }">
+    <v-card class="monthly-income-expense-card" :class="{ 'disabled': disabled }">
         <template #title>
             <span>{{ tt('Income and Expense Trends') }}</span>
         </template>
@@ -323,6 +323,17 @@ function clickItem(e: ECElementEvent): void {
 </script>
 
 <style>
+.monthly-income-expense-card {
+    --v-theme-on-surface: 32, 36, 58;
+    color: #20243a !important;
+}
+
+.monthly-income-expense-card .v-card-title,
+.monthly-income-expense-card .v-card-item-title {
+    color: #20243a !important;
+    opacity: 1 !important;
+}
+
 .overview-monthly-chart-container {
     width: 100%;
     height: 400px;

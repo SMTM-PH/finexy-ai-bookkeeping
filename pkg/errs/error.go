@@ -45,6 +45,11 @@ const (
 	NormalSubcategoryOAuth2                 = 17
 	NormalSubcategoryInsightsExplorer       = 18
 	NormalSubcategoryTagGroup               = 19
+	NormalSubcategoryProductAsset           = 20
+	NormalSubcategoryMonthlyBudget          = 21
+	NormalSubcategoryAIReviewItem           = 22
+	NormalSubcategoryAIReport               = 23
+	NormalSubcategoryFullBackup             = 24
 )
 
 // Error represents the specific error returned to user

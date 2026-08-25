@@ -67,6 +67,10 @@ export function isTransactionFromAIImageRecognitionEnabled(): boolean {
     return getServerSetting('llmir') === 1;
 }
 
+export function isLocalOCREnabled(): boolean {
+    return getServerSetting('ocr') === 1;
+}
+
 export function getLoginPageTips(): Record<string, string>{
     return getServerSetting('lpt') as Record<string, string>;
 }

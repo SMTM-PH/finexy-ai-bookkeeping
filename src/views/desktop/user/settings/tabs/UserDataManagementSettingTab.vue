@@ -114,6 +114,28 @@
             </v-card>
         </v-col>
 
+        <v-col cols="12" v-if="isDataExportingEnabled() || isDataImportingEnabled()">
+            <v-card :class="{ 'disabled': processingFullBackup }">
+                <template #title>完整备份与恢复</template>
+                <v-card-text>
+                    <span class="text-body-1">备份包含账户、流水、预算、商品资产、AI 分析报告及本地附件。恢复会校验备份并重启服务，恢复前的数据会保留为可回退副本。</span>
+                </v-card-text>
+                <v-card-text class="d-flex flex-wrap gap-4">
+                    <v-btn color="primary" variant="elevated" :prepend-icon="mdiDownload"
+                           :loading="downloadingFullBackup" :disabled="processingFullBackup || !isDataExportingEnabled()"
+                           @click="downloadFullBackup">
+                        下载完整备份
+                    </v-btn>
+                    <v-btn color="warning" variant="tonal" :prepend-icon="mdiBackupRestore"
+                           :loading="restoringFullBackup" :disabled="processingFullBackup || !isDataImportingEnabled()"
+                           @click="selectFullBackup">
+                        从备份恢复
+                    </v-btn>
+                    <input ref="fullBackupInput" class="d-none" type="file" accept=".zip,application/zip" @change="restoreFullBackup" />
+                </v-card-text>
+            </v-card>
+        </v-col>
+
         <v-col cols="12">
             <v-card :class="{ 'disabled': clearingData }">
                 <template #title>
@@ -172,7 +194,7 @@
 import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
 
-import { ref, useTemplateRef } from 'vue';
+import { computed, ref, useTemplateRef } from 'vue';
 
 import { useI18n } from '@/locales/helpers.ts';
 import { useDataManagementPageBase } from '@/views/base/users/DataManagementPageBase.ts';
@@ -181,7 +203,8 @@ import { useRootStore } from '@/stores/index.ts';
 import { useUserStore } from '@/stores/user.ts';
 
 import { isEquals } from '@/lib/common.ts';
-import { isDataExportingEnabled } from '@/lib/server_settings.ts';
+import services from '@/lib/services.ts';
+import { isDataExportingEnabled, isDataImportingEnabled } from '@/lib/server_settings.ts';
 import { startDownloadFile } from '@/lib/ui/common.ts';
 
 import {
@@ -194,7 +217,9 @@ import {
     mdiTagOutline,
     mdiClipboardTextOutline,
     mdiClipboardTextClockOutline,
-    mdiAlert
+    mdiAlert,
+    mdiDownload,
+    mdiBackupRestore
 } from '@mdi/js';
 
 type ConfirmDialogType = InstanceType<typeof ConfirmDialog>;
@@ -208,11 +233,83 @@ const userStore = useUserStore();
 
 const confirmDialog = useTemplateRef<ConfirmDialogType>('confirmDialog');
 const snackbar = useTemplateRef<SnackBarType>('snackbar');
+const fullBackupInput = useTemplateRef<HTMLInputElement>('fullBackupInput');
 
 const loadingDataStatistics = ref<boolean>(true);
 const exportingData = ref<boolean>(false);
 const currentPasswordForClearData = ref<string>('');
 const clearingData = ref<boolean>(false);
+const downloadingFullBackup = ref<boolean>(false);
+const restoringFullBackup = ref<boolean>(false);
+const processingFullBackup = computed<boolean>(() => downloadingFullBackup.value || restoringFullBackup.value);
+
+function fullBackupFileName(): string {
+    const date = new Date();
+    const part = (value: number): string => value.toString().padStart(2, '0');
+    return `ai-bookkeeping-full-backup_${date.getFullYear()}${part(date.getMonth() + 1)}${part(date.getDate())}_${part(date.getHours())}${part(date.getMinutes())}${part(date.getSeconds())}.zip`;
+}
+
+function downloadFullBackup(): void {
+    if (processingFullBackup.value) {
+        return;
+    }
+    downloadingFullBackup.value = true;
+    services.downloadFullBackup().then(response => {
+        startDownloadFile(fullBackupFileName(), response.data);
+        snackbar.value?.showMessage('完整备份已下载');
+    }).catch(error => {
+        if (!error.processed) {
+            snackbar.value?.showError(error);
+        }
+    }).finally(() => {
+        downloadingFullBackup.value = false;
+    });
+}
+
+function selectFullBackup(): void {
+    if (!processingFullBackup.value) {
+        fullBackupInput.value?.click();
+    }
+}
+
+function restoreFullBackup(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file || processingFullBackup.value) {
+        return;
+    }
+    confirmDialog.value?.open('确认使用此备份替换当前全部数据？服务将自动重启，当前数据会保留为恢复前副本。', { color: 'warning' }).then(() => {
+        restoringFullBackup.value = true;
+        services.restoreFullBackup(file).then(() => {
+            snackbar.value?.showMessage('备份已校验，服务正在重启…');
+            waitForRestart();
+        }).catch(error => {
+            restoringFullBackup.value = false;
+            if (!error.processed) {
+                snackbar.value?.showError(error);
+            }
+        });
+    });
+}
+
+function waitForRestart(): void {
+    let attempts = 0;
+    const timer = window.setInterval(() => {
+        attempts++;
+        fetch(window.location.href, { cache: 'no-store' }).then(response => {
+            if (response.ok && attempts > 1) {
+                window.clearInterval(timer);
+                window.location.reload();
+            }
+        }).catch(() => undefined);
+        if (attempts >= 30) {
+            window.clearInterval(timer);
+            restoringFullBackup.value = false;
+            snackbar.value?.showMessage('服务重启时间较长，请稍后手动刷新页面');
+        }
+    }, 2000);
+}
 
 function reloadUserDataStatistics(force: boolean): void {
     loadingDataStatistics.value = true;

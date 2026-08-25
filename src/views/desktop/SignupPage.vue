@@ -1,29 +1,33 @@
 <template>
-    <div class="layout-wrapper">
+    <div class="layout-wrapper signup-page">
         <router-link to="/">
             <div class="auth-logo d-flex align-start gap-x-3">
                 <img alt="logo" class="login-page-logo" :src="APPLICATION_LOGO_PATH" />
                 <h1 class="font-weight-medium leading-normal text-2xl">{{ tt('global.app.title') }}</h1>
             </div>
         </router-link>
-        <v-row no-gutters class="auth-wrapper">
-            <v-col cols="12" md="4" class="auth-image-background d-none d-md-flex align-center justify-center position-relative">
-                <div class="d-flex auth-img-footer" v-if="!isDarkMode">
-                    <v-img class="img-with-direction" src="img/desktop/background.svg"/>
+        <v-row no-gutters class="auth-wrapper signup-wrapper">
+            <v-col cols="12" md="5" class="auth-image-background signup-visual d-none d-md-flex position-relative">
+                <div class="signup-hero-media" aria-hidden="true">
+                    <v-img cover src="/img/desktop/finexy-login-hero.png" />
                 </div>
-                <div class="d-flex auth-img-footer" v-if="isDarkMode">
-                    <v-img class="img-with-direction" src="img/desktop/background-dark.svg"/>
-                </div>
-                <div class="d-flex align-center justify-center w-100 pt-10">
-                    <v-img class="img-with-direction" max-width="320px" src="img/desktop/people2.svg" v-if="!isDarkMode"/>
-                    <v-img class="img-with-direction" max-width="320px" src="img/desktop/people2-dark.svg" v-else-if="isDarkMode"/>
+                <div class="signup-brand-statement">
+                    <span>YUANYUAN FINANCE</span>
+                    <h2>从第一笔开始，<br>建立清晰的财务秩序。</h2>
+                    <p>一个账号，一本属于你的个人账本。数据由你的自托管服务安全保存。</p>
                 </div>
             </v-col>
-            <v-col cols="12" md="8" class="auth-card d-flex align-center justify-center pa-10">
-                <v-card variant="flat" class="mt-12 mt-sm-0 pt-sm-12 pt-md-0">
-                    <steps-bar min-width="700" :steps="allSteps" :current-step="currentStep" @step:change="switchToTab" />
+            <v-col cols="12" md="7" class="auth-card signup-card d-flex align-center justify-center">
+                <v-card variant="flat" class="signup-panel">
+                    <div class="signup-toolbar">
+                        <v-btn variant="text"
+                               :disabled="submitting || navigateToHomePage"
+                               :prepend-icon="mdiArrowLeft"
+                               @click="navigateToLogin">返回登录</v-btn>
+                    </div>
+                    <steps-bar min-width="0" :steps="allSteps" :current-step="currentStep" @step:change="switchToTab" />
 
-                    <v-window class="mt-5 disable-tab-transition" style="max-width: 700px" v-model="currentStep">
+                    <v-window class="signup-window disable-tab-transition" v-model="currentStep">
                         <v-form>
                             <v-window-item value="basicSetting">
                                 <h4 class="text-h4 mb-1">{{ tt('Basic Information') }}</h4>
@@ -179,11 +183,12 @@
                         </v-form>
                     </v-window>
 
-                    <div class="d-flex justify-sm-space-between gap-4 flex-wrap justify-center mt-5">
+                    <div class="signup-actions">
                         <v-btn class="button-icon-with-direction"
-                               :color="(currentStep === 'basicSetting' || currentStep === 'finalResult') ? 'default' : 'primary'"
-                               :disabled="currentStep === 'basicSetting' || currentStep === 'finalResult' || submitting || navigateToHomePage"
+                               color="default"
+                               :disabled="submitting || navigateToHomePage"
                                :prepend-icon="mdiArrowLeft"
+                               v-if="currentStep === 'presetCategories'"
                                @click="switchToPreviousTab">{{ tt('Previous') }}</v-btn>
                         <v-btn class="button-icon-with-direction" color="primary"
                                :disabled="submitting || navigateToHomePage"
@@ -217,7 +222,6 @@ import type { StepBarItem } from '@/components/desktop/StepsBar.vue';
 
 import { ref, computed, useTemplateRef } from 'vue';
 import { useRouter } from 'vue-router';
-import { useTheme } from 'vuetify';
 
 import { useI18n } from '@/locales/helpers.ts';
 import { useSignupPageBase } from '@/views/base/SignupPageBase.ts';
@@ -226,7 +230,6 @@ import { useRootStore } from '@/stores/index.ts';
 
 import type { TypeAndDisplayName } from '@/core/base.ts';
 import { type LocalizedPresetCategory } from '@/core/category.ts';
-import { ThemeType } from '@/core/theme.ts';
 import { APPLICATION_LOGO_PATH } from '@/consts/asset.ts';
 
 import { categorizedArrayToPlainArray } from '@/lib/common.ts';
@@ -241,7 +244,6 @@ import {
 type SnackBarType = InstanceType<typeof SnackBar>;
 
 const router = useRouter();
-const theme = useTheme();
 
 const { tt, getAllWeekDays, getAllTransactionDefaultCategories } = useI18n();
 
@@ -267,8 +269,6 @@ const navigateToHomePage = ref<boolean>(false);
 
 const allWeekDays = computed<TypeAndDisplayName[]>(() => getAllWeekDays());
 const allPresetCategories = computed<Record<string, LocalizedPresetCategory[]>>(() => getAllTransactionDefaultCategories(0, currentLocale.value));
-const isDarkMode = computed<boolean>(() => theme.global.name.value === ThemeType.Dark);
-
 const allSteps = computed<StepBarItem[]>(() => {
     const allSteps = [
         {
@@ -380,7 +380,7 @@ function submit(): void {
 }
 
 function navigateToLogin(): void {
-    router.push('/');
+    router.push('/login');
 }
 
 function onSnackbarShowStateChanged(newValue: boolean): void {
@@ -390,9 +390,334 @@ function onSnackbarShowStateChanged(newValue: boolean): void {
 }
 </script>
 
-<style>
-.signup-preset-categories .v-expansion-panel-text__wrapper {
-    padding: 0 0 0 0;
-    padding-inline-start: 20px;
+<style scoped>
+.signup-page {
+    min-height: 100dvh;
+    color: #12141a;
+    background: #f2f4f7;
+    font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Segoe UI", system-ui, sans-serif;
+    font-synthesis: none;
+}
+
+.signup-page .auth-logo {
+    z-index: 5;
+}
+
+.signup-page .auth-logo h1 {
+    color: #fff !important;
+    font-weight: 750 !important;
+    text-shadow: 0 2px 16px rgba(0, 0, 0, .45);
+    opacity: 1 !important;
+}
+
+.signup-wrapper {
+    min-height: 100dvh;
+}
+
+.signup-visual {
+    isolation: isolate;
+    align-items: flex-start;
+    overflow: hidden;
+    background: #101216 !important;
+}
+
+.signup-visual::before,
+.signup-visual::after {
+    display: none !important;
+}
+
+.signup-hero-media {
+    position: absolute;
+    z-index: 0;
+    inset: 0;
+    overflow: hidden;
+}
+
+.signup-hero-media::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+        linear-gradient(180deg, rgba(8, 10, 13, .76) 0%, rgba(8, 10, 13, .14) 42%, rgba(8, 10, 13, .34) 100%),
+        linear-gradient(90deg, rgba(8, 10, 13, .64) 0%, transparent 72%);
+}
+
+.signup-hero-media :deep(.v-img) {
+    width: 100%;
+    height: 100%;
+}
+
+.signup-hero-media :deep(.v-img__img) {
+    object-position: 69% center;
+}
+
+.signup-brand-statement {
+    position: relative;
+    z-index: 2;
+    max-width: 520px;
+    margin: 154px 52px 0;
+    color: #fff;
+}
+
+.signup-brand-statement > span {
+    color: #ff8b72;
+    font-size: 12px;
+    font-weight: 850;
+    letter-spacing: .18em;
+}
+
+.signup-brand-statement h2 {
+    margin: 18px 0 13px;
+    color: #fff !important;
+    font-size: clamp(32px, 2.8vw, 52px);
+    font-weight: 850;
+    line-height: 1.16;
+    letter-spacing: -.045em;
+    text-shadow: 0 3px 28px rgba(0, 0, 0, .42);
+}
+
+.signup-brand-statement p {
+    max-width: 480px;
+    margin: 0;
+    color: #e2e7ef !important;
+    font-size: 15px;
+    font-weight: 550;
+    line-height: 1.75;
+    text-shadow: 0 2px 14px rgba(0, 0, 0, .4);
+}
+
+.signup-card {
+    flex: 0 0 58.333333%;
+    width: 58.333333%;
+    max-width: 58.333333%;
+    min-width: 0;
+    min-height: 100dvh;
+    align-self: stretch;
+    margin: 0;
+    padding: 24px 34px;
+    color: #12141a !important;
+    border: 0;
+    border-radius: 0 !important;
+    background: #f2f4f7 !important;
+    box-shadow: none !important;
+    backdrop-filter: none;
+    animation: none;
+}
+
+.signup-panel {
+    width: min(100%, 800px);
+    max-height: calc(100dvh - 48px);
+    padding: 26px 38px 30px;
+    overflow-y: auto;
+    color: #12141a !important;
+    border: 1px solid #e4e7ec;
+    border-radius: 26px !important;
+    background: #fff !important;
+    box-shadow: 0 22px 65px rgba(16, 24, 40, .10) !important;
+}
+
+.signup-toolbar {
+    display: flex;
+    margin-bottom: 20px;
+}
+
+.signup-toolbar :deep(.v-btn) {
+    min-height: 42px;
+    padding-inline: 12px;
+    color: #344054 !important;
+    border-radius: 11px;
+    background: #f2f4f7 !important;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.signup-window {
+    margin-top: 20px;
+}
+
+.signup-panel :deep(.slide-group-with-stepper) {
+    margin-bottom: 0 !important;
+}
+
+.signup-panel :deep(.slide-group-stepper-indicator) {
+    background: #fff !important;
+    border-color: #f05537 !important;
+    opacity: .38;
+}
+
+.signup-panel :deep(.slide-group-stepper-link-line) {
+    background: #f05537 !important;
+    opacity: .26;
+}
+
+.signup-panel :deep(.slide-group-step-active .slide-group-stepper-indicator),
+.signup-panel :deep(.slide-group-step-completed .slide-group-stepper-indicator),
+.signup-panel :deep(.slide-group-step-completed .slide-group-stepper-link-line) {
+    opacity: 1;
+}
+
+.signup-panel :deep(.step-number) {
+    color: #344054 !important;
+    font-size: 24px !important;
+    font-weight: 800 !important;
+    opacity: 1 !important;
+}
+
+.signup-panel :deep(.step-title) {
+    color: #101828 !important;
+    font-size: 13px !important;
+    font-weight: 750 !important;
+    line-height: 1.35;
+    opacity: 1 !important;
+}
+
+.signup-panel :deep(.step-subtitle) {
+    color: #667085 !important;
+    font-size: 12px !important;
+    line-height: 1.4;
+    opacity: 1 !important;
+}
+
+.signup-panel :deep(h4.text-h4) {
+    color: #12141a !important;
+    font-size: 27px !important;
+    font-weight: 850 !important;
+    line-height: 1.25;
+    letter-spacing: -.035em !important;
+    opacity: 1 !important;
+}
+
+.signup-panel :deep(p),
+.signup-panel :deep(p span) {
+    color: #475467 !important;
+    font-size: 14px;
+    font-weight: 520;
+    line-height: 1.6;
+    opacity: 1 !important;
+}
+
+.signup-panel :deep(a) {
+    color: #c83f28 !important;
+    font-weight: 750;
+    opacity: 1 !important;
+}
+
+.signup-panel :deep(.v-row) {
+    margin-top: -5px;
+    margin-bottom: -5px;
+}
+
+.signup-panel :deep(.v-col) {
+    padding-top: 8px;
+    padding-bottom: 8px;
+}
+
+.signup-panel :deep(.v-field) {
+    min-height: 54px;
+    color: #101828 !important;
+    border-radius: 13px !important;
+    background: #f8fafc !important;
+    box-shadow: none !important;
+}
+
+.signup-panel :deep(.v-field__outline) {
+    --v-field-border-opacity: 1;
+    color: #d0d5dd !important;
+}
+
+.signup-panel :deep(.v-field--focused) {
+    background: #fff !important;
+    box-shadow: 0 0 0 4px rgba(240, 85, 55, .1) !important;
+}
+
+.signup-panel :deep(.v-field--focused .v-field__outline) {
+    color: #f05537 !important;
+}
+
+.signup-panel :deep(.v-label),
+.signup-panel :deep(.v-field-label) {
+    color: #344054 !important;
+    font-size: 14px !important;
+    font-weight: 700 !important;
+    opacity: 1 !important;
+}
+
+.signup-panel :deep(.v-field__input),
+.signup-panel :deep(input),
+.signup-panel :deep(.v-select__selection-text) {
+    color: #101828 !important;
+    font-size: 15px !important;
+    font-weight: 550;
+    opacity: 1 !important;
+}
+
+.signup-panel :deep(input::placeholder) {
+    color: #667085 !important;
+    opacity: 0 !important;
+}
+
+.signup-panel :deep(.v-field--focused input::placeholder) {
+    opacity: 1 !important;
+}
+
+.signup-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    margin-top: 22px;
+}
+
+.signup-actions > :only-child {
+    margin-left: auto;
+}
+
+.signup-actions :deep(.v-btn) {
+    min-width: 130px;
+    min-height: 48px;
+    padding-inline: 20px;
+    color: #fff !important;
+    border-radius: 13px !important;
+    background: #12141a !important;
+    font-size: 14px;
+    font-weight: 750;
+    opacity: 1 !important;
+}
+
+.signup-actions :deep(.v-btn:hover:not(:disabled)) {
+    background: #f05537 !important;
+}
+
+.signup-actions :deep(.v-btn:disabled) {
+    color: #667085 !important;
+    background: #e4e7ec !important;
+}
+
+.signup-preset-categories :deep(.v-expansion-panel-text__wrapper) {
+    padding: 0 0 0 20px;
+}
+
+.signup-preset-categories :deep(.v-switch .v-label),
+.signup-preset-categories :deep(.v-expansion-panel-title),
+.signup-preset-categories :deep(.v-list-item) {
+    color: #344054 !important;
+    font-size: 14px !important;
+    opacity: 1 !important;
+}
+
+@media (max-width: 1100px) {
+    .signup-card { padding: 20px; }
+    .signup-panel { padding: 24px 26px 28px; }
+    .signup-brand-statement { margin-inline: 34px; }
+}
+
+@media (max-width: 959px) {
+    .signup-page .auth-logo h1 { color: #12141a !important; text-shadow: none; }
+    .signup-card { flex-basis: 100%; width: 100%; max-width: 100%; min-height: 100dvh; padding: 78px 18px 18px; }
+    .signup-panel { max-height: none; padding: 22px 20px 26px; border-radius: 20px !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .signup-page * { transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
 </style>

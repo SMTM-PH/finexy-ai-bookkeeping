@@ -1,0 +1,985 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>栗子记账 V2 · Soft Glass Wallet</title>
+<style>
+/* ============================================================
+   0. 设计令牌
+   材质纪律（V2-SOFT-GLASS §6）：
+   G0 雾面画布 / G1 软质面板（不透明，无模糊）/ G2 透明玻璃（仅悬浮层）/ G3 聚焦玻璃（对话框）
+   ============================================================ */
+:root{
+  /* 色彩 */
+  --ink:#1A2140;            /* 主要文字 */
+  --muted:#5B6478;          /* 次要文字（浅底上 ≥4.5:1） */
+  --mist:#EDF0F9;           /* G0 画布 */
+  --cloud:#FAFBFF;          /* 面板高光 */
+  --iris:#7568F8;           /* 主行动（填充/焦点） */
+  --iris-deep:#5849E6;      /* 主行动渐变深端（白字 ≥4.5:1） */
+  --iris-text:#5B4BE3;      /* Iris 的文本用法（浅底 AA） */
+  --ice:#45B8C6;
+  --info:#2B7F8F;           /* 信息文本 */
+  --mint:#72D6BD;
+  --income:#177E66;         /* 收入文本 */
+  --coral:#ED7184;
+  --expense:#CE3D5B;        /* 支出文本 */
+  /* 字型 */
+  --font-ui:"Microsoft YaHei UI","PingFang SC","Noto Sans CJK SC",system-ui,sans-serif;
+  --font-display:"ZCOOL QingKe HuangYou","Microsoft YaHei UI","PingFang SC",system-ui,sans-serif; /* 站酷庆科黄油体：随应用打包后自动生效 */
+  --font-mono:"JetBrains Mono","Cascadia Mono","SF Mono",Consolas,monospace;
+  /* 圆角 */
+  --r-s:12px; --r-m:18px; --r-l:26px; --r-xl:34px;
+  /* 阴影（柔性拟态：双向柔影 + 顶部冷白高光） */
+  --e1:14px 16px 34px rgba(84,92,134,.12), -8px -8px 22px rgba(255,255,255,.85);
+  --e2:20px 26px 52px rgba(84,92,134,.17), -10px -10px 26px rgba(255,255,255,.9);
+  --inset:inset 4px 5px 10px rgba(90,100,140,.13), inset -4px -4px 10px #fff;
+  --glass-shadow:0 18px 44px rgba(35,42,72,.22), inset 0 1px 0 rgba(255,255,255,.35);
+  /* 动效 */
+  --ease:cubic-bezier(.22,1,.36,1);
+  --t-view:320ms; --t-ui:200ms;
+}
+/* ============================================================ 1. 基础 */
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;color:var(--ink);font-family:var(--font-ui);background:var(--mist);-webkit-font-smoothing:antialiased}
+button,input{font:inherit;color:inherit}
+button{cursor:pointer}
+h1,h2,h3,p{margin:0}
+.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)}
+:focus-visible{outline:3px solid var(--iris);outline-offset:2px;border-radius:6px}
+::selection{background:rgba(117,104,248,.24)}
+/* G0 雾面画布：环境色 + 淡出网格 */
+.ambient{position:fixed;inset:0;z-index:-2;
+  background:radial-gradient(circle at 8% 6%,rgba(117,104,248,.26),transparent 30rem),
+             radial-gradient(circle at 94% 12%,rgba(237,113,132,.18),transparent 32rem),
+             radial-gradient(circle at 60% 104%,rgba(69,184,198,.18),transparent 32rem),
+             linear-gradient(150deg,#F2F3FC,#E9EDF8 52%,#F6EFF7)}
+.ambient:after{content:"";position:absolute;inset:0;
+  background-image:linear-gradient(rgba(255,255,255,.14) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.14) 1px,transparent 1px);
+  background-size:44px 44px;mask-image:linear-gradient(to bottom,black,transparent 68%)}
+/* ============================================================ 2. 材质 */
+/* G1 软质面板：不透明、双向柔影，不做模糊（性能与材质纪律） */
+.g1{border:1px solid rgba(255,255,255,.82);background:linear-gradient(145deg,#F7F8FE,#EBEEF8);box-shadow:var(--e1)}
+.g1.hoverable{transition:transform var(--t-ui) var(--ease),box-shadow var(--t-ui) var(--ease)}
+.g1.hoverable:hover{transform:translateY(-3px);box-shadow:var(--e2)}
+/* G2 透明玻璃：仅侧轨 / Dock / 浮动件 / 弹层 */
+.g2{border:1px solid rgba(255,255,255,.5);background:rgba(248,249,255,.58);backdrop-filter:blur(24px) saturate(150%);-webkit-backdrop-filter:blur(24px) saturate(150%);box-shadow:var(--e1)}
+.g2-dark{border:1px solid rgba(255,255,255,.14);background:rgba(26,31,54,.78);backdrop-filter:blur(26px) saturate(140%);-webkit-backdrop-filter:blur(26px) saturate(140%);box-shadow:var(--glass-shadow)}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  .g2{background:#F3F5FC}.g2-dark{background:#232944}
+}
+/* 通用小组件 */
+.eyebrow{color:var(--iris-text);font:700 11px/1.3 var(--font-mono);letter-spacing:.14em}
+.btn-p{height:46px;padding:0 22px;border:1px solid rgba(255,255,255,.36);border-radius:15px;color:#fff;font-weight:700;
+  background:linear-gradient(135deg,#7A6DFB,var(--iris-deep));box-shadow:6px 8px 18px rgba(88,73,230,.28),inset 0 1px 0 rgba(255,255,255,.32);
+  transition:transform var(--t-ui) var(--ease),box-shadow var(--t-ui) var(--ease)}
+.btn-p:hover{transform:translateY(-2px);box-shadow:9px 12px 24px rgba(88,73,230,.32),inset 0 1px 0 rgba(255,255,255,.32)}
+.btn-p:active{transform:translateY(1px);box-shadow:inset 3px 4px 9px rgba(43,32,150,.35)}
+.btn-g{height:46px;padding:0 18px;border:1px solid rgba(255,255,255,.85);border-radius:15px;color:var(--muted);font-weight:600;
+  background:linear-gradient(145deg,#FBFCFF,#EDF0F8);box-shadow:5px 6px 14px rgba(84,92,134,.12),-4px -4px 10px rgba(255,255,255,.8);
+  transition:transform var(--t-ui) var(--ease)}
+.btn-g:hover{color:var(--ink);transform:translateY(-2px)}
+.btn-g:active{box-shadow:var(--inset);transform:none}
+.link-btn{border:0;background:none;color:var(--iris-text);font-weight:600;cursor:pointer;padding:4px 2px}
+.delta{display:inline-flex;align-items:center;gap:5px;margin-top:12px;padding:5px 10px;border-radius:9px;font-size:12px;font-weight:600}
+.delta.up{color:var(--income);background:rgba(114,214,189,.22)}
+.delta.flat{color:var(--info);background:rgba(69,184,198,.16)}
+.bar{height:9px;border-radius:6px;background:#DFE3EF;box-shadow:inset 2px 3px 6px rgba(74,83,124,.14);overflow:hidden}
+.bar i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--iris),var(--ice));transition:width 500ms var(--ease)}
+/* 斜纹签名纹理：表达「剩余 / 额度」的负空间（参考 Finexy 的 hatch 语言） */
+.bar.hatched{background-color:#E4E7F1;background-image:repeating-linear-gradient(-45deg,rgba(117,104,248,.16) 0 3px,transparent 3px 10px)}
+/* ============================================================ 3. 侧轨（G2，hover / focus / 触屏按钮 展开） */
+.rail{position:fixed;z-index:40;inset:18px auto 18px 18px;width:88px;padding:14px 12px;border-radius:30px;
+  display:flex;flex-direction:column;align-items:center;overflow:hidden;white-space:nowrap;
+  transition:width var(--t-view) var(--ease)}
+.rail:hover,.rail:focus-within,.rail.pinned{width:228px;align-items:stretch}
+.brand{display:flex;align-items:center;gap:12px;height:56px;padding:0 9px}
+.brand-mark{display:grid;place-items:center;min-width:46px;height:46px;border-radius:16px;font-size:25px;
+  background:linear-gradient(145deg,#fff,#DFDAF8);box-shadow:6px 7px 14px rgba(80,87,130,.16),-4px -4px 12px rgba(255,255,255,.9)}
+.brand span{font-weight:800;font-size:17px;opacity:0;transition:opacity 160ms}
+.rail:hover .brand span,.rail:focus-within .brand span,.rail.pinned .brand span{opacity:1}
+.nav{display:grid;gap:8px;margin-top:22px}
+.nav button{display:flex;align-items:center;gap:14px;height:52px;padding:0 15px;border:0;border-radius:17px;background:transparent;text-align:left;
+  transition:background var(--t-ui),box-shadow var(--t-ui)}
+.nav button i{display:grid;place-items:center;min-width:34px;height:34px;font-style:normal;font-size:18px}
+.nav button span{opacity:0;transition:opacity 160ms}
+.rail:hover .nav span,.rail:focus-within .nav span,.rail.pinned .nav span{opacity:1}
+.nav button.active{background:rgba(255,255,255,.74);box-shadow:7px 8px 17px rgba(84,91,134,.14),-5px -5px 13px rgba(255,255,255,.9),inset 3px 0 0 var(--iris);color:var(--iris-text);font-weight:700}
+.rail-foot{margin-top:auto;display:grid;gap:8px}
+.rail-foot button{display:flex;align-items:center;gap:14px;height:48px;padding:0 15px;border:0;border-radius:15px;background:transparent}
+.rail-foot button:hover{background:rgba(255,255,255,.5)}
+.rail-foot i{font-style:normal;font-size:18px;min-width:34px;display:grid;place-items:center}
+.rail-foot span{opacity:0;font-size:14px;transition:opacity 160ms}
+.rail:hover .rail-foot span,.rail:focus-within .rail-foot span,.rail.pinned .rail-foot span{opacity:1}
+/* ============================================================ 4. 顶部 Dock（G2 深色玻璃，内部只用细分隔线） */
+.shell{margin-left:122px;padding:18px 26px 64px}
+.dock{position:sticky;z-index:30;top:14px;height:68px;border-radius:34px;display:flex;align-items:center;padding:0 16px 0 24px;color:#fff}
+.dock>*,{flex:none}
+.dock-date{font-weight:700;font-size:15px}
+.dock-date small{display:block;margin-top:2px;color:rgba(255,255,255,.6);font-size:11px;font-weight:400}
+.dock-div{width:1px;height:26px;margin:0 18px;background:rgba(255,255,255,.18)}
+.dock-status{display:flex;align-items:center;gap:10px;font-size:13px;color:rgba(255,255,255,.88)}
+.pulse{width:9px;height:9px;border-radius:50%;background:var(--mint);box-shadow:0 0 0 6px rgba(114,214,189,.16);animation:pulse 2.4s infinite}
+@keyframes pulse{50%{box-shadow:0 0 0 10px rgba(114,214,189,.05)}}
+.dock-spacer{flex:1}
+.icon-btn{position:relative;display:grid;place-items:center;width:42px;height:42px;border:0;border-radius:50%;background:transparent;color:#fff;font-size:17px}
+.icon-btn:hover{background:rgba(255,255,255,.12)}
+.badge{position:absolute;top:5px;right:5px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--coral);color:#fff;font:700 10px/16px var(--font-mono);text-align:center}
+.dock .btn-p{height:40px;border-radius:20px;margin:0 6px 0 10px}
+.avatar{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.22);font-size:13px!important}
+/* 通知弹层（G2） */
+.pop{position:fixed;z-index:60;top:92px;right:26px;width:320px;padding:18px;border-radius:22px;display:none}
+.pop.open{display:block;animation:enter var(--t-view) var(--ease)}
+.pop h3{font-size:15px;margin-bottom:10px}
+.pop-item{display:flex;gap:10px;padding:10px 0;border-top:1px solid rgba(90,100,140,.12);font-size:13px}
+.pop-item i{font-style:normal}
+.pop-item small{display:block;color:var(--muted);margin-top:2px}
+.pop .link-btn{margin-top:8px;font-size:13px}
+/* ============================================================ 5. 视图框架 */
+main{max-width:1440px;margin:26px auto 0}
+.view{display:none}
+.view.active{display:block;animation:enter var(--t-view) var(--ease)}
+@keyframes enter{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:none}}
+.section-title{display:flex;align-items:end;justify-content:space-between;gap:12px;margin:36px 4px 16px}
+.section-title h2{margin:6px 0 0;font-size:24px;letter-spacing:-.02em}
+/* ============================================================ 6. 今日 */
+.hero{display:grid;grid-template-columns:1.25fr .75fr;gap:20px}
+.capture{position:relative;padding:34px;border-radius:var(--r-xl);overflow:hidden}
+.capture h1{margin:14px 0 8px;font-family:var(--font-display);font-size:clamp(26px,3vw,38px);letter-spacing:-.02em}
+.capture>p{color:var(--muted)}
+.composer{display:flex;gap:10px;align-items:center;margin-top:26px;height:66px;padding:8px 8px 8px 22px;border-radius:22px;
+  background:rgba(237,240,249,.9);box-shadow:var(--inset)}
+.composer input{min-width:0;flex:1;border:0;outline:0;background:transparent;font-size:15px}
+.composer input::placeholder{color:#8A92A8}
+.composer .btn-g,.composer .btn-p{height:50px;flex:none}
+/* 识别预览 chips：规则命中为实色，缺失字段为珊瑚虚线 */
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;min-height:30px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:11px;font-size:13px;background:rgba(255,255,255,.66);box-shadow:3px 4px 9px rgba(84,92,134,.1)}
+.chip b{font-family:var(--font-mono)}
+.chip.miss{border:1.5px dashed var(--coral);background:rgba(237,113,132,.08);color:var(--expense);box-shadow:none}
+.chip.src{font-size:11px;color:var(--muted);background:none;box-shadow:none;padding:6px 2px}
+.chip.ex{border:0;cursor:pointer;color:var(--iris-text);font-size:12.5px}
+.chip.ex:hover{background:rgba(255,255,255,.9)}
+/* 行内确认条：字段缺失/待确认时在输入框下方展开，而不是弹窗 */
+.confirm{display:grid;grid-template-rows:0fr;transition:grid-template-rows var(--t-view) var(--ease)}
+.confirm.open{grid-template-rows:1fr}
+.confirm>div{overflow:hidden}
+.confirm-inner{display:flex;align-items:center;gap:12px;margin-top:12px;padding:13px 16px;border-radius:16px;
+  background:rgba(255,255,255,.7);box-shadow:4px 5px 12px rgba(84,92,134,.1);font-size:14px;flex-wrap:wrap}
+.confirm-inner .sum{font-family:var(--font-mono);font-weight:700}
+.confirm-inner .btn-p{height:38px;padding:0 18px;margin-left:auto}
+.confirm-inner .btn-g{height:38px;padding:0 14px}
+/* 今日节奏 */
+.rhythm{padding:28px;border-radius:var(--r-xl);display:flex;flex-direction:column;gap:16px}
+.rhythm-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.rhythm h2{margin:8px 0 0;font-size:22px}
+@property --p{syntax:'<number>';initial-value:0;inherits:false}
+.ring{position:relative;display:grid;place-items:center;width:104px;height:104px;flex:none;border-radius:50%;
+  background:conic-gradient(var(--iris) calc(var(--p,33)*1%),rgba(255,255,255,.5) 0);
+  box-shadow:9px 10px 22px rgba(84,91,134,.15),-7px -7px 18px rgba(255,255,255,.9);transition:--p 480ms var(--ease)}
+.ring:before{content:"";position:absolute;inset:14px;border-radius:50%;background:#EFF1F9;box-shadow:var(--inset)}
+.ring span{position:relative;font:800 16px var(--font-mono)}
+.tasks{display:grid;gap:9px;margin-top:auto}
+.task{display:flex;align-items:center;gap:12px;padding:11px 13px;border-radius:15px;background:rgba(255,255,255,.5);font-size:14px}
+.task small{margin-left:auto;color:var(--muted);font-size:12px}
+.check{display:grid;place-items:center;width:28px;height:28px;flex:none;border-radius:10px;background:#E6E8F3;box-shadow:var(--inset);font-size:13px;color:var(--muted)}
+.task.done .check{background:var(--mint);color:#0E4A3C;box-shadow:none}
+.task.done b{color:var(--muted);text-decoration:line-through}
+.no-tx{align-self:flex-start;border:0;background:none;color:var(--muted);font-size:12px;text-decoration:underline;text-underline-offset:3px}
+.no-tx:hover{color:var(--iris-text)}
+/* 待处理收件箱：仅存在异常时渲染，完成后消失 */
+.inbox{border-radius:var(--r-l);padding:20px 24px;margin-top:22px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;
+  border-left:4px solid var(--coral);animation:enter var(--t-view) var(--ease)}
+.inbox .dot{width:10px;height:10px;border-radius:50%;background:var(--coral);flex:none}
+.inbox .txt{flex:1;min-width:220px}
+.inbox .txt b{font-size:14px}
+.inbox .txt small{display:block;color:var(--muted);margin-top:3px}
+.inbox .btn-g{height:38px;padding:0 14px;font-size:13px}
+.inbox.closing{opacity:0;transform:translateY(-6px);transition:all 300ms var(--ease)}
+/* 资金脉搏 */
+.metrics{display:grid;grid-template-columns:1.25fr 1fr 1fr;gap:18px}
+.metric{padding:24px;border-radius:var(--r-l)}
+.metric>small{color:var(--muted);font-size:13px}
+.metric strong{display:block;margin-top:14px;font:700 28px var(--font-mono);letter-spacing:-.02em}
+.metric .bar{margin-top:18px}
+.metric .remain{display:flex;justify-content:space-between;margin-top:10px;font-size:12px;color:var(--muted)}
+/* 净余额总览卡：深色软质面板（G1 深色变体，呼应 Dock），内嵌钱包速览 */
+.overview{background:linear-gradient(150deg,#272E4E,#1A2140);border:1px solid rgba(255,255,255,.1);color:#fff;box-shadow:var(--e2)}
+.overview>small{color:rgba(255,255,255,.58)}
+.overview .delta{background:rgba(114,214,189,.16);color:#7FE3C5}
+.ow-actions{display:flex;gap:10px;margin-top:18px}
+.ow-actions button{flex:1;height:42px;font-size:13.5px}
+.ow-actions .btn-g{background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.16);color:#fff;box-shadow:none}
+.ow-actions .btn-g:hover{background:rgba(255,255,255,.17);color:#fff}
+.ow-wallets{display:grid;gap:8px;margin-top:16px}
+.ow-wallet{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:14px;text-align:left;cursor:pointer;
+  background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.08);color:#fff;transition:background var(--t-ui)}
+.ow-wallet:hover{background:rgba(255,255,255,.13)}
+.ow-wallet .seal{width:38px;height:38px;border-radius:12px;font-size:16px}
+.ow-wallet small{display:block;color:rgba(255,255,255,.55);font-size:11.5px}
+.ow-wallet b{font:700 14.5px var(--font-mono)}
+.ow-wallet .st{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:11px;color:rgba(255,255,255,.62);flex:none}
+.ow-wallet .st i{width:7px;height:7px;border-radius:50%;background:var(--mint)}
+.ow-wallet .st.warn i{background:var(--coral)}
+/* 钱包速览内嵌于总览卡（.ow-wallet）；seal 为账户印章 */
+.seal{display:grid;place-items:center;width:54px;height:54px;flex:none;border-radius:17px;color:#fff;font-size:22px;font-weight:800;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.35),4px 6px 14px rgba(50,56,94,.22)}
+/* 持有资产 + 洞察胶囊 */
+.duo{display:grid;grid-template-columns:1.15fr .85fr;gap:18px}
+.panel{padding:26px;border-radius:var(--r-l)}
+.asset-row{display:flex;align-items:center;gap:16px;margin-top:18px}
+.asset-icon{display:grid;place-items:center;width:64px;height:64px;flex:none;border-radius:20px;font-size:25px;color:var(--iris-text);
+  background:linear-gradient(145deg,#EDEBFD,#DCD8F5);box-shadow:8px 9px 18px rgba(82,91,130,.14),-5px -5px 14px rgba(255,255,255,.9),inset 0 1px 0 rgba(255,255,255,.8)}
+.asset-data{flex:1;min-width:0}
+.asset-data h3{font-size:16px}
+.asset-data p{margin-top:5px;color:var(--muted);font-size:12.5px}
+.cost{font:800 24px var(--font-mono);text-align:right;flex:none}
+.cost small{display:block;color:var(--muted);font:400 11.5px var(--font-ui);margin-top:3px}
+.capsule{display:flex;flex-direction:column}
+.capsule blockquote{margin:14px 0 0;padding:14px 16px;border-left:3px solid var(--iris);border-radius:0 14px 14px 0;background:rgba(117,104,248,.07);font-size:13.5px;line-height:1.7}
+.capsule .meta{margin-top:10px;font-size:12px;color:var(--muted)}
+.capsule .btn-p{margin-top:auto;height:44px}
+/* ============================================================ 7. 流水（月历 → 分栏） */
+.ledger-tools{display:flex;align-items:center;gap:8px}
+.month-nav{display:grid;place-items:center;width:38px;height:38px;border:1px solid rgba(255,255,255,.85);border-radius:13px;
+  background:linear-gradient(145deg,#FBFCFF,#EDF0F8);box-shadow:4px 5px 11px rgba(84,92,134,.11);font-size:15px}
+.calendar-layout{display:grid;grid-template-columns:1fr;gap:20px;transition:grid-template-columns var(--t-view) var(--ease)}
+.calendar-layout.selected{grid-template-columns:minmax(300px,.85fr) 1.15fr}
+.calendar{padding:26px;border-radius:var(--r-xl)}
+.calendar h3{font-size:18px}
+.week,.days{display:grid;grid-template-columns:repeat(7,1fr);gap:7px}
+.week{margin-top:20px;color:var(--muted);font-size:11.5px;text-align:center}
+.days{margin-top:8px}
+.day{min-height:72px;padding:10px;border:0;border-radius:16px;background:rgba(255,255,255,.38);box-shadow:inset 1px 1px 0 rgba(255,255,255,.9);
+  text-align:left;font-size:14px;cursor:pointer;display:flex;flex-direction:column;gap:6px;transition:background var(--t-ui),box-shadow var(--t-ui)}
+.day:hover{background:rgba(255,255,255,.7)}
+.day.pad{background:none;box-shadow:none;cursor:default}
+.day.today{color:var(--iris-text);font-weight:800;box-shadow:inset 0 0 0 2px var(--iris)}
+.day.active{background:rgba(255,255,255,.8);box-shadow:6px 7px 15px rgba(83,92,133,.13),inset 3px 0 0 var(--iris)}
+.day em{font:600 10.5px var(--font-mono);font-style:normal;color:var(--expense)}
+.day em.in{color:var(--income)}
+.search{height:40px;width:210px;padding:0 15px;border:0;border-radius:14px;background:rgba(237,240,249,.9);box-shadow:var(--inset);outline:0;font-size:13px}
+.search::placeholder{color:#8A92A8}
+.day-list{padding:26px;border-radius:var(--r-xl);display:none}
+.selected .day-list{display:block;animation:enter var(--t-view) var(--ease)}
+.tx{display:grid;grid-template-columns:40px 1fr auto;gap:12px;align-items:center;padding:13px 0;border-bottom:1px solid rgba(90,100,140,.1)}
+.tx:last-child{border-bottom:0}
+.tx i{display:grid;place-items:center;width:38px;height:38px;border-radius:13px;background:#E8EAF4;font-style:normal;font-size:14px;font-weight:700;color:var(--iris-text)}
+.tx small{display:block;color:var(--muted);margin-top:2px;font-size:12px}
+.tx strong{font:700 15px var(--font-mono)}
+.tx .out{color:var(--expense)} .tx .in{color:var(--income)}
+.empty{padding:38px 0;text-align:center;color:var(--muted);font-size:14px}
+.empty .btn-p{margin-top:14px}
+/* ============================================================ 8. 钱包展厅（叙事 + 3D 轨道 + 详情） */
+.showroom{display:grid;grid-template-columns:280px 1fr 330px;gap:20px;align-items:stretch}
+.story{padding:28px;border-radius:var(--r-xl)}
+.story h1{font-family:var(--font-display);font-size:26px;margin:12px 0 10px;letter-spacing:-.01em}
+.story p{color:var(--muted);font-size:13.5px;line-height:1.75}
+.totals{display:grid;gap:9px;margin-top:22px}
+.totals div{display:flex;justify-content:space-between;padding:10px 13px;border-radius:13px;background:rgba(255,255,255,.5);font-size:13px}
+.totals b{font-family:var(--font-mono)}
+.stage{padding:28px 20px;border-radius:var(--r-xl);display:flex;flex-direction:column;overflow:hidden}
+.carousel{position:relative;height:280px;margin-top:6px;perspective:1200px}
+.carousel .wcard{position:absolute;top:16px;left:50%;width:min(340px,80%);height:228px;padding:24px;border-radius:24px;color:#fff;overflow:hidden;
+  text-align:left;border:0;cursor:pointer;box-shadow:0 22px 40px rgba(50,56,94,.26);
+  transition:transform 420ms var(--ease),opacity 420ms var(--ease)}
+.wcard:after{content:"";position:absolute;width:200px;height:200px;border:34px solid rgba(255,255,255,.1);border-radius:50%;right:-74px;top:-82px}
+.wcard .glyph{position:absolute;right:14px;bottom:-26px;font-size:110px;font-weight:900;opacity:.16;line-height:1}
+.wcard small{opacity:.75;font-size:12px;letter-spacing:.08em}
+.wcard .bal{display:block;margin-top:38px;font:750 29px var(--font-mono);letter-spacing:-.01em}
+.wcard .meta{position:absolute;left:24px;right:24px;bottom:18px;display:flex;justify-content:space-between;font:600 11.5px var(--font-mono);opacity:.85}
+.carousel-nav{display:flex;justify-content:center;gap:12px;margin-top:8px}
+.carousel-nav button{width:44px;height:44px;border-radius:50%;border:1px solid rgba(255,255,255,.85);font-size:16px;
+  background:linear-gradient(145deg,#FBFCFF,#E9ECF6);box-shadow:5px 6px 13px rgba(84,92,134,.13),-4px -4px 10px rgba(255,255,255,.85)}
+.carousel-nav button:active{box-shadow:var(--inset)}
+.detail{padding:26px;border-radius:var(--r-xl);display:flex;flex-direction:column;gap:14px;transition:opacity 200ms}
+.detail.switching{opacity:0}
+.detail .bal-big{font:800 30px var(--font-mono);letter-spacing:-.02em;margin-top:10px}
+.detail dl{display:grid;gap:9px;margin:6px 0 0}
+.detail dl div{display:flex;justify-content:space-between;gap-:10px;padding:10px 13px;border-radius:13px;background:rgba(255,255,255,.5);font-size:13px}
+.detail dt{color:var(--muted)} .detail dd{margin:0;font-weight:600;text-align:right}
+.detail .actions{display:flex;gap:10px;margin-top:auto}
+.detail .actions .btn-g{flex:1;height:42px;font-size:13.5px}
+/* ============================================================ 9. 资产 / 洞察 */
+.asset-line{display:grid;grid-template-columns:64px 1fr auto;gap:16px;align-items:center;padding:20px 0;border-bottom:1px solid rgba(90,100,140,.1)}
+.asset-line:last-of-type{border-bottom:0}
+.asset-line .bar{margin-top:12px}
+.asset-line .meta2{display:flex;gap:16px;margin-top:8px;color:var(--muted);font-size:12px;flex-wrap:wrap}
+.asset-summary{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:22px}
+.asset-summary div{padding:16px 18px;border-radius:17px;background:rgba(255,255,255,.5)}
+.asset-summary small{color:var(--muted)}
+.asset-summary b{display:block;margin-top:7px;font:700 20px var(--font-mono)}
+.insight-grid{display:grid;grid-template-columns:1.35fr .65fr;gap:20px}
+.chart{padding:26px;border-radius:var(--r-xl)}
+.legend{display:flex;gap:16px;margin-top:12px;font-size:12px;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px}
+.legend i.hatch{background:repeating-linear-gradient(-45deg,var(--iris) 0 2px,rgba(117,104,248,.35) 2px 4px)!important}
+.chart-plot{position:relative;height:210px;margin-top:22px}
+.chart-plot .gl{position:absolute;left:0;right:0;border-top:1px dashed rgba(90,100,140,.18)}
+.chart-bars{position:relative;display:flex;align-items:flex-end;gap:4%;height:100%}
+.col{flex:1;display:flex;align-items:flex-end;justify-content:center;gap:6px;height:100%;position:relative}
+.col i{width:34%;max-width:26px;border-radius:8px 8px 3px 3px;
+  background:repeating-linear-gradient(-45deg,rgba(255,255,255,.38) 0 2px,transparent 2px 7px),linear-gradient(180deg,var(--iris),rgba(117,104,248,.5))}
+.col i.in{background:linear-gradient(180deg,var(--ice),rgba(69,184,198,.22))}
+.col span{position:absolute;bottom:-24px;left:0;right:0;text-align:center;font:600 11px var(--font-mono);color:var(--muted)}
+.chart-summary{margin-top:38px;font-size:13px;line-height:1.75;color:var(--muted)}
+.report{padding:26px;border-radius:var(--r-xl);display:flex;flex-direction:column}
+.report h2{font-size:19px;margin-top:12px;line-height:1.5}
+.report .btn-p{margin-top:20px;height:48px}
+.history{display:grid;gap:9px;margin-top:18px}
+.history button{display:flex;justify-content:space-between;gap:10px;padding:12px 14px;border:0;border-radius:14px;background:rgba(255,255,255,.5);font-size:13px;text-align:left;cursor:pointer}
+.history button:hover{background:rgba(255,255,255,.8)}
+.history small{color:var(--muted);font-family:var(--font-mono)}
+/* ============================================================ 10. 浮动 AI 入口（G2）+ 聚焦玻璃对话（G3） */
+.fab{position:fixed;z-index:45;right:26px;bottom:26px;width:58px;height:58px;border-radius:50%;font-size:21px;color:#fff;
+  border:1px solid rgba(255,255,255,.4);background:linear-gradient(135deg,rgba(122,109,251,.92),rgba(88,73,230,.92));
+  backdrop-filter:blur(14px);box-shadow:0 14px 32px rgba(88,73,230,.36),inset 0 1px 0 rgba(255,255,255,.4)}
+.fab:hover{transform:translateY(-2px)}
+.ai-panel{position:fixed;z-index:70;right:26px;bottom:96px;width:min(360px,calc(100vw - 40px));padding:22px;border-radius:24px;display:none;
+  border:1px solid rgba(255,255,255,.6);background:rgba(250,251,255,.82);backdrop-filter:blur(30px) saturate(160%);box-shadow:var(--e2)}
+.ai-panel.open{display:block;animation:enter var(--t-view) var(--ease)}
+.ai-panel h3{font-size:15px;display:flex;align-items:center;gap:8px}
+.ai-panel p{margin-top:8px;font-size:12px;color:var(--muted)}
+.ai-panel .row{display:flex;gap:8px;margin-top:14px}
+.ai-panel input{flex:1;min-width:0;height:44px;padding:0 14px;border:0;border-radius:14px;background:rgba(237,240,249,.9);box-shadow:var(--inset);outline:0}
+.ai-panel .btn-p{height:44px;padding:0 16px}
+.ai-close{position:absolute;top:12px;right:12px;width:30px;height:30px;border:0;border-radius:50%;background:transparent;color:var(--muted);font-size:14px}
+/* Toast（支持动作按钮，如撤销） */
+.toast{position:fixed;z-index:80;right:26px;bottom:96px;display:flex;align-items:center;gap:14px;padding:14px 18px;border-radius:17px;color:#fff;
+  background:rgba(30,36,60,.86);backdrop-filter:blur(16px);box-shadow:0 16px 36px rgba(30,36,60,.28);font-size:14px;
+  transform:translateY(24px);opacity:0;pointer-events:none;transition:all 240ms var(--ease)}
+.toast.show{transform:none;opacity:1;pointer-events:auto}
+.toast button{border:0;background:none;color:var(--mint);font-weight:700;cursor:pointer}
+/* ============================================================ 11. 底部 Dock（≤1240px 接管导航，快速记账常驻） */
+.tabbar{position:fixed;z-index:40;left:12px;right:12px;bottom:calc(10px + env(safe-area-inset-bottom));height:64px;border-radius:32px;
+  display:none;align-items:center;justify-content:space-around;padding:0 8px}
+.tabbar button{display:grid;place-items:center;gap:2px;min-width:52px;height:50px;border:0;border-radius:16px;background:transparent;font-size:17px}
+.tabbar button small{font-size:10px;color:var(--muted)}
+.tabbar button.active{background:rgba(255,255,255,.78);box-shadow:5px 6px 13px rgba(84,92,134,.14)}
+.tabbar button.active small{color:var(--iris-text);font-weight:700}
+.tabbar .fab-mini{width:52px;height:52px;border-radius:50%;margin-top:-26px;color:#fff;font-size:22px;
+  background:linear-gradient(135deg,#7A6DFB,var(--iris-deep));box-shadow:0 10px 24px rgba(88,73,230,.4),inset 0 1px 0 rgba(255,255,255,.4)}
+/* ============================================================ 12. 响应式 */
+@media(max-width:1360px){.showroom{grid-template-columns:240px 1fr 300px}}
+@media(max-width:1240px){
+  .rail{display:none}
+  .shell{margin-left:0;padding:14px 16px 110px}
+  .tabbar{display:flex}
+  .fab{right:18px;bottom:92px;width:50px;height:50px;font-size:18px}
+  .ai-panel{bottom:152px;right:16px}
+  .toast{bottom:152px}
+  .showroom{grid-template-columns:1fr 1fr}
+  .story{grid-column:1/-1;display:flex;gap:24px;align-items:center}
+  .story .totals{margin-top:0;min-width:260px}
+}
+@media(max-width:1080px){
+  .hero,.duo,.insight-grid{grid-template-columns:1fr}
+  .metrics{grid-template-columns:1fr 1fr}
+  .metric.overview{grid-column:1/-1;order:-1}
+  .showroom{grid-template-columns:1fr}
+  .story{display:block}
+  .story .totals{margin-top:20px}
+  .calendar-layout.selected{grid-template-columns:1fr}
+}
+@media(max-width:640px){
+  .carousel{--cshift:118px}
+  .carousel .wcard{height:210px}
+  .dock{padding-left:16px;height:60px}
+  .dock-status span:last-child{display:none}
+  .dock .btn-p{padding:0 14px;font-size:13px}
+  .dock-date small{display:none}
+  .metrics,.asset-summary{grid-template-columns:1fr}
+  .search{display:none}
+  .capture{padding:24px}
+  .composer{height:auto;flex-wrap:wrap;padding:12px}
+  .composer input{flex:1 1 100%;height:38px}
+  .composer .btn-g,.composer .btn-p{flex:1}
+  .day{min-height:52px;padding:8px}
+  .day em{display:none}
+  .pop{right:16px;left:16px;width:auto}
+  .confirm-inner .btn-p{margin-left:0;width:100%}
+}
+/* ============================================================ 13. 减少动态效果 */
+@media(prefers-reduced-motion:reduce){
+  *,*:before,*:after{animation:none!important;transition:none!important}
+  .carousel .wcard{transform:none!important;opacity:1!important;position:static;width:100%;margin-bottom:12px}
+  .carousel{height:auto;perspective:none}
+}
+</style>
+</head>
+<body>
+<div class="ambient" aria-hidden="true"></div>
+
+<!-- 侧轨：G2 透明玻璃（悬浮层） -->
+<aside class="rail g2" id="rail" aria-label="主导航">
+  <div class="brand"><div class="brand-mark" aria-hidden="true">🦊</div><span>栗子记账</span></div>
+  <nav class="nav" id="nav">
+    <button class="active" data-view="today" aria-current="page"><i aria-hidden="true">⌂</i><span>今日</span></button>
+    <button data-view="ledger"><i aria-hidden="true">▦</i><span>流水</span></button>
+    <button data-view="wallet"><i aria-hidden="true">▰</i><span>钱包</span></button>
+    <button data-view="assets"><i aria-hidden="true">◇</i><span>资产</span></button>
+    <button data-view="insights"><i aria-hidden="true">◔</i><span>洞察</span></button>
+  </nav>
+  <div class="rail-foot">
+    <button id="pinRail" aria-label="固定侧轨展开" title="固定展开"><i aria-hidden="true">⇤</i><span>固定展开</span></button>
+    <button aria-label="控制中心" title="控制中心"><i aria-hidden="true">⚙</i><span>控制中心</span></button>
+  </div>
+</aside>
+
+<div class="shell">
+  <!-- 顶部 Dock：单一深色玻璃层，内部只用细分隔线 -->
+  <header class="dock g2-dark">
+    <div class="dock-date"><span id="dockDate">—</span><small id="dockWeek">—</small></div>
+    <div class="dock-div" aria-hidden="true"></div>
+    <div class="dock-status" role="status"><span class="pulse" aria-hidden="true"></span><span id="dockStatus">今天还差 1 笔 · 1 条异常</span></div>
+    <div class="dock-spacer"></div>
+    <button class="icon-btn" id="bell" aria-label="通知中心" aria-expanded="false">◔<span class="badge" id="bellBadge">2</span></button>
+    <button class="btn-p" id="quick">＋ 快速记账</button>
+    <button class="icon-btn avatar" aria-label="我的账户">栗</button>
+  </header>
+
+  <!-- 通知弹层 -->
+  <div class="pop g2" id="pop" role="dialog" aria-label="通知中心">
+    <h3>通知中心</h3>
+    <div class="pop-item"><i aria-hidden="true">⇪</i><div><b>支付宝账单导入完成</b><small>32 条已自动入账 · 1 条进入待处理</small></div></div>
+    <div class="pop-item"><i aria-hidden="true">⚠</i><div><b>1 条流水缺少账户</b><small>美团订单 ¥46.50 · 等待选择账户</small></div></div>
+    <button class="link-btn" id="readAll">全部已读</button>
+  </div>
+
+  <main>
+    <!-- ============ 今日 ============ -->
+    <section class="view active" id="today" aria-label="今日">
+      <div class="hero">
+        <article class="capture g1">
+          <div class="eyebrow">TODAY · QUICK CAPTURE</div>
+          <h1>今天的钱，发生了什么？</h1>
+          <p>说一句就好。本地规则优先识别，AI 只补齐缺失字段。</p>
+          <div class="composer">
+            <input id="entry" placeholder="例如：午饭 28 元，微信零钱支付" aria-label="快速记账输入" autocomplete="off">
+            <button class="btn-g" id="uploadBtn">上传账单</button>
+            <button class="btn-p" id="book">记一笔</button>
+          </div>
+          <div class="chips" id="chips" aria-live="polite"></div>
+          <div class="confirm" id="confirm"><div><div class="confirm-inner">
+            <span>识别为</span><span class="sum" id="confirmSum"></span>
+            <button class="btn-p" id="confirmOk">确认入账</button>
+            <button class="btn-g" id="confirmEdit">继续编辑</button>
+          </div></div></div>
+        </article>
+
+        <article class="rhythm g1" aria-label="今日任务">
+          <div class="rhythm-head">
+            <div><div class="eyebrow">DAILY RHYTHM</div><h2>今日节奏</h2></div>
+            <div class="ring" id="ring" style="--p:33"><span id="ringLabel">1 / 3</span></div>
+          </div>
+          <div class="tasks" id="tasks">
+            <div class="task done"><span class="check" aria-hidden="true">✓</span><b>确认账户余额</b><small>已完成</small></div>
+            <div class="task" id="taskBook"><span class="check" aria-hidden="true">1</span><b>记录一笔流水</b><small>＋50 XP</small></div>
+            <div class="task" id="taskEx"><span class="check" aria-hidden="true">2</span><b>处理异常</b><small>1 项</small></div>
+          </div>
+          <button class="no-tx" id="noTx">今天没有花钱？记为「今日无账」</button>
+        </article>
+      </div>
+
+      <!-- 待处理收件箱：仅存在异常时渲染，处理完消失 -->
+      <div class="inbox g1" id="inbox" role="alert">
+        <span class="dot" aria-hidden="true"></span>
+        <div class="txt"><b>美团订单 ¥46.50 · 缺少账户</b><small>规则未匹配到支付账户，选择后即可自动入账</small></div>
+        <button class="btn-g" id="fixAcc">选为「微信零钱」</button>
+        <button class="link-btn" id="ignoreEx">忽略</button>
+      </div>
+
+      <div class="section-title"><div><div class="eyebrow">MONEY PULSE</div><h2>本月资金脉搏</h2></div><button class="link-btn" data-goto="insights">查看完整分析 →</button></div>
+      <div class="metrics">
+        <article class="metric overview">
+          <small>账户净余额</small>
+          <strong>¥ 26,095.50</strong>
+          <span class="delta up">4 个账户 · 3 个已核对</span>
+          <div class="ow-actions">
+            <button class="btn-p" data-goto="wallet">转账 / 钱包</button>
+            <button class="btn-g" id="owQuick">记一笔</button>
+          </div>
+          <div class="ow-wallets" id="walletMini"></div>
+        </article>
+        <article class="metric g1 hoverable"><small>本月支出</small><strong>¥ 3,842.60</strong><span class="delta up">▼ 比上月少 8.2%</span></article>
+        <article class="metric g1 hoverable"><small>本月预算</small><strong>¥ 3,842.60 <span class="muted" style="font-size:16px">/ 8,000</span></strong>
+          <div class="bar hatched"><i style="width:48%"></i></div><div class="remain"><span>已用 48%</span><span>剩余 ¥ 4,157.40</span></div></article>
+      </div>
+
+      <div class="section-title"><div><div class="eyebrow">OWNERSHIP & INSIGHT</div><h2>持有资产 · 洞察</h2></div></div>
+      <div class="duo">
+        <article class="panel g1 hoverable">
+          <div class="eyebrow">DAILY OWNERSHIP COST</div>
+          <div class="asset-row">
+            <div class="asset-icon" aria-hidden="true">▣</div>
+            <div class="asset-data"><h3>手机 · ¥6,000</h3><p>3 年直线折旧 · 已持有 287 天</p></div>
+            <div class="cost">¥ 5.48<small>每日成本</small></div>
+          </div>
+          <div class="bar hatched" style="margin-top:18px"><i style="width:26%"></i></div>
+          <p class="muted" style="margin-top:12px;font-size:12.5px">账面价值 ¥ 4,427.40 · 二手估值待填写</p>
+        </article>
+        <article class="panel capsule g1 hoverable">
+          <div class="eyebrow">LAST AI REPORT</div>
+          <blockquote>「8 月支出更克制，餐饮占比下降；数码消费仍偏集中，建议下月设置数码专项预算。」</blockquote>
+          <p class="meta">8 月 1 日生成 · 报告已保存，可随时回看 · AI 仅在点击时调用</p>
+          <button class="btn-p" data-goto="insights">查看 / 生成月报</button>
+        </article>
+      </div>
+    </section>
+
+    <!-- ============ 流水 ============ -->
+    <section class="view" id="ledger" aria-label="流水">
+      <div class="section-title">
+        <div><div class="eyebrow">LEDGER CALENDAR</div><h2 id="calTitle">流水日历</h2></div>
+        <div class="ledger-tools">
+          <input class="search" id="txSearch" placeholder="搜索流水：分类 / 备注 / 账户" aria-label="搜索流水">
+          <button class="link-btn" id="expandCal" hidden>展开日历</button>
+          <button class="btn-g" id="importBtn" style="height:40px;font-size:13px">导入账单</button>
+          <button class="month-nav" id="prevM" aria-label="上个月">‹</button>
+          <button class="month-nav" id="nextM" aria-label="下个月">›</button>
+        </div>
+      </div>
+      <div class="calendar-layout" id="calendarLayout">
+        <article class="calendar g1">
+          <h3 id="calMonth" class="mono">—</h3>
+          <div class="week" aria-hidden="true"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
+          <div class="days" id="days" role="grid" aria-label="选择日期"></div>
+        </article>
+        <article class="day-list g1" id="dayList" aria-live="polite">
+          <div class="eyebrow">SELECTED DAY</div>
+          <h2 id="dayTitle" style="margin:8px 0 4px">—</h2>
+          <div id="dayTx"></div>
+        </article>
+      </div>
+    </section>
+
+    <!-- ============ 钱包 ============ -->
+    <section class="view" id="wallet" aria-label="钱包">
+      <div class="showroom">
+        <article class="story g1">
+          <div class="eyebrow">ACCOUNTS</div>
+          <h1>你的钱，各有位置。</h1>
+          <p>每张卡片是一个账户印章：大字徽记承担识别，余额始终位于最高信息层。点击任意卡片查看它的角色与流转。</p>
+          <div class="totals" id="walletTotals"></div>
+        </article>
+        <article class="stage g1">
+          <div class="carousel" id="carousel" tabindex="0" role="group" aria-label="账户卡片轮播，使用左右方向键切换"></div>
+          <div class="carousel-nav">
+            <button id="cPrev" aria-label="上一个账户">‹</button>
+            <button id="cNext" aria-label="下一个账户">›</button>
+          </div>
+        </article>
+        <article class="detail g1" id="accDetail" aria-live="polite"></article>
+      </div>
+    </section>
+
+    <!-- ============ 资产 ============ -->
+    <section class="view" id="assets" aria-label="资产">
+      <div class="section-title"><div><div class="eyebrow">OWNERSHIP VALUE</div><h2>买下之后，每天都在产生价值。</h2></div><button class="btn-g" style="height:40px;font-size:13px" id="addAsset">登记资产</button></div>
+      <article class="panel g1">
+        <div class="asset-line">
+          <div class="asset-icon" aria-hidden="true">▣</div>
+          <div><h3>手机 · ¥6,000</h3>
+            <div class="meta2"><span>2025-11-03 购入</span><span>已持有 287 天</span><span>3 年直线折旧</span></div>
+            <div class="bar hatched"><i style="width:26%"></i></div>
+          </div>
+          <div class="cost">¥ 5.48<small>每日成本</small></div>
+        </div>
+        <div class="asset-line">
+          <div class="asset-icon" aria-hidden="true">▤</div>
+          <div><h3>MacBook · ¥12,499</h3>
+            <div class="meta2"><span>2026-02-14 购入</span><span>已持有 184 天</span><span>4 年直线折旧</span></div>
+            <div class="bar hatched"><i style="width:13%"></i></div>
+          </div>
+          <div class="cost">¥ 8.56<small>每日成本</small></div>
+        </div>
+        <div class="asset-summary">
+          <div><small>总账面价值</small><b>¥ 15,351.40</b></div>
+          <div><small>本月折旧合计</small><b style="color:var(--expense)">− ¥ 435.24</b></div>
+        </div>
+      </article>
+    </section>
+
+    <!-- ============ 洞察 ============ -->
+    <section class="view" id="insights" aria-label="洞察">
+      <div class="section-title"><div><div class="eyebrow">MONTHLY STORY</div><h2>这个月，钱去了哪里？</h2></div></div>
+      <div class="insight-grid">
+        <article class="chart g1">
+          <b>近六个月收支</b>
+          <div class="legend"><span><i class="hatch"></i>支出</span><span><i style="background:var(--ice)"></i>收入</span></div>
+          <div class="chart-plot">
+            <div class="gl" style="top:25%"></div><div class="gl" style="top:50%"></div><div class="gl" style="top:75%"></div>
+            <div class="chart-bars" id="chartBars" role="img" aria-label="3月到8月支出分别为4205、3980、3620、4510、4186、3843元，收入稳定在8500元左右"></div>
+          </div>
+          <p class="chart-summary">8 月支出 ¥3,842.60，较 7 月下降 8.2%；工资收入 ¥8,500 保持稳定。数码类占比 22%，连续两月偏高。</p>
+        </article>
+        <article class="report g1">
+          <div class="eyebrow">AI REPORT</div>
+          <h2>支出更克制，数码消费仍偏集中</h2>
+          <p class="muted" style="margin-top:10px;font-size:13px;line-height:1.7">固定统计随时可看；AI 报告仅在你点击时生成，生成后保存可回看，不重复调用。</p>
+          <button class="btn-p" id="genReport">生成本月报告</button>
+          <div class="history" id="history">
+            <button><span>8 月月度报告</span><small>08-01</small></button>
+            <button><span>7 月月度报告</span><small>07-01</small></button>
+          </div>
+        </article>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- 底部 Dock（≤1240px） -->
+<nav class="tabbar g2" id="tabbar" aria-label="主导航">
+  <button class="active" data-view="today"><span aria-hidden="true">⌂</span><small>今日</small></button>
+  <button data-view="ledger"><span aria-hidden="true">▦</span><small>流水</small></button>
+  <button class="fab-mini" id="quickM" aria-label="快速记账">＋</button>
+  <button data-view="wallet"><span aria-hidden="true">▰</span><small>钱包</small></button>
+  <button data-view="insights"><span aria-hidden="true">◔</span><small>洞察</small></button>
+</nav>
+
+<!-- 浮动 AI 入口 -->
+<button class="fab" id="aiFab" aria-label="打开 AI 助手" aria-expanded="false">✦</button>
+<div class="ai-panel" id="aiPanel" role="dialog" aria-label="AI 助手">
+  <button class="ai-close" id="aiClose" aria-label="关闭">✕</button>
+  <h3>✦ 栗子 AI</h3>
+  <p>问一句关于钱的事。AI 仅在你提问时调用，不在后台自动运行。</p>
+  <div class="row"><input id="aiInput" placeholder="例如：这个月哪类花得最多？" aria-label="向 AI 提问"><button class="btn-p" id="aiAsk">提问</button></div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+/* ======================================================== 数据（演示） */
+const NOW = new Date();
+const fmt = n => '¥ ' + Math.abs(n).toLocaleString('zh-CN',{minimumFractionDigits:2});
+const accounts = [
+  {seal:'微', en:'WECHAT PAY',  name:'微信零钱',     role:'日常高频消费',   bal:9926.00,  last4:'3102', cur:'CNY 人民币', out:1426.00, checked:'今天 08:30', note:'买菜、餐饮与小额转账主力', grad:'linear-gradient(135deg,#4AD1AC,#1F8A70)'},
+  {seal:'支', en:'ALIPAY',      name:'支付宝',       role:'线上支付与理财', bal:10240.00, last4:'8857', cur:'CNY 人民币', out:1038.20, checked:'今天 08:30', note:'网购与基金定投入口',         grad:'linear-gradient(135deg,#44B4FF,#3B5BDB)'},
+  {seal:'储', en:'DEBIT CARD',  name:'招行储蓄卡',   role:'主要储蓄',       bal:8240.00,  last4:'6621', cur:'CNY 人民币', out:500.00,  checked:'昨天 21:12', note:'工资入账与长期储蓄',         grad:'linear-gradient(135deg,#9A83FF,#5B4BD6)'},
+  {seal:'信', en:'CREDIT CARD', name:'信用卡',       role:'大额与免息周转', bal:-2310.50, last4:'9043', cur:'CNY 人民币', out:2310.50, checked:'8 月 10 日', note:'账单日每月 20 日',           grad:'linear-gradient(135deg,#F0988C,#CE3D5B)'}
+];
+const TX = {
+  3:[{t:'08:12',cat:'餐饮',d:'豆浆油条',acc:'微信零钱',amt:-9.50},{t:'19:40',cat:'交通',d:'地铁',acc:'支付宝',amt:-4.00}],
+  8:[{t:'12:05',cat:'餐饮',d:'午餐',acc:'微信零钱',amt:-32.00},{t:'20:16',cat:'购物',d:'数据线',acc:'支付宝',amt:-49.90}],
+  12:[{t:'09:30',cat:'居住',d:'水电费',acc:'招行储蓄卡',amt:-186.40}],
+  16:[{t:'12:20',cat:'餐饮',d:'午餐',acc:'微信零钱',amt:-28.00},{t:'18:02',cat:'交通',d:'地铁',acc:'支付宝',amt:-4.00},{t:'10:00',cat:'收入',d:'工资',acc:'招行储蓄卡',amt:8500}],
+  21:[{t:'15:44',cat:'购物',d:'机械键盘',acc:'信用卡',amt:-499.00}],
+  26:[{t:'13:10',cat:'餐饮',d:'周末聚餐',acc:'微信零钱',amt:-128.00}]
+};
+TX[NOW.getDate()] = TX[NOW.getDate()] || [{t:'08:30',cat:'餐饮',d:'早餐',acc:'微信零钱',amt:-12.00}];
+
+/* ======================================================== 工具 */
+const $ = s => document.querySelector(s);
+const toastEl = $('#toast'); let toastTimer;
+function say(msg, action){
+  toastEl.innerHTML = '';
+  toastEl.appendChild(document.createTextNode(msg));
+  if (action){
+    const b = document.createElement('button');
+    b.textContent = action.label;
+    b.onclick = () => { toastEl.classList.remove('show'); action.fn(); };
+    toastEl.appendChild(b);
+  }
+  toastEl.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove('show'), action ? 4200 : 2000);
+}
+
+/* ======================================================== Dock 日期 */
+const WEEK = ['星期日','星期一','星期二','星期三','星期四','星期五','星期六'];
+$('#dockDate').textContent = `${NOW.getMonth()+1}月${NOW.getDate()}日`;
+$('#dockWeek').textContent = `${WEEK[NOW.getDay()]} · 财务状态平稳`;
+
+/* ======================================================== 视图切换（侧轨 + 底部 Dock 同步） */
+const navBtns = [...document.querySelectorAll('#nav button, #tabbar button[data-view]')];
+function goto(view){
+  navBtns.forEach(b => { const on = b.dataset.view === view; b.classList.toggle('active', on);
+    if (b.closest('#nav')) on ? b.setAttribute('aria-current','page') : b.removeAttribute('aria-current'); });
+  document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === view));
+}
+navBtns.forEach(b => b.addEventListener('click', () => goto(b.dataset.view)));
+document.querySelectorAll('[data-goto]').forEach(b => b.addEventListener('click', () => goto(b.dataset.goto)));
+$('#pinRail').onclick = () => $('#rail').classList.toggle('pinned');
+
+/* ======================================================== 快速记账：规则识别 → 行内确认 → 入账 → 可撤销 */
+const entry = $('#entry'), chips = $('#chips'), confirmBox = $('#confirm');
+let parsed = null, pendingDate = NOW.getDate();
+const CATS = [['餐饮',['饭','餐','咖啡','奶茶','外卖','吃','豆浆']],['交通',['地铁','打车','公交','滴滴','加油','高铁']],['购物',['买','淘宝','京东','快递','键盘']],['居住',['房租','水电','物业']],['娱乐',['电影','游戏','会员']],['收入',['工资','薪水','奖金','报销']]];
+const ACCS = [['微信零钱',['微信']],['支付宝',['支付宝']],['招行储蓄卡',['储蓄卡','银行卡','招行']],['信用卡',['信用卡']],['现金',['现金']]];
+function parse(text){
+  const r = {amt:null, cat:null, acc:null, when: pendingDate === NOW.getDate() ? '今天' : `${NOW.getMonth()+1}月${pendingDate}日`};
+  const m = text.replace(/,/g,'').match(/(\d+(?:\.\d{1,2})?)/);
+  if (m) r.amt = +m[1];
+  for (const [c,ks] of CATS) if (ks.some(k => text.includes(k))) { r.cat = c; break; }
+  for (const [a,ks] of ACCS) if (ks.some(k => text.includes(k))) { r.acc = a; break; }
+  if (/昨天/.test(text)) r.when = '昨天';
+  return r;
+}
+const EXAMPLES = ['午饭 28 元，微信零钱支付','地铁 4 元，支付宝','工资到账 8500'];
+function renderChips(){
+  const t = entry.value.trim();
+  chips.innerHTML = '';
+  if (!t){
+    confirmBox.classList.remove('open');
+    const tag = document.createElement('span');
+    tag.className = 'chip src'; tag.textContent = '试试：';
+    chips.appendChild(tag);
+    EXAMPLES.forEach(x => {
+      const b = document.createElement('button');
+      b.className = 'chip ex'; b.textContent = x;
+      b.onclick = () => { entry.value = x; renderChips(); entry.focus(); };
+      chips.appendChild(b);
+    });
+    return;
+  }
+  parsed = parse(t);
+  const mk = (label, val, miss) => {
+    const s = document.createElement('span');
+    s.className = 'chip' + (miss ? ' miss' : '');
+    s.innerHTML = miss ? `${label}待补` : `${label} <b>${val}</b>`;
+    chips.appendChild(s);
+  };
+  const tag = document.createElement('span');
+  tag.className = 'chip src'; tag.textContent = '规则识别';
+  chips.appendChild(tag);
+  mk('金额', parsed.amt != null ? fmt(parsed.amt) : '', parsed.amt == null);
+  mk('分类', parsed.cat || '', !parsed.cat);
+  mk('账户', parsed.acc || '', !parsed.acc);
+  mk('时间', parsed.when, false);
+}
+entry.addEventListener('input', renderChips);
+renderChips();
+entry.addEventListener('keydown', e => { if (e.key === 'Enter') $('#book').click(); });
+$('#book').onclick = () => {
+  if (!entry.value.trim()) return say('先说说发生了什么，例如：午饭 28 元');
+  if (!parsed) parsed = parse(entry.value);
+  if (parsed.amt == null) return say('至少告诉我金额');
+  const missing = [!parsed.cat && '分类', !parsed.acc && '账户'].filter(Boolean).join('、');
+  $('#confirmSum').textContent = `${fmt(parsed.amt)} · ${parsed.cat || '未分类'} · ${parsed.acc || '账户待定'} · ${parsed.when}`;
+  $('#confirmSum').style.color = missing ? 'var(--expense)' : 'var(--ink)';
+  confirmBox.classList.add('open');
+  if (missing) say(`AI 将补齐：${missing}`);
+};
+$('#confirmEdit').onclick = () => { confirmBox.classList.remove('open'); entry.focus(); };
+$('#confirmOk').onclick = () => {
+  const day = parsed.when === '昨天' ? NOW.getDate() - 1 : pendingDate;
+  const tx = { t: new Date().toTimeString().slice(0,5), cat: parsed.cat || '其他', d: entry.value.trim().slice(0,18), acc: parsed.acc || '现金', amt: parsed.cat === '收入' ? Math.abs(parsed.amt) : -Math.abs(parsed.amt) };
+  (TX[day] = TX[day] || []).push(tx);
+  entry.value = ''; renderChips(); confirmBox.classList.remove('open');
+  renderCal(); if (selDay === day) renderDay(day);
+  completeTask('book');
+  say(`已入账 ${fmt(tx.amt)} · ${tx.cat}`, { label:'撤销', fn(){
+    TX[day].splice(TX[day].indexOf(tx), 1);
+    renderCal(); if (selDay === day) renderDay(day);
+    say('已撤销该笔流水');
+  }});
+};
+$('#uploadBtn').onclick = () => say('演示环境：上传后将本地 OCR 并批量预处理');
+
+/* ======================================================== 今日节奏 / 收件箱 / 无账 */
+const state = { book:false, ex:false };
+function completeTask(k){
+  if (state[k]) return; state[k] = true;
+  const row = k === 'book' ? $('#taskBook') : $('#taskEx');
+  row.classList.add('done'); row.querySelector('.check').textContent = '✓'; row.querySelector('small').textContent = '已完成';
+  updateRhythm();
+}
+function updateRhythm(){
+  const done = 1 + state.book + state.ex;
+  $('#ring').style.setProperty('--p', Math.round(done/3*100));
+  $('#ringLabel').textContent = `${done} / 3`;
+  $('#dockStatus').textContent = done === 3 ? '今日任务全部完成' : `今天还差 ${state.book ? 0 : 1} 笔${state.ex ? '' : ' · 1 条异常'}`;
+  if (done === 3) say('今日任务全部完成，栗子长大了 🦊');
+}
+function resolveInbox(byFix){
+  state.ex || completeTask('ex');
+  const box = $('#inbox');
+  box.classList.add('closing');
+  setTimeout(() => box.remove(), 320);
+  say(byFix ? '已归入「微信零钱」并自动入账' : '已忽略，该条保留为未分类');
+}
+$('#fixAcc').onclick = () => resolveInbox(true);
+$('#ignoreEx').onclick = () => resolveInbox(false);
+$('#noTx').onclick = () => { completeTask('book'); say('已记录「今日无账」＋50 XP'); };
+
+/* ======================================================== 钱包速览（内嵌总览卡，余额直读 + 核对状态点） */
+const mini = $('#walletMini');
+accounts.slice(0,3).forEach((a,i) => {
+  const ok = a.checked.includes('今天');
+  const b = document.createElement('button');
+  b.className = 'ow-wallet';
+  b.innerHTML = `<span class="seal" style="background:${a.grad}">${a.seal}</span>
+    <span style="min-width:0"><small>${a.name} · ${a.role}</small><b>${a.bal < 0 ? '− ' : ''}${fmt(a.bal)}</b></span>
+    <span class="st${ok ? '' : ' warn'}"><i aria-hidden="true"></i>${ok ? '已核对' : '待核对'}</span>`;
+  b.setAttribute('aria-label', `${a.name}，余额 ${fmt(a.bal)}，${ok ? '已核对' : '待核对'}，查看详情`);
+  b.onclick = () => { cur = i; renderCarousel(); goto('wallet'); };
+  mini.appendChild(b);
+});
+
+/* ======================================================== 流水日历 */
+let cy = NOW.getFullYear(), cm = NOW.getMonth(), selDay = null;
+const daySum = d => (TX[d] || []).filter(x => x.amt < 0).reduce((s,x) => s + x.amt, 0);
+const dayInc = d => (TX[d] || []).filter(x => x.amt > 0).reduce((s,x) => s + x.amt, 0);
+function renderCal(){
+  $('#calMonth').textContent = `${cy} 年 ${cm+1} 月`;
+  const grid = $('#days'); grid.innerHTML = '';
+  const offset = (new Date(cy, cm, 1).getDay() + 6) % 7;
+  for (let i = 0; i < offset; i++){ const p = document.createElement('button'); p.className = 'day pad'; p.tabIndex = -1; p.setAttribute('aria-hidden','true'); grid.appendChild(p); }
+  const n = new Date(cy, cm+1, 0).getDate();
+  for (let d = 1; d <= n; d++){
+    const b = document.createElement('button');
+    b.className = 'day'; b.setAttribute('role','gridcell');
+    const out = daySum(d), inc = dayInc(d);
+    b.innerHTML = `<span>${d}</span>` + (out ? `<em>−${fmt(out).slice(2)}</em>` : '') + (!out && inc ? `<em class="in">＋${fmt(inc).slice(2)}</em>` : '');
+    if (cy === NOW.getFullYear() && cm === NOW.getMonth() && d === NOW.getDate()) b.classList.add('today');
+    if (d === selDay) b.classList.add('active');
+    b.setAttribute('aria-label', `${cm+1}月${d}日${out ? '，支出 ' + fmt(out) : ''}`);
+    b.onclick = () => selectDay(d);
+    grid.appendChild(b);
+  }
+}
+function selectDay(d){
+  selDay = d;
+  $('#txSearch').value = '';
+  $('#calendarLayout').classList.add('selected');
+  $('#expandCal').hidden = false;
+  renderCal(); renderDay(d);
+}
+/* 搜索模式：跨天过滤已加载的当月数据，复用右侧分栏 */
+$('#txSearch').addEventListener('input', e => {
+  const q = e.target.value.trim(), box = $('#dayTx');
+  if (!q){
+    if (selDay != null) renderDay(selDay);
+    else { $('#calendarLayout').classList.remove('selected'); $('#expandCal').hidden = true; }
+    return;
+  }
+  $('#calendarLayout').classList.add('selected'); $('#expandCal').hidden = false;
+  const hits = [];
+  Object.entries(TX).forEach(([d,list]) => list.forEach(x => { if ((x.d + x.cat + x.acc).includes(q)) hits.push({ ...x, day:+d }); }));
+  $('#dayTitle').textContent = `搜索「${q}」· ${hits.length} 条`;
+  box.innerHTML = hits.length
+    ? hits.sort((a,b) => b.day - a.day).map(x => `<div class="tx">
+        <i aria-hidden="true">${x.cat[0]}</i>
+        <div><b>${x.d}</b><small>${cm+1}月${x.day}日 ${x.t} · ${x.cat} · ${x.acc}</small></div>
+        <strong class="${x.amt < 0 ? 'out' : 'in'}">${x.amt < 0 ? '−' : '＋'} ${fmt(x.amt)}</strong></div>`).join('')
+    : `<div class="empty">没有匹配「${q}」的流水。</div>`;
+});
+function renderDay(d){
+  $('#dayTitle').textContent = `${cm+1} 月 ${d} 日` + (d === NOW.getDate() && cm === NOW.getMonth() ? ' · 今天' : '');
+  const list = TX[d] || [], box = $('#dayTx');
+  if (!list.length){
+    box.innerHTML = `<div class="empty">这一天还没有流水。<br><button class="btn-p" id="addForDay">补记一笔</button></div>`;
+    $('#addForDay').onclick = () => { pendingDate = d; goto('today'); setTimeout(() => entry.focus(), 120); say(`将为 ${cm+1}月${d}日 补记`); };
+    return;
+  }
+  box.innerHTML = list.map(x => `<div class="tx">
+    <i aria-hidden="true">${x.cat[0]}</i>
+    <div><b>${x.d}</b><small>${x.t} · ${x.cat} · ${x.acc}</small></div>
+    <strong class="${x.amt < 0 ? 'out' : 'in'}">${x.amt < 0 ? '−' : '＋'} ${fmt(x.amt)}</strong></div>`).join('');
+}
+$('#expandCal').onclick = () => { $('#calendarLayout').classList.remove('selected'); $('#expandCal').hidden = true; };
+$('#prevM').onclick = () => { cm--; if (cm < 0){ cm = 11; cy--; } selDay = null; $('#calendarLayout').classList.remove('selected'); $('#expandCal').hidden = true; renderCal(); };
+$('#nextM').onclick = () => { cm++; if (cm > 11){ cm = 0; cy++; } selDay = null; $('#calendarLayout').classList.remove('selected'); $('#expandCal').hidden = true; renderCal(); };
+$('#importBtn').onclick = () => say('演示环境：导入进度将出现在通知中心');
+renderCal();
+
+/* ======================================================== 钱包展厅：3D 轨道 + 详情联动 */
+let cur = 0;
+const carousel = $('#carousel');
+function renderCarousel(){
+  carousel.innerHTML = '';
+  const n = accounts.length;
+  accounts.forEach((a,i) => {
+    const off = ((i - cur) % n + n) % n;             // 0 中央 / 1 右 / n-1 左
+    const b = document.createElement('button');
+    b.className = 'wcard';
+    b.style.background = a.grad;
+    const T = {
+      0:   'translate(-50%,0) rotateY(0deg) scale(1)',
+      1:   'translate(calc(-50% + var(--cshift,200px)),0) rotateY(-32deg) scale(.8)'
+    };
+    b.style.transform = T[off] || (off === n-1 ? 'translate(calc(-50% - var(--cshift,200px)),0) rotateY(32deg) scale(.8)' : 'translate(-50%,0) scale(.5)');
+    b.style.opacity = (off === 0 || off === 1 || off === n-1) ? 1 : 0;
+    b.style.zIndex = off === 0 ? 3 : off === 1 || off === n-1 ? 2 : 1;
+    b.style.pointerEvents = b.style.opacity === '0' ? 'none' : 'auto';
+    b.setAttribute('aria-label', `${a.name}，余额 ${fmt(a.bal)}${off === 0 ? '，当前选中' : '，点击选中'}`);
+    b.innerHTML = `<small>${a.en}</small><span class="glyph" aria-hidden="true">${a.seal}</span>
+      <span class="bal">${a.bal < 0 ? '− ' : ''}${fmt(a.bal)}</span>
+      <span class="meta"><span>${a.name}</span><span>·· ${a.last4}</span></span>`;
+    b.onclick = () => { if (off !== 0){ cur = i; renderCarousel(); } };
+    carousel.appendChild(b);
+  });
+  renderDetail();
+}
+function renderDetail(){
+  const a = accounts[cur], d = $('#accDetail');
+  d.classList.add('switching');
+  setTimeout(() => {
+    d.innerHTML = `
+      <div><div class="eyebrow">${a.en}</div><div class="bal-big">${a.bal < 0 ? '− ' : ''}${fmt(a.bal)}</div></div>
+      <dl>
+        <div><dt>账户角色</dt><dd>${a.role}</dd></div>
+        <div><dt>币种</dt><dd>${a.cur}</dd></div>
+        <div><dt>本月流出</dt><dd class="mono">${fmt(a.out)}</dd></div>
+        <div><dt>最近核对</dt><dd>${a.checked}</dd></div>
+        <div><dt>备注</dt><dd>${a.note}</dd></div>
+      </dl>
+      <div class="actions"><button class="btn-g" id="viewTx">查看流水</button><button class="btn-g" id="editAcc">编辑账户</button></div>`;
+    d.classList.remove('switching');
+    $('#viewTx').onclick = () => { goto('ledger'); selDay || selectDay(NOW.getDate()); };
+    $('#editAcc').onclick = () => say('演示环境：编辑抽屉保持日期上下文打开');
+  }, 120);
+}
+$('#cPrev').onclick = () => { cur = (cur - 1 + accounts.length) % accounts.length; renderCarousel(); };
+$('#cNext').onclick = () => { cur = (cur + 1) % accounts.length; renderCarousel(); };
+carousel.addEventListener('keydown', e => {
+  if (e.key === 'ArrowLeft'){ e.preventDefault(); $('#cPrev').click(); }
+  if (e.key === 'ArrowRight'){ e.preventDefault(); $('#cNext').click(); }
+});
+const totals = $('#walletTotals');
+[['日常消费', accounts[0].bal],['线上支付', accounts[1].bal],['储蓄', accounts[2].bal],['信用负债', accounts[3].bal]]
+  .forEach(([k,v]) => { const r = document.createElement('div'); r.innerHTML = `<span>${k}</span><b>${v < 0 ? '− ' : ''}${fmt(v)}</b>`; totals.appendChild(r); });
+renderCarousel();
+
+/* ======================================================== 洞察 */
+const MONTHS = ['3月','4月','5月','6月','7月','8月'], OUT = [48,46,42,52,48,44], IN = [98,98,100,98,98,98];
+const bars = $('#chartBars');
+MONTHS.forEach((m,i) => {
+  const c = document.createElement('div'); c.className = 'col';
+  c.innerHTML = `<i style="height:${OUT[i]}%"></i><i class="in" style="height:${IN[i]}%"></i><span>${m}</span>`;
+  bars.appendChild(c);
+});
+$('#genReport').onclick = function(){
+  this.disabled = true; this.textContent = '生成中…';
+  setTimeout(() => {
+    this.disabled = false; this.textContent = '生成本月报告';
+    const b = document.createElement('button');
+    b.innerHTML = `<span>8 月中期报告</span><small>刚刚</small>`;
+    $('#history').prepend(b);
+    say('报告已生成并保存，不会重复调用 AI');
+  }, 1400);
+};
+
+/* ======================================================== 通知 / AI 面板 / 全局 */
+const pop = $('#pop'), bell = $('#bell');
+bell.onclick = e => { e.stopPropagation(); const on = pop.classList.toggle('open'); bell.setAttribute('aria-expanded', on); };
+$('#readAll').onclick = () => { $('#bellBadge').remove(); pop.classList.remove('open'); say('通知已全部已读'); };
+const aiPanel = $('#aiPanel'), aiFab = $('#aiFab');
+aiFab.onclick = e => { e.stopPropagation(); const on = aiPanel.classList.toggle('open'); aiFab.setAttribute('aria-expanded', on); if (on) setTimeout(() => $('#aiInput').focus(), 80); };
+$('#aiClose').onclick = () => aiPanel.classList.remove('open');
+$('#aiAsk').onclick = () => { if ($('#aiInput').value.trim()){ say('演示环境未连接 AI，正式版仅在此刻调用一次'); $('#aiInput').value = ''; } };
+document.addEventListener('click', e => {
+  if (!pop.contains(e.target) && e.target !== bell) pop.classList.remove('open');
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape'){ pop.classList.remove('open'); aiPanel.classList.remove('open'); confirmBox.classList.remove('open'); }
+});
+const quick = () => { goto('today'); setTimeout(() => entry.focus(), 100); };
+$('#quick').onclick = quick; $('#quickM').onclick = quick; $('#owQuick').onclick = quick;
+$('#addAsset').onclick = () => say('演示环境：登记入口在控制中心');
+</script>
+</body>
+</html>

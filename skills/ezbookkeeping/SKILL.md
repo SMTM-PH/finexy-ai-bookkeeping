@@ -1,65 +1,56 @@
 ---
 name: ezbookkeeping
-description: Use ezBookkeeping API Tools script to record new transactions, query transactions, retrieve account information, retrieve categories, retrieve tags, and retrieve exchange rate data in the self hosted personal finance application ezBookkeeping.
+description: Manage the self-hosted ezBookkeeping personal finance app through its MCP server or bundled API CLI. Use when Codex or another agent needs to record income, expenses, or transfers; inspect balances, accounts, categories, tags, or transactions; reconcile a natural-language bookkeeping request; or analyze personal spending. Prefer MCP tools when available and use the scripts only as a fallback.
 ---
 
-# ezBookkeeping API Tools
+# ezBookkeeping
 
-## Usage
+Use the authenticated MCP server first. Its tools are the safest and most portable path across Codex, ChatGPT desktop, IDE agents, and other MCP clients.
 
-### List all supported commands
+## Workflow
 
-Linux / macOS
+1. Discover tools from the configured `ezbookkeeping` MCP server. Tool names may be namespaced; match these suffixes:
+   - `query_all_accounts` / `query_all_accounts_balance`
+   - `query_all_transaction_categories`
+   - `query_all_transaction_tags`
+   - `query_transactions`
+   - `add_transaction`
+2. Before adding a transaction, query accounts and categories. Never invent an account or secondary category name.
+3. Convert amounts to positive decimal strings such as `16.00`. Express time in RFC 3339 with the user's timezone, for example `2026-08-11T12:30:00+08:00`.
+4. Use `dry_run: true` first when account/category matching or intent is uncertain. Only perform the write when the request clearly authorizes it or after the user confirms the preview.
+5. For analysis, query the smallest relevant time range and summarize the returned data. Do not mutate records during analysis.
+6. Never send bookkeeping text to DeepSeek or another model through the app merely to interpret a request. Parse the user's instruction directly and call the deterministic MCP tools.
+
+## Safety
+
+- Treat balances, transactions, account names, and tokens as private financial data.
+- Never print or persist the MCP token in chat, logs, reports, or repository files.
+- Treat `add_transaction` as a write. Use its `dry_run` mode for previews.
+- If multiple accounts or categories plausibly match, ask one focused question instead of guessing.
+- For transfers, provide both source and destination accounts and amounts.
+
+## CLI fallback
+
+Use the bundled CLI only when MCP tools are unavailable. Read [references/mcp-setup.md](references/mcp-setup.md) when configuring a client or troubleshooting authentication.
+
+List commands:
 
 ```bash
 sh scripts/ebktools.sh list
 ```
 
-Windows
-
 ```powershell
 scripts\ebktools.ps1 list
 ```
 
-### Show help for a specific command
-
-Linux / macOS
-
-```bash
-sh scripts/ebktools.sh help <command>
-```
-
-Windows
-
-```powershell
-scripts\ebktools.ps1 help <command>
-```
-
-### Call API
-
-Linux / macOS
+Call a command:
 
 ```bash
 sh scripts/ebktools.sh [global-options] <command> [command-options]
 ```
 
-Windows
-
 ```powershell
 scripts\ebktools.ps1 [global-options] <command> [command-options]
 ```
 
-## Troubleshooting
-
-If the script reports that the environment variable `EBKTOOL_SERVER_BASEURL` or `EBKTOOL_TOKEN` is not set, user can define them as system environment variables, or create a `.env` file in the user home directory that contains these two variables and place it there.
-
-The meanings of these environment variables are as follows:
-
-| Variable | Required | Description |
-| --- | --- | --- |
-| `EBKTOOL_SERVER_BASEURL` | Required | ezBookkeeping server base URL (e.g., `http://localhost:8080`) |
-| `EBKTOOL_TOKEN` | Required | ezBookkeeping API token |
-
-## Reference
-
-ezBookkeeping: [https://ezbookkeeping.mayswind.net](https://ezbookkeeping.mayswind.net)
+The fallback requires `EBKTOOL_SERVER_BASEURL` and `EBKTOOL_TOKEN` in the environment or the user's home `.env` file. Run `help <command>` before an unfamiliar write command.

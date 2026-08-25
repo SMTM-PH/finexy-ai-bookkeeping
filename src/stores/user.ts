@@ -11,6 +11,7 @@ import type { ApplicationCloudSetting } from '@/core/setting.ts';
 import {
     type UserBasicInfo,
     type UserProfileResponse,
+    type UserProfileUpdateRequest,
     type UserProfileUpdateResponse,
     User,
     EMPTY_USER_BASIC_INFO
@@ -215,6 +216,32 @@ export const useUserStore = defineStore('user', () => {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to update editable transaction range' });
+                } else {
+                    reject(error);
+                }
+            });
+        });
+    }
+
+    function updateUserProfile(request: UserProfileUpdateRequest): Promise<UserProfileUpdateResponse> {
+        return new Promise((resolve, reject) => {
+            services.updateProfile(request).then(response => {
+                const data = response.data;
+
+                if (!data || !data.success || !data.result || !data.result.user || !isObject(data.result.user)) {
+                    reject({ message: 'Unable to update user profile' });
+                    return;
+                }
+
+                storeUserBasicInfo(data.result.user);
+                resolve(data.result);
+            }).catch(error => {
+                logger.error('failed to save user profile', error);
+
+                if (error.response && error.response.data && error.response.data.errorMessage) {
+                    reject({ error: error.response.data });
+                } else if (!error.processed) {
+                    reject({ message: 'Unable to update user profile' });
                 } else {
                     reject(error);
                 }
@@ -471,6 +498,7 @@ export const useUserStore = defineStore('user', () => {
         storeUserBasicInfo,
         resetUserBasicInfo,
         getCurrentUserProfile,
+        updateUserProfile,
         updateUserTransactionEditScope,
         updateUserAvatar,
         removeUserAvatar,

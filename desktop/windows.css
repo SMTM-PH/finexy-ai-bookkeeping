@@ -1,0 +1,83 @@
+/* Windows desktop layout layer. It is injected by Electron only, so the web
+   and mobile layouts keep their existing presentation. */
+html,
+body,
+#app,
+.v-application {
+    width: 100% !important;
+    min-width: 100% !important;
+    min-height: 100% !important;
+    margin: 0 !important;
+    background: #fff !important;
+}
+
+body {
+    overflow: hidden !important;
+}
+
+.workspace,
+.finance-home {
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    min-width: 1160px !important;
+    min-height: 100% !important;
+    padding: 0 !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    background: #fff !important;
+    scrollbar-color: #b9c0ca transparent;
+    scrollbar-width: thin;
+}
+
+.workspace > .shell,
+.finance-home > .app {
+    width: 100% !important;
+    min-height: 100vh !important;
+    margin: 0 !important;
+    padding: 14px 24px 28px !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: #fff !important;
+    box-shadow: none !important;
+}
+
+.workspace::-webkit-scrollbar,
+.finance-home::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+.workspace::-webkit-scrollbar-track,
+.finance-home::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.workspace::-webkit-scrollbar-thumb,
+.finance-home::-webkit-scrollbar-thumb {
+    min-height: 48px;
+    border: 2px solid #fff;
+    border-radius: 999px;
+    background: #b9c0ca;
+}
+
+.workspace::-webkit-scrollbar-thumb:hover,
+.finance-home::-webkit-scrollbar-thumb:hover {
+    background: #9199a5;
+}
+
+.workspace::-webkit-scrollbar-button,
+.workspace::-webkit-scrollbar-corner,
+.finance-home::-webkit-scrollbar-button,
+.finance-home::-webkit-scrollbar-corner {
+    display: none;
+    width: 0;
+    height: 0;
+}
+
+@media (max-width: 1440px) {
+    .workspace > .shell,
+    .finance-home > .app {
+        padding-inline: 18px !important;
+    }
+}

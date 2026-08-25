@@ -183,7 +183,8 @@ const (
 	defaultAIRecognitionPictureMaxSize                 uint32 = 10485760 // 10MB
 	defaultAnthropicLargeLanguageModelAPIMaximumTokens uint32 = 1024
 	defaultAnthropicLargeLanguageModelThinkingBudget   uint32 = 1024
-	defaultLargeLanguageModelAPIRequestTimeout         uint32 = 60000 // 60 seconds
+	defaultLargeLanguageModelAPIRequestTimeout         uint32 = 60000  // 60 seconds
+	defaultLocalOCRRequestTimeout                      uint32 = 120000 // 120 seconds
 
 	defaultInMemoryDuplicateCheckerCleanupInterval uint32 = 60  // 1 minutes
 	defaultDuplicateSubmissionsInterval            uint32 = 300 // 5 minutes
@@ -204,7 +205,8 @@ const (
 	defaultTransactionPictureFileMaxSize uint32 = 10485760 // 10MB
 	defaultUserAvatarFileMaxSize         uint32 = 1048576  // 1MB
 
-	defaultImportFileMaxSize uint32 = 10485760 // 10MB
+	defaultImportFileMaxSize     uint32 = 10485760  // 10MB
+	defaultFullBackupFileMaxSize uint32 = 536870912 // 512MB
 
 	defaultExchangeRatesDataRequestTimeout uint32 = 10000 // 10 seconds
 )
@@ -367,6 +369,10 @@ type Config struct {
 	// Large Language Model for Receipt Image Recognition
 	ReceiptImageRecognitionLLMConfig *LLMConfig
 
+	// Local OCR service. Uploaded images are forwarded in memory and are never persisted.
+	LocalOCRServerURL      string
+	LocalOCRRequestTimeout uint32
+
 	// Uuid
 	UuidGeneratorType string
 	UuidServerId      uint8
@@ -437,9 +443,10 @@ type Config struct {
 	DefaultFeatureRestrictions    core.UserFeatureRestrictions
 
 	// Data
-	EnableDataExport  bool
-	EnableDataImport  bool
-	MaxImportFileSize uint32
+	EnableDataExport      bool
+	EnableDataImport      bool
+	MaxImportFileSize     uint32
+	MaxFullBackupFileSize uint32
 
 	// Tip
 	LoginPageTips MultiLanguageContentConfig
@@ -537,6 +544,12 @@ func LoadConfiguration(configFilePath string) (*Config, error) {
 	}
 
 	err = loadLLMGlobalConfiguration(config, cfgFile, "llm")
+
+	if err != nil {
+		return nil, err
+	}
+
+	err = loadLocalOCRConfiguration(config, cfgFile, "ocr")
 
 	if err != nil {
 		return nil, err
@@ -884,6 +897,13 @@ func loadLLMGlobalConfiguration(config *Config, configFile *ini.File, sectionNam
 	return nil
 }
 
+func loadLocalOCRConfiguration(config *Config, configFile *ini.File, sectionName string) error {
+	config.LocalOCRServerURL = strings.TrimRight(getConfigItemStringValue(configFile, sectionName, "server_url"), "/")
+	config.LocalOCRRequestTimeout = getConfigItemUint32Value(configFile, sectionName, "request_timeout", defaultLocalOCRRequestTimeout)
+
+	return nil
+}
+
 func loadLLMConfiguration(configFile *ini.File, sectionName string) (*LLMConfig, error) {
 	llmConfig := &LLMConfig{}
 	llmProvider := getConfigItemStringValue(configFile, sectionName, "llm_provider")
@@ -1166,6 +1186,7 @@ func loadDataConfiguration(config *Config, configFile *ini.File, sectionName str
 	config.EnableDataExport = getConfigItemBoolValue(configFile, sectionName, "enable_export", false)
 	config.EnableDataImport = getConfigItemBoolValue(configFile, sectionName, "enable_import", false)
 	config.MaxImportFileSize = getConfigItemUint32Value(configFile, sectionName, "max_import_file_size", defaultImportFileMaxSize)
+	config.MaxFullBackupFileSize = getConfigItemUint32Value(configFile, sectionName, "max_full_backup_file_size", defaultFullBackupFileMaxSize)
 
 	return nil
 }

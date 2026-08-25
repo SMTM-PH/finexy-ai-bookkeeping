@@ -85,7 +85,13 @@
                                                 <v-icon size="20" start :icon="templateType === TemplateType.Schedule.type ? mdiClockTimeNineOutline : mdiTextBoxOutline"/>
                                             </v-badge>
                                             <v-icon size="20" start :icon="templateType === TemplateType.Schedule.type ? mdiClockTimeNineOutline : mdiTextBoxOutline" v-else-if="!element.hidden"/>
-                                            <span class="transaction-template-name">{{ element.name }}</span>
+                                            <div class="d-flex flex-column">
+                                                <span class="transaction-template-name">{{ element.name }}</span>
+                                                <span class="text-caption text-medium-emphasis" v-if="templateType === TemplateType.Schedule.type">
+                                                    {{ formatScheduledRule(element) }} · 下次：{{ formatNextScheduledTime(element.nextScheduledTime) }} ·
+                                                    {{ formatAmountToLocalizedNumeralsWithCurrency(Math.abs(element.sourceAmount), userStore.currentUserDefaultCurrency) }}
+                                                </span>
+                                            </div>
                                         </div>
 
                                         <v-spacer/>
@@ -157,6 +163,7 @@ import { ref, computed, useTemplateRef } from 'vue';
 import { useI18n } from '@/locales/helpers.ts';
 
 import { useTransactionTemplatesStore } from '@/stores/transactionTemplate.ts';
+import { useUserStore } from '@/stores/user.ts';
 
 import { TemplateType } from '@/core/template.ts';
 import { TransactionTemplate } from '@/models/transaction_template.ts';
@@ -165,6 +172,7 @@ import {
     isNoAvailableTemplate,
     getAvailableTemplateCount
 } from '@/lib/template.ts';
+import { formatNextScheduledTime, formatScheduledRule } from '@/lib/scheduled_transaction.ts';
 
 import {
     mdiRefresh,
@@ -186,9 +194,10 @@ const props = defineProps<{
     initType: number;
 }>();
 
-const { tt } = useI18n();
+const { tt, formatAmountToLocalizedNumeralsWithCurrency } = useI18n();
 
 const transactionTemplatesStore = useTransactionTemplatesStore();
+const userStore = useUserStore();
 
 const confirmDialog = useTemplateRef<ConfirmDialogType>('confirmDialog');
 const snackbar = useTemplateRef<SnackBarType>('snackbar');

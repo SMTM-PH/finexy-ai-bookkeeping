@@ -45,7 +45,7 @@ const f7params = ref<Framework7Parameters>({
     name: 'ezBookkeeping',
     theme: 'ios',
     colors: {
-        primary: '#c67e48'
+        primary: '#6758f3'
     },
     routes: routes,
     darkMode: (() => {
@@ -124,13 +124,13 @@ function setThemeColorMeta(darkMode: boolean | undefined): void {
         if (hasBackdrop.value) {
             document.querySelector('meta[name=theme-color]')?.setAttribute('content', '#0b0b0b');
         } else {
-            document.querySelector('meta[name=theme-color]')?.setAttribute('content', '#121212');
+            document.querySelector('meta[name=theme-color]')?.setAttribute('content', '#070b18');
         }
     } else {
         if (hasBackdrop.value) {
             document.querySelector('meta[name=theme-color]')?.setAttribute('content', '#949495');
         } else {
-            document.querySelector('meta[name=theme-color]')?.setAttribute('content', '#f6f6f8');
+            document.querySelector('meta[name=theme-color]')?.setAttribute('content', '#f3f5fb');
         }
     }
 }

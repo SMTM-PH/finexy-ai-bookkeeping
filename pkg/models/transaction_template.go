@@ -146,6 +146,7 @@ type TransactionTemplateInfoResponse struct {
 	ScheduledStartDate     *string                           `json:"scheduledStartDate" binding:"omitempty"`
 	ScheduledEndDate       *string                           `json:"scheduledEndDate" binding:"omitempty"`
 	ScheduledAt            *int16                            `json:"scheduledAt,omitempty"`
+	NextScheduledTime      *int64                            `json:"nextScheduledTime,omitempty"`
 	DisplayOrder           int32                             `json:"displayOrder"`
 	Hidden                 bool                              `json:"hidden"`
 }
@@ -183,6 +184,7 @@ func (t *TransactionTemplate) ToTransactionTemplateInfoResponse(serverUtcOffset 
 		response.ScheduledFrequencyType = &t.ScheduledFrequencyType
 		response.ScheduledFrequency = &t.ScheduledFrequency
 		response.ScheduledAt = &t.ScheduledAt
+		response.NextScheduledTime = t.NextScheduledUnixTime(time.Now())
 
 		templateTimeZone := time.FixedZone("Template Timezone", int(t.ScheduledTimezoneUtcOffset)*60)
 
@@ -198,6 +200,73 @@ func (t *TransactionTemplate) ToTransactionTemplateInfoResponse(serverUtcOffset 
 	}
 
 	return response
+}
+
+// NextScheduledUnixTime returns the first occurrence after the supplied time.
+func (t *TransactionTemplate) NextScheduledUnixTime(after time.Time) *int64 {
+	if t.TemplateType != TRANSACTION_TEMPLATE_TYPE_SCHEDULE ||
+		t.ScheduledFrequencyType == TRANSACTION_SCHEDULE_FREQUENCY_TYPE_DISABLED || t.ScheduledFrequency == "" {
+		return nil
+	}
+	frequencyValues, err := utils.StringArrayToInt64Array(strings.Split(t.ScheduledFrequency, ","))
+	if err != nil || len(frequencyValues) < 1 {
+		return nil
+	}
+	frequencySet := utils.ToSet(frequencyValues)
+	location := time.FixedZone("Template Timezone", int(t.ScheduledTimezoneUtcOffset)*60)
+	localAfter := after.In(location)
+	localMinute := (int(t.ScheduledAt) + int(t.ScheduledTimezoneUtcOffset)) % (24 * 60)
+	if localMinute < 0 {
+		localMinute += 24 * 60
+	}
+	firstDay := time.Date(localAfter.Year(), localAfter.Month(), localAfter.Day(), 0, 0, 0, 0, location)
+
+	for dayOffset := 0; dayOffset <= 3660; dayOffset++ {
+		day := firstDay.AddDate(0, 0, dayOffset)
+		candidate := day.Add(time.Duration(localMinute) * time.Minute)
+		if !candidate.After(after) {
+			continue
+		}
+		candidateUnix := candidate.Unix()
+		if t.ScheduledStartTime != nil && candidateUnix < *t.ScheduledStartTime {
+			continue
+		}
+		if t.ScheduledEndTime != nil && candidateUnix > *t.ScheduledEndTime {
+			return nil
+		}
+		matches := false
+		switch t.ScheduledFrequencyType {
+		case TRANSACTION_SCHEDULE_FREQUENCY_TYPE_DAILY:
+			matches = true
+		case TRANSACTION_SCHEDULE_FREQUENCY_TYPE_WEEKLY:
+			matches = frequencySet[int64(candidate.Weekday())]
+		case TRANSACTION_SCHEDULE_FREQUENCY_TYPE_MONTHLY:
+			maxDay := time.Date(candidate.Year(), candidate.Month()+1, 0, 0, 0, 0, 0, location).Day()
+			for _, value := range frequencyValues {
+				monthDay := int(value)
+				if monthDay < 0 {
+					monthDay = maxDay + monthDay + 1
+				}
+				if candidate.Day() == monthDay {
+					matches = true
+					break
+				}
+			}
+		case TRANSACTION_SCHEDULE_FREQUENCY_TYPE_YEARLY:
+			matches = frequencySet[int64(candidate.Month())*100+int64(candidate.Day())]
+		case TRANSACTION_SCHEDULE_FREQUENCY_TYPE_EVERY_N_DAYS:
+			if t.ScheduledStartTime != nil && len(frequencyValues) == 1 && frequencyValues[0] > 0 {
+				start := time.Unix(*t.ScheduledStartTime, 0).In(location)
+				startDay := time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, location)
+				days := int64(day.Sub(startDay) / (24 * time.Hour))
+				matches = days >= 0 && days%frequencyValues[0] == 0
+			}
+		}
+		if matches {
+			return &candidateUnix
+		}
+	}
+	return nil
 }
 
 func (t *TransactionTemplate) toTransactionInfoResponse(utcOffset int16) *TransactionInfoResponse {

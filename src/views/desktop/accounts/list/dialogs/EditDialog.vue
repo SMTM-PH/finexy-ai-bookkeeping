@@ -1,5 +1,5 @@
 <template>
-    <v-dialog :width="account.type === AccountType.MultiSubAccounts.type ? 1000 : 800" :persistent="isAccountModified" v-model="showState">
+    <v-dialog class="finexy-dialog finexy-dialog--account" :width="account.type === AccountType.MultiSubAccounts.type ? 1000 : 800" :persistent="isAccountModified" v-model="showState">
         <v-card class="pa-sm-1 pa-md-2">
             <template #title>
                 <div class="d-flex align-center justify-center">
@@ -44,6 +44,19 @@
                     <v-window-item value="account">
                         <v-form class="mt-2">
                             <v-row>
+                                <v-col cols="12" v-if="!editAccountId && currentAccountIndex < 0">
+                                    <div class="text-body-2 font-weight-medium mb-2">
+                                        <v-icon class="me-1" size="18" :icon="mdiLightningBoltOutline"/>
+                                        常用账户预设
+                                    </div>
+                                    <div class="d-flex flex-wrap ga-2" role="group" aria-label="常用账户预设">
+                                        <v-chip v-for="preset in accountPresets" :key="preset.name" variant="outlined"
+                                                :disabled="loading || submitting" @click="applyAccountPreset(preset)">
+                                            {{ preset.name }}
+                                        </v-chip>
+                                    </div>
+                                    <div class="text-caption text-medium-emphasis mt-2">选择后仍可修改账户类别、名称和当前余额。</div>
+                                </v-col>
                                 <v-col cols="12" md="12" v-if="account.type === AccountType.SingleAccount.type || currentAccountIndex < 0">
                                     <v-select
                                         item-title="displayName"
@@ -217,7 +230,7 @@ import { useUserStore } from '@/stores/user.ts';
 import { useAccountsStore } from '@/stores/account.ts';
 
 import { itemAndIndex } from '@/core/base.ts';
-import { AccountType } from '@/core/account.ts';
+import { AccountType, AccountCategory } from '@/core/account.ts';
 import { ALL_ACCOUNT_ICONS } from '@/consts/icon.ts';
 import { ALL_ACCOUNT_COLORS } from '@/consts/color.ts';
 import { Account } from '@/models/account.ts';
@@ -229,8 +242,14 @@ import { generateRandomUUID } from '@/lib/misc.ts';
 import {
     mdiDotsVertical,
     mdiCreditCardPlusOutline,
-    mdiDeleteOutline
+    mdiDeleteOutline,
+    mdiLightningBoltOutline
 } from '@mdi/js';
+
+interface AccountPreset {
+    name: string;
+    category: AccountCategory;
+}
 
 interface AccountEditResponse {
     message: string;
@@ -294,6 +313,23 @@ const accountAmountTitle = computed<string>(() => {
         return account.value.isLiability ? tt('Sub-account Outstanding Balance') : tt('Sub-account Balance');
     }
 });
+
+const accountPresets: AccountPreset[] = [
+    { name: '微信零钱', category: AccountCategory.VirtualAccount },
+    { name: '支付宝余额', category: AccountCategory.VirtualAccount },
+    { name: '花呗', category: AccountCategory.DebtAccount },
+    { name: '京东白条', category: AccountCategory.DebtAccount },
+    { name: '储蓄卡', category: AccountCategory.SavingsAccount },
+    { name: '信用卡', category: AccountCategory.CreditCard },
+    { name: '现金', category: AccountCategory.Cash }
+];
+
+function applyAccountPreset(preset: AccountPreset): void {
+    account.value.name = preset.name;
+    account.value.category = preset.category.type;
+    account.value.type = AccountType.SingleAccount.type;
+    account.value.icon = preset.category.defaultAccountIconId;
+}
 
 const isAccountModified = computed<boolean>(() => {
     if (!editAccountId.value) {

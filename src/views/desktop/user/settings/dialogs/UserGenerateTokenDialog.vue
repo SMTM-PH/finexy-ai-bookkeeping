@@ -102,6 +102,12 @@
 
             <v-card-text class="flex-grow-1 overflow-y-auto" :style="codeContainerStyle" v-if="generatedToken">
                 <div class="w-100 h-100 code-container">
+                    <v-btn-toggle class="mb-3" color="primary" density="compact" mandatory
+                                  v-model="mcpConfigurationType"
+                                  v-if="tokenType === 'mcp' && showMCPConfiguration && serverUrl">
+                        <v-btn value="codex">Codex TOML</v-btn>
+                        <v-btn value="generic">通用 JSON</v-btn>
+                    </v-btn-toggle>
                     <v-textarea class="w-100 h-100 always-cursor-text" :readonly="true"
                                 :value="generatedToken" v-if="(tokenType === 'api' && (!showAPIExample || !serverUrl)) || (tokenType === 'mcp' && (!showMCPConfiguration || !serverUrl))" />
                     <v-textarea class="w-100 h-100 always-cursor-text" :readonly="true"
@@ -163,6 +169,7 @@ const currentPassword = ref<string>('');
 const generating = ref<boolean>(false);
 const showAPIExample = ref<boolean>(false);
 const showMCPConfiguration = ref<boolean>(false);
+const mcpConfigurationType = ref<'codex' | 'generic'>('codex');
 const serverUrl = ref<string>('');
 const generatedToken = ref<string>('');
 
@@ -181,6 +188,14 @@ const apiExample = computed<string>(() => {
 });
 
 const mcpServerConfiguration = computed<string>(() => {
+    if (mcpConfigurationType.value === 'codex') {
+        return '[mcp_servers.ezbookkeeping]\n' +
+            'url = "' + serverUrl.value + '"\n' +
+            'http_headers = { Authorization = "Bearer ' + generatedToken.value + '" }\n' +
+            'default_tools_approval_mode = "writes"\n' +
+            'tool_timeout_sec = 60';
+    }
+
     return '{\n' +
         '    "mcpServers": {\n' +
         '        "ezbookkeeping-mcp": {\n' +
@@ -203,6 +218,7 @@ function open(): Promise<void> {
     generating.value = false;
     showAPIExample.value = false;
     showMCPConfiguration.value = false;
+    mcpConfigurationType.value = 'codex';
     serverUrl.value = '';
     generatedToken.value = '';
 

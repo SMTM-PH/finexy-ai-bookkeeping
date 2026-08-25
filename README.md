@@ -1,4 +1,109 @@
-# ezBookkeeping
+# Finexy AI Bookkeeping
+
+[![GitHub](https://img.shields.io/badge/GitHub-Public-2ea44f?logo=github)](https://github.com/SMTM-PH/finexy-ai-bookkeeping)
+[![Docker Image](https://img.shields.io/badge/Docker%20Hub-ph97%2Ffinexy--bookkeeping-2496ed?logo=docker)](https://hub.docker.com/r/ph97/finexy-bookkeeping)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-AMD64-blue)](#部署要求)
+
+Finexy 是基于 [ezBookkeeping](https://github.com/mayswind/ezbookkeeping) 二次开发的自托管 AI 个人财务管理应用。本仓库增加了 Finexy 桌面工作台、AI 报告与复核、月度预算、资产清单、本地 OCR、完整备份恢复、Windows 桌面客户端，以及 Docker/NAS 部署支持。
+
+> 本项目为公开源码仓库，任何人均可查看和克隆。当前发布到 Docker Hub 的镜像仅支持 `linux/amd64`，不适用于 ARM64 NAS。
+
+## 主要功能
+
+- 日常收入、支出、转账、账户、分类、标签及周期交易管理
+- AI 文本记账、AI 财务报告和待复核项目
+- 本地 OCR 服务，可识别中文票据并交给大模型结构化
+- 月度预算、资产清单、统计图表及桌面财务工作台
+- SQLite 数据持久化及完整备份/恢复
+- MCP 接口，可连接 Codex 等支持 MCP 的客户端
+- Web、PWA 和 Windows 桌面客户端
+- Docker Compose、群晖、威联通及其他 AMD64 NAS 部署
+
+## 部署要求
+
+| 项目 | 要求 |
+| --- | --- |
+| Docker 镜像架构 | AMD64 / x86_64 |
+| NAS 内存 | 建议 8 GB 或以上；启用 OCR 时至少预留约 5 GB |
+| Docker | Docker Engine 与 Docker Compose |
+| 访问端口 | 默认 `8080` |
+| AI 服务 | 可选 DeepSeek API Key |
+
+## Docker 镜像
+
+公开镜像无需登录 Docker Hub，可直接下载：
+
+| 服务 | 镜像 |
+| --- | --- |
+| Finexy 主服务 | `ph97/finexy-bookkeeping:1.6.1-amd64` |
+| 本地 OCR 服务 | `ph97/finexy-bookkeeping:ocr-1.0-amd64` |
+
+```bash
+docker pull ph97/finexy-bookkeeping:1.6.1-amd64
+docker pull ph97/finexy-bookkeeping:ocr-1.0-amd64
+```
+
+完整的环境变量、Compose 文件、数据目录、健康检查和群晖操作步骤请阅读：
+
+- [NAS 公开镜像部署指南](docs/NAS_PUBLIC_IMAGE_DEPLOYMENT.md)
+- [NAS 通用部署说明](docs/NAS_DEPLOYMENT.md)
+- [DeepSeek 配置说明](docs/DEEPSEEK_CONFIG.md)
+
+## 从源码运行
+
+复制环境变量示例并填写随机应用密钥。真实密钥不得提交到 Git：
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+```
+
+启动后访问：
+
+```text
+http://你的服务器IP:8080/
+```
+
+查看服务状态与日志：
+
+```bash
+docker compose ps
+docker compose logs -f bookkeeping ocr
+```
+
+## Windows 桌面客户端
+
+安装 Node.js 后可在 Windows PowerShell 中构建：
+
+```powershell
+npm install
+npm run desktop:build
+```
+
+桌面客户端连接到已经部署的 Finexy 服务；相关 Electron 文件位于 `desktop/`。
+
+## 数据与安全
+
+- 首次部署必须为 `APP_SECRET_KEY` 设置长期保存的随机值，例如运行 `openssl rand -hex 32`。
+- 不要把 `.env`、DeepSeek API Key、数据库文件、日志或备份上传到公开仓库。
+- 建议定期备份 `data/`、`storage/` 和应用生成的完整备份文件。
+- 公网访问时应使用 HTTPS 反向代理，并限制管理端口的访问范围。
+
+## 项目文档
+
+- [AI 记账 MVP 说明](docs/AI_BOOKKEEPING_MVP.md)
+- [产品设计系统](design-system/ai-bookkeeping/MASTER.md)
+- [ezBookkeeping Agent Skill](skills/ezbookkeeping/SKILL.md)
+- [MCP 配置说明](skills/ezbookkeeping/references/mcp-setup.md)
+
+## 开源说明
+
+Finexy 基于 ezBookkeeping 开发并继续采用 [MIT License](LICENSE)。原项目版权及许可证声明予以保留。下方为上游项目的原始介绍和使用文档。
+
+---
+
+# ezBookkeeping（上游项目说明）
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/mayswind/ezbookkeeping/blob/master/LICENSE)
 [![Latest Release](https://img.shields.io/github/release/mayswind/ezbookkeeping.svg?style=flat)](https://github.com/mayswind/ezbookkeeping/releases)
 [![Latest Build](https://img.shields.io/github/actions/workflow/status/mayswind/ezbookkeeping/build-snapshot.yml?branch=main)](https://github.com/mayswind/ezbookkeeping/actions)

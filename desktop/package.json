@@ -1,0 +1,41 @@
+{
+  "name": "finexy-desktop",
+  "version": "1.6.1",
+  "description": "Finexy personal finance desktop client for Windows",
+  "main": "main.cjs",
+  "author": "Finexy",
+  "license": "MIT",
+  "build": {
+    "appId": "com.finexy.desktop",
+    "productName": "Finexy",
+    "electronVersion": "43.4.1",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "offline.html",
+      "windows.css",
+      "package.json"
+    ],
+    "win": {
+      "icon": "icon.png",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "artifactName": "Finexy-Windows-${version}-${arch}-Setup.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Finexy"
+    },
+    "portable": {
+      "artifactName": "Finexy-Windows-${version}-${arch}-Portable.${ext}"
+    }
+  }
+}

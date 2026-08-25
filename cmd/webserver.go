@@ -378,6 +378,11 @@ func startWebServer(c *core.CliContext) error {
 			if config.EnableDataExport {
 				apiV1Route.GET("/data/export.csv", bindCsv(api.DataManagements.ExportDataToEzbookkeepingCSVHandler, config))
 				apiV1Route.GET("/data/export.tsv", bindTsv(api.DataManagements.ExportDataToEzbookkeepingTSVHandler, config))
+				apiV1Route.GET("/data/full-backup.zip", bindZip(api.DataManagements.DownloadFullBackupHandler, config))
+			}
+
+			if config.EnableDataImport {
+				apiV1Route.POST("/data/full-backup/restore.json", bindApi(api.DataManagements.RestoreFullBackupHandler, config))
 			}
 
 			// Accounts
@@ -472,6 +477,28 @@ func startWebServer(c *core.CliContext) error {
 			apiV1Route.POST("/insights/explorers/move.json", bindApi(api.InsightsExplorers.InsightsExplorerMoveHandler, config))
 			apiV1Route.POST("/insights/explorers/delete.json", bindApi(api.InsightsExplorers.InsightsExplorerDeleteHandler, config))
 
+			// Product Assets
+			apiV1Route.GET("/product/assets/list.json", bindApi(api.ProductAssets.ProductAssetListHandler, config))
+			apiV1Route.GET("/product/assets/get.json", bindApi(api.ProductAssets.ProductAssetGetHandler, config))
+			apiV1Route.POST("/product/assets/add.json", bindApi(api.ProductAssets.ProductAssetCreateHandler, config))
+			apiV1Route.POST("/product/assets/modify.json", bindApi(api.ProductAssets.ProductAssetModifyHandler, config))
+			apiV1Route.POST("/product/assets/sell.json", bindApi(api.ProductAssets.ProductAssetSellHandler, config))
+			apiV1Route.POST("/product/assets/delete.json", bindApi(api.ProductAssets.ProductAssetDeleteHandler, config))
+
+			// Monthly Budget
+			apiV1Route.GET("/budget/monthly/get.json", bindApi(api.MonthlyBudgets.MonthlyBudgetGetHandler, config))
+			apiV1Route.POST("/budget/monthly/set.json", bindApi(api.MonthlyBudgets.MonthlyBudgetSetHandler, config))
+			apiV1Route.POST("/budget/monthly/delete.json", bindApi(api.MonthlyBudgets.MonthlyBudgetDeleteHandler, config))
+
+			// AI review queue
+			apiV1Route.GET("/ai/review/list.json", bindApi(api.AIReviewItems.ListHandler, config))
+			apiV1Route.POST("/ai/review/create.json", bindApi(api.AIReviewItems.CreateHandler, config))
+	apiV1Route.POST("/ai/review/resolve.json", bindApi(api.AIReviewItems.ResolveHandler, config))
+	apiV1Route.POST("/ai/review/dismiss.json", bindApi(api.AIReviewItems.DismissHandler, config))
+	apiV1Route.POST("/ai/review/delete.json", bindApi(api.AIReviewItems.DeleteHandler, config))
+			apiV1Route.GET("/ai/reports/list.json", bindApi(api.AIReports.ListHandler, config))
+			apiV1Route.POST("/ai/reports/generate.json", bindApi(api.AIReports.GenerateHandler, config))
+
 			// Large Language Models
 			if config.TextRecognitionLLMConfig != nil && config.TextRecognitionLLMConfig.LLMProvider != "" {
 				if config.TransactionFromAITextRecognition {
@@ -483,6 +510,11 @@ func startWebServer(c *core.CliContext) error {
 				if config.TransactionFromAIImageRecognition {
 					apiV1Route.POST("/llm/transactions/recognize_receipt_image.json", bindApi(api.LargeLanguageModels.RecognizeReceiptImageHandler, config))
 				}
+			}
+
+			if config.LocalOCRServerURL != "" && config.TransactionFromAITextRecognition &&
+				config.TextRecognitionLLMConfig != nil && config.TextRecognitionLLMConfig.LLMProvider != "" {
+				apiV1Route.POST("/ocr/recognize.json", bindApi(api.LocalOCR.RecognizeHandler, config))
 			}
 
 			// Exchange Rates
@@ -658,6 +690,18 @@ func bindTsv(fn core.DataHandlerFunc, config *settings.Config) gin.HandlerFunc {
 			utils.PrintDataErrorResult(c, "text/text", err)
 		} else {
 			utils.PrintDataSuccessResult(c, "text/tab-separated-values; charset=utf-8", fileName, result)
+		}
+	}
+}
+
+func bindZip(fn core.DataHandlerFunc, config *settings.Config) gin.HandlerFunc {
+	return func(ginCtx *gin.Context) {
+		c := core.WrapWebContext(ginCtx, config.TrustedProxyIPs)
+		result, fileName, err := fn(c)
+		if err != nil {
+			utils.PrintDataErrorResult(c, "text/text", err)
+		} else {
+			utils.PrintDataSuccessResult(c, "application/zip", fileName, result)
 		}
 	}
 }

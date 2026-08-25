@@ -4,6 +4,51 @@
             <f7-nav-title :title="tt('global.app.title')"></f7-nav-title>
         </f7-navbar>
 
+        <section v-if="!loading && !mobileWalletAccounts.length" class="mobile-onboarding" aria-labelledby="mobile-onboarding-title">
+            <div class="mobile-onboarding-icon"><f7-icon f7="wallet_pass"></f7-icon></div>
+            <div class="mobile-onboarding-copy">
+                <small>开始使用 · 0 / 1</small>
+                <strong id="mobile-onboarding-title">先添加一个账户</strong>
+                <span>填写当前余额后，才能准确记录支出与资金流转。</span>
+            </div>
+            <f7-link href="/account/add" class="mobile-onboarding-action" aria-label="添加首个账户">
+                添加
+            </f7-link>
+        </section>
+
+        <section class="mobile-wallet" aria-labelledby="mobile-wallet-title">
+            <div class="mobile-section-heading">
+                <div>
+                    <small>DIGITAL WALLET</small>
+                    <strong id="mobile-wallet-title">我的钱包</strong>
+                </div>
+                <f7-link href="/account/list">管理</f7-link>
+            </div>
+            <div v-if="loading" class="mobile-wallet-skeleton skeleton-text" aria-label="正在加载账户">
+                <span></span><span></span>
+            </div>
+            <div v-else-if="mobileWalletAccounts.length" class="mobile-wallet-stack">
+                <f7-link v-for="account in mobileWalletAccounts" :key="account.id" href="/account/list"
+                         class="mobile-wallet-card" :class="mobileWalletCardClass(account.category)"
+                         :aria-label="`查看账户 ${account.name}`">
+                    <span class="mobile-wallet-card-top">
+                        <small>{{ mobileWalletCategoryLabel(account.category) }}</small>
+                        <f7-icon :f7="account.isLiability ? 'creditcard' : 'wave_3_right'"></f7-icon>
+                    </span>
+                    <span class="mobile-wallet-chip" aria-hidden="true"></span>
+                    <span class="mobile-wallet-card-bottom">
+                        <span><small>{{ account.isLiability ? '待还金额' : '可用余额' }}</small><strong>{{ formatMobileWalletBalance(account.balance, account.currency) }}</strong></span>
+                        <b>{{ account.name }}</b>
+                    </span>
+                </f7-link>
+            </div>
+            <f7-link v-else href="/account/add" class="mobile-wallet-empty">
+                <f7-icon f7="plus"></f7-icon>
+                <span><strong>添加账户卡</strong><small>微信零钱、银行卡、信用卡或现金</small></span>
+                <f7-icon f7="chevron_right"></f7-icon>
+            </f7-link>
+        </section>
+
         <f7-card class="home-summary-card no-margin-top" :class="{ 'skeleton-text': loading }">
             <f7-card-header class="display-block" style="padding-top: 120px;">
                 <p class="no-margin">
@@ -239,7 +284,9 @@ import { useTransactionTemplatesStore } from '@/stores/transactionTemplate.ts';
 import { useOverviewStore } from '@/stores/overview.ts';
 
 import { DateRange } from '@/core/datetime.ts';
+import { AccountCategory } from '@/core/account.ts';
 import { TemplateType } from '@/core/template.ts';
+import type { Account } from '@/models/account.ts';
 import { TransactionTemplate } from '@/models/transaction_template.ts';
 
 import { isFunction } from '@/lib/common.ts';
@@ -257,7 +304,7 @@ const props = defineProps<{
     f7router: Router.Router;
 }>();
 
-const { tt } = useI18n();
+const { tt, formatAmountToLocalizedNumeralsWithCurrency } = useI18n();
 const { showToast } = useI18nUIComponents();
 
 const {
@@ -279,11 +326,33 @@ const aiImageRecognitionSheet = useTemplateRef<AIImageRecognitionSheetType>('aiI
 const loading = ref<boolean>(true);
 const showTransactionTemplatePopover = ref<boolean>(false);
 const showAIReceiptImageRecognitionSheet = ref<boolean>(false);
+const mobileWalletAccounts = computed<Account[]>(() => accountsStore.allVisiblePlainAccounts.slice(0, 4));
 
 const allTransactionTemplates = computed<TransactionTemplate[]>(() => {
     const allTemplates = transactionTemplatesStore.allVisibleTemplates;
     return allTemplates[TemplateType.Normal.type] || [];
 });
+
+function formatMobileWalletBalance(balance: number, currency: string): string {
+    return formatAmountToLocalizedNumeralsWithCurrency(balance, currency);
+}
+
+function mobileWalletCardClass(category: number): string {
+    if (category === AccountCategory.CreditCard.type || category === AccountCategory.DebtAccount.type) return 'mobile-wallet-card-coral';
+    if (category === AccountCategory.VirtualAccount.type) return 'mobile-wallet-card-cyan';
+    if (category === AccountCategory.Cash.type) return 'mobile-wallet-card-amber';
+    if (category === AccountCategory.InvestmentAccount.type) return 'mobile-wallet-card-ink';
+    return 'mobile-wallet-card-violet';
+}
+
+function mobileWalletCategoryLabel(category: number): string {
+    if (category === AccountCategory.Cash.type) return '现金';
+    if (category === AccountCategory.CreditCard.type) return '信用账户';
+    if (category === AccountCategory.VirtualAccount.type) return '数字余额';
+    if (category === AccountCategory.DebtAccount.type) return '负债账户';
+    if (category === AccountCategory.InvestmentAccount.type) return '投资账户';
+    return '储蓄账户';
+}
 
 function openTransactionTemplatePopover(): void {
     if (isTransactionFromAIImageRecognitionEnabled() || (allTransactionTemplates.value && allTransactionTemplates.value.length)) {
@@ -426,8 +495,89 @@ init();
 </script>
 
 <style>
+.mobile-onboarding {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    margin: 16px;
+    padding: 14px;
+    border: 1px solid color-mix(in srgb, var(--f7-theme-color) 24%, transparent);
+    border-radius: 18px;
+    background: color-mix(in srgb, var(--f7-theme-color) 8%, var(--f7-card-bg-color));
+}
+.mobile-onboarding-icon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 14px; color: var(--f7-theme-color); background: color-mix(in srgb, var(--f7-theme-color) 14%, transparent); }
+.mobile-onboarding-copy { display: grid; gap: 2px; min-width: 0; }
+.mobile-onboarding-copy small { color: var(--f7-theme-color); font-size: 10px; font-weight: 750; letter-spacing: .08em; }
+.mobile-onboarding-copy strong { font-size: 15px; }
+.mobile-onboarding-copy span { color: var(--f7-text-color-secondary); font-size: 12px; line-height: 1.4; }
+.mobile-onboarding-action { min-width: 52px; min-height: 44px; justify-content: center; font-weight: 700; touch-action: manipulation; }
+
+.mobile-wallet { margin: 20px 16px 24px; }
+.mobile-section-heading { display: flex; align-items: end; justify-content: space-between; margin-bottom: 12px; }
+.mobile-section-heading > div { display: grid; gap: 3px; }
+.mobile-section-heading small { color: var(--f7-theme-color); font: 750 10px/1 ui-monospace, monospace; letter-spacing: .14em; }
+.mobile-section-heading strong { font-size: 22px; line-height: 1.2; }
+.mobile-section-heading > a { min-width: 52px; min-height: 44px; justify-content: flex-end; touch-action: manipulation; }
+.mobile-wallet-stack { display: grid; }
+.mobile-wallet-card {
+    position: relative;
+    display: grid;
+    min-height: 164px;
+    padding: 16px;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,.24);
+    border-radius: 20px;
+    color: #fff;
+    box-shadow: 0 14px 28px rgba(13, 20, 48, .18);
+    touch-action: manipulation;
+    transition: transform 180ms ease, filter 180ms ease;
+}
+.mobile-wallet-card + .mobile-wallet-card { margin-top: -104px; }
+.mobile-wallet-card::after { content: ""; position: absolute; width: 190px; height: 190px; inset: -120px -60px auto auto; border: 1px solid rgba(255,255,255,.18); border-radius: 50%; pointer-events: none; }
+.mobile-wallet-card:active { transform: scale(.985); filter: brightness(.94); }
+.mobile-wallet-card-violet { background: linear-gradient(145deg, #6b5ce8, #352c81); }
+.mobile-wallet-card-cyan { background: linear-gradient(145deg, #117f8d, #15345d); }
+.mobile-wallet-card-coral { background: linear-gradient(145deg, #bd5468, #552a64); }
+.mobile-wallet-card-amber { background: linear-gradient(145deg, #b87927, #58352c); }
+.mobile-wallet-card-ink { background: linear-gradient(145deg, #29344c, #0b101d); }
+.mobile-wallet-card-top, .mobile-wallet-card-bottom { position: relative; z-index: 1; display: flex; justify-content: space-between; }
+.mobile-wallet-card-top { align-items: center; align-self: start; font-weight: 750; letter-spacing: .1em; opacity: .82; }
+.mobile-wallet-chip { align-self: start; width: 36px; height: 26px; margin-top: 14px; border: 1px solid rgba(79,55,22,.3); border-radius: 7px; background: linear-gradient(135deg, #f4dc9d, #b98737); }
+.mobile-wallet-card-bottom { align-items: end; align-self: end; }
+.mobile-wallet-card-bottom > span { display: grid; }
+.mobile-wallet-card-bottom small { font-size: 10px; opacity: .66; }
+.mobile-wallet-card-bottom strong { font-size: 18px; font-variant-numeric: tabular-nums; }
+.mobile-wallet-card-bottom b { max-width: 42%; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.mobile-wallet-empty { display: grid; grid-template-columns: 44px minmax(0,1fr) 24px; align-items: center; gap: 12px; min-height: 78px; padding: 12px; border: 1px dashed color-mix(in srgb, var(--f7-theme-color) 38%, transparent); border-radius: 18px; background: color-mix(in srgb, var(--f7-theme-color) 6%, var(--f7-card-bg-color)); touch-action: manipulation; }
+.mobile-wallet-empty > i:first-child { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 14px; background: color-mix(in srgb, var(--f7-theme-color) 13%, transparent); }
+.mobile-wallet-empty > span { display: grid; gap: 2px; }
+.mobile-wallet-empty small { color: var(--f7-text-color-secondary); font-size: 11px; }
+.mobile-wallet-skeleton { display: grid; gap: 10px; }
+.mobile-wallet-skeleton span { display: block; height: 164px; border-radius: 20px; background: var(--f7-skeleton-color); }
+
 .home-summary-card {
-    background-color: var(--f7-color-yellow);
+    position: relative;
+    overflow: hidden;
+    color: #fff;
+    border: 0;
+    background:
+        radial-gradient(circle at 80% 10%, rgba(40, 199, 203, 0.48), transparent 11rem),
+        radial-gradient(circle at 5% 110%, rgba(139, 124, 255, 0.8), transparent 17rem),
+        linear-gradient(145deg, #111a35, #0c3540);
+    box-shadow: 0 22px 52px rgba(20, 28, 62, 0.24);
+    animation: mobile-summary-enter 480ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.home-summary-card::after {
+    content: "";
+    position: absolute;
+    width: 210px;
+    height: 210px;
+    inset: -125px -60px auto auto;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 50%;
+    pointer-events: none;
 }
 
 .home-summary-card .home-summary-month {
@@ -451,7 +601,9 @@ init();
 }
 
 .dark .home-summary-card {
-    background-color: var(--f7-theme-color);
+    background:
+        radial-gradient(circle at 80% 10%, rgba(40, 199, 203, 0.42), transparent 11rem),
+        linear-gradient(145deg, #111a35, #0b2a35);
 }
 
 .dark .home-summary-card a {
@@ -504,5 +656,27 @@ init();
 .template-popover-menu .popover-inner {
     max-height: 400px;
     overflow-y: auto;
+}
+
+@keyframes mobile-summary-enter {
+    from { opacity: 0; transform: translateY(12px) scale(0.985); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (max-width: 374px) {
+    .mobile-onboarding { grid-template-columns: 44px minmax(0, 1fr); }
+    .mobile-onboarding-action { grid-column: 2; justify-content: flex-start; }
+    .mobile-wallet-card { min-height: 152px; }
+    .mobile-wallet-card + .mobile-wallet-card { margin-top: -94px; }
+}
+
+@media (orientation: landscape) and (max-height: 520px) {
+    .mobile-wallet-stack { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .mobile-wallet-card + .mobile-wallet-card { margin-top: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .mobile-wallet-card { transition: none; }
+    .mobile-wallet-card:active { transform: none; }
 }
 </style>

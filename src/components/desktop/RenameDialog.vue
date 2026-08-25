@@ -1,5 +1,5 @@
 <template>
-    <v-dialog max-width="500" :persistent="oldName !== newName" v-model="showState">
+    <v-dialog class="finexy-dialog finexy-subdialog" max-width="500" :persistent="oldName !== newName" v-model="showState">
         <v-card class="pa-sm-1 pa-md-2">
             <template #title>
                 <h4 class="text-h4 text-wrap">{{ dialogTitle || defaultTitle }}</h4>

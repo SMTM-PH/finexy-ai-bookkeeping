@@ -1,10 +1,10 @@
 <template>
-    <v-card :class="{ 'disabled': disabled }">
+    <v-card class="income-expense-overview-card" :class="{ 'disabled': disabled }">
         <v-card-text class="d-flex align-center">
             <v-avatar color="grey" size="38">
                 <v-icon size="24" :icon="icon" />
             </v-avatar>
-            <span class="font-weight-bold ms-3">{{ title }}</span>
+            <span class="overview-card-title font-weight-bold ms-3">{{ title }}</span>
             <v-spacer/>
             <v-btn density="comfortable" color="default" variant="text" class="ms-2" :icon="true">
                 <v-icon :icon="mdiDotsVertical" />
@@ -23,7 +23,7 @@
             <div class="text-truncate text-h5 mt-2 mb-7" style="padding-bottom: 2px" v-if="!loading && !incomeAmount && !expenseAmount">{{ tt('No data') }}</div>
         </v-card-text>
         <v-card-text class="mt-6">
-            <span class="text-caption">{{ datetime }}</span>
+            <span class="overview-card-date text-caption">{{ datetime }}</span>
         </v-card-text>
     </v-card>
 </template>
@@ -47,3 +47,20 @@ defineProps<{
 
 const { tt } = useI18n();
 </script>
+
+<style>
+.income-expense-overview-card {
+    --v-theme-on-surface: 32, 36, 58;
+    color: #20243a !important;
+}
+
+.income-expense-overview-card .overview-card-title {
+    color: #20243a !important;
+    opacity: 1 !important;
+}
+
+.income-expense-overview-card .overview-card-date {
+    color: #62677d !important;
+    opacity: 1 !important;
+}
+</style>

@@ -1,6 +1,8 @@
 <template>
-    <v-dialog width="1000" :persistent="isTransactionModified || recognizing" v-model="showState">
-        <v-card class="pa-sm-1 pa-md-2">
+    <v-dialog class="transaction-edit-dialog finexy-dialog finexy-dialog--wide" width="920" max-width="calc(100vw - 24px)"
+              max-height="calc(100dvh - 24px)" scrollable
+              :persistent="isTransactionModified || recognizing" v-model="showState">
+        <v-card class="transaction-edit-card pa-sm-1 pa-md-2">
             <template #title>
                 <div class="d-flex align-center justify-center">
                     <div class="d-flex align-center">
@@ -10,6 +12,7 @@
                     <v-spacer/>
                     <small class="ms-2 text-truncate" v-if="recognizing">{{ tt('AI can make mistakes. Check important info.') }}</small>
                     <v-btn density="comfortable" color="default" variant="text" class="ms-2" :icon="true"
+                           :aria-label="tt('AI Clipboard Text Recognition')"
                            :disabled="loading || submitting || recognizing"
                            v-if="mode !== TransactionEditPageMode.View && type === TransactionEditPageType.Transaction && activeTab === 'basicInfo' && isTransactionFromAITextRecognitionEnabled()"
                            @click="recognizeFromClipboard">
@@ -18,8 +21,10 @@
                         <v-progress-circular indeterminate size="22" v-if="recognizing"></v-progress-circular>
                     </v-btn>
                     <v-btn density="comfortable" color="default" variant="text" class="ms-2" :icon="true"
+                           :aria-label="tt('More')"
                            :disabled="loading || submitting || recognizing" v-if="mode !== TransactionEditPageMode.View && (activeTab === 'basicInfo' || (activeTab === 'map' && isSupportGetGeoLocationByClick()))">
                         <v-icon :icon="mdiDotsVertical" />
+                        <v-tooltip activator="parent">{{ tt('More') }}</v-tooltip>
                         <v-menu activator="parent">
                             <v-list v-if="activeTab === 'basicInfo'">
                                 <v-list-item :prepend-icon="mdiSwapHorizontal"
@@ -59,7 +64,7 @@
                     </v-btn>
                 </div>
             </template>
-            <v-card-text class="d-flex flex-column flex-md-row flex-grow-1 overflow-y-auto">
+            <v-card-text class="transaction-edit-body d-flex flex-column flex-md-row flex-grow-1 overflow-y-auto">
                 <div class="mb-4">
                     <v-tabs class="v-tabs-pill" direction="vertical" :class="{ 'readonly': type === TransactionEditPageType.Transaction && mode !== TransactionEditPageMode.Add && mode !== TransactionEditPageMode.Edit }"
                             :disabled="loading || submitting || recognizing" v-model="transaction.type">
@@ -105,7 +110,7 @@
                                         v-model="transaction.name"
                                     />
                                 </v-col>
-                                <v-col cols="12" :md="transaction.type === TransactionType.Transfer ? 6 : 12">
+                                <v-col cols="12" md="6">
                                     <amount-input class="transaction-edit-amount font-weight-bold"
                                                   :color="sourceAmountColor"
                                                   :currency="sourceAccountCurrency"
@@ -313,7 +318,7 @@
                                         :no-data-text="tt('No limit')"
                                         v-model="transaction.scheduledEndDate" />
                                 </v-col>
-                                <v-col cols="12" md="12" v-if="type === TransactionEditPageType.Transaction">
+                                <v-col cols="12" md="6" v-if="type === TransactionEditPageType.Transaction">
                                     <v-select
                                         persistent-placeholder
                                         :readonly="mode === TransactionEditPageMode.View"
@@ -418,7 +423,7 @@
                     </v-window-item>
                 </v-window>
             </v-card-text>
-            <v-card-text>
+            <v-card-text class="transaction-edit-actions">
                 <div class="w-100 d-flex justify-center flex-wrap mt-sm-1 mt-md-2 gap-4">
                     <v-tooltip :disabled="!inputIsEmpty" :text="inputEmptyProblemMessage ? tt(inputEmptyProblemMessage) : ''">
                         <template v-slot:activator="{ props }">
@@ -480,7 +485,7 @@
         </v-card>
     </v-dialog>
 
-    <v-dialog width="600" v-model="showPasteTextDialog">
+    <v-dialog class="finexy-dialog finexy-subdialog" width="600" v-model="showPasteTextDialog">
         <v-card class="pa-sm-1 pa-md-2">
             <template #title>
                 <h4 class="text-h4 text-wrap">{{ tt('AI Clipboard Text Recognition') }}</h4>
@@ -547,6 +552,7 @@ import { SUPPORTED_IMAGE_EXTENSIONS } from '@/consts/file.ts';
 import { TransactionTemplate } from '@/models/transaction_template.ts';
 import type { TransactionPictureInfoBasicResponse } from '@/models/transaction_picture_info.ts';
 import { Transaction } from '@/models/transaction.ts';
+import type { RecognizedTransactionResponse } from '@/models/large_language_model.ts';
 
 import { isDefined } from '@/lib/common.ts';
 import {
@@ -593,11 +599,19 @@ export interface TransactionEditOptions extends SetTransactionOptions {
     currentTemplate?: TransactionTemplate;
     autoUploadPicture?: File;
     autoRecognizeClipboardText?: string;
+    autoRecognizeText?: string;
+    autoSaveAfterRecognition?: boolean;
     noTransactionDraft?: boolean;
 }
 
 interface TransactionEditResponse {
     message: string;
+    transactionId?: string;
+}
+
+export interface TransactionEditFailure {
+    readonly canceled: boolean;
+    readonly recognizedTransaction?: RecognizedTransactionResponse;
 }
 
 type MapViewType = InstanceType<typeof MapView>;
@@ -687,6 +701,7 @@ const noTransactionDraft = ref<boolean>(false);
 const geoMenuState = ref<boolean>(false);
 const removingPictureId = ref<string>('');
 const pastedText = ref<string>('');
+const lastRecognizedTransaction = ref<RecognizedTransactionResponse | null>(null);
 
 const initOptions = ref<TransactionEditOptions | undefined>(undefined);
 
@@ -727,6 +742,7 @@ function open(options: TransactionEditOptions): Promise<TransactionEditResponse 
     setGeoLocationByClickMap.value = false;
     originalTransactionEditable.value = false;
     noTransactionDraft.value = options.noTransactionDraft || false;
+    lastRecognizedTransaction.value = null;
 
     initOptions.value = options;
 
@@ -852,6 +868,8 @@ function open(options: TransactionEditOptions): Promise<TransactionEditResponse 
             } else {
                 showPasteTextDialog.value = true;
             }
+        } else if (isDefined(options.autoRecognizeText)) {
+            recognizeText(options.autoRecognizeText);
         }
     }).catch(error => {
         logger.error('failed to load essential data for editing transaction', error);
@@ -889,7 +907,7 @@ function save(afterAction: AfterSaveAction): void {
                 defaultCurrency: defaultCurrency.value,
                 isEdit: mode.value === TransactionEditPageMode.Edit,
                 clientSessionId: clientSessionId.value
-            }).then(() => {
+            }).then(savedTransaction => {
                 submitting.value = false;
                 submitted.value = true;
 
@@ -905,11 +923,13 @@ function save(afterAction: AfterSaveAction): void {
                     if (resolveFunc) {
                         if (mode.value === TransactionEditPageMode.Add) {
                             resolveFunc({
-                                message: 'You have added a new transaction'
+                                message: 'You have added a new transaction',
+                                transactionId: savedTransaction.id
                             });
                         } else if (mode.value === TransactionEditPageMode.Edit) {
                             resolveFunc({
-                                message: 'You have saved this transaction'
+                                message: 'You have saved this transaction',
+                                transactionId: savedTransaction.id
                             });
                         }
                     }
@@ -995,8 +1015,20 @@ function recognizeText(text: string): void {
     recognizing.value = true;
 
     transactionsStore.recognizeTransactionText({ text }).then(response => {
+        lastRecognizedTransaction.value = response;
         updateTransactionModelFromRecognizedResponse(response);
         recognizing.value = false;
+
+        if (initOptions.value?.autoSaveAfterRecognition) {
+            nextTick(() => {
+                if (inputEmptyProblemMessage.value || transaction.value.sourceAmount <= 0) {
+                    snackbar.value?.showMessage('AI 识别结果存在缺失，请检查后再保存');
+                    return;
+                }
+
+                save(AfterSaveAction.GoBack);
+            });
+        }
     }).catch(error => {
         recognizing.value = false;
 
@@ -1096,7 +1128,10 @@ function cancel(): void {
                 message: 'You have added a new transaction'
             });
         } else if (rejectFunc) {
-            rejectFunc();
+            rejectFunc({
+                canceled: true,
+                recognizedTransaction: lastRecognizedTransaction.value || undefined
+            } satisfies TransactionEditFailure);
         }
 
         showState.value = false;
@@ -1283,6 +1318,51 @@ defineExpose({
 </script>
 
 <style>
+.transaction-edit-dialog .v-overlay__content {
+    max-height: min(760px, calc(100dvh - 24px)) !important;
+    margin: 12px;
+}
+
+.transaction-edit-card {
+    display: flex;
+    max-height: min(760px, calc(100dvh - 24px));
+    overflow: hidden;
+    border: 1px solid rgba(var(--v-border-color), .14);
+}
+
+.transaction-edit-card > .v-card-item {
+    flex: 0 0 auto;
+    padding-block: 16px 12px;
+    border-bottom: 1px solid rgba(var(--v-border-color), .1);
+}
+
+.transaction-edit-body {
+    min-height: 0;
+    padding-top: 14px !important;
+    padding-bottom: 10px !important;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+}
+
+.transaction-edit-body .v-row {
+    margin: -6px;
+}
+
+.transaction-edit-body .v-col-12 {
+    padding: 6px;
+}
+
+.transaction-edit-actions {
+    position: relative;
+    z-index: 2;
+    flex: 0 0 auto;
+    padding-block: 12px !important;
+    border-top: 1px solid rgba(var(--v-border-color), .12);
+    background: rgba(var(--v-theme-surface), .94);
+    box-shadow: 0 -12px 28px rgba(31, 27, 61, .06);
+    backdrop-filter: blur(18px);
+}
+
 .transaction-edit-amount .v-field__prepend-inner,
 .transaction-edit-amount .v-field__append-inner,
 .transaction-edit-amount .v-field__field > input {
@@ -1372,6 +1452,17 @@ defineExpose({
 
     .transaction-picture-add-icon {
         color: rgba(var(--v-theme-grey-700));
+    }
+}
+
+@media (max-width: 959px) {
+    .transaction-edit-dialog .v-overlay__content,
+    .transaction-edit-card {
+        max-height: calc(100dvh - 16px) !important;
+    }
+
+    .transaction-edit-body {
+        padding-inline: 14px !important;
     }
 }
 </style>

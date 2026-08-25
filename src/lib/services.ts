@@ -133,6 +133,21 @@ import type {
     TransactionTemplateInfoResponse
 } from '@/models/transaction_template.ts';
 import type {
+    ProductAssetCreateRequest,
+    ProductAssetModifyRequest,
+    ProductAssetSellRequest,
+    ProductAssetDeleteRequest,
+    ProductAssetInfoResponse
+} from '@/models/product_asset.ts';
+import type {
+    MonthlyBudgetInfoResponse,
+    MonthlyBudgetSetRequest,
+    MonthlyBudgetDeleteRequest
+} from '@/models/monthly_budget.ts';
+import type { LocalOCRResponse } from '@/models/local_ocr.ts';
+import type { AIReviewItemCreateRequest, AIReviewItemInfoResponse } from '@/models/ai_review_item.ts';
+import type { AIReportInfoResponse } from '@/models/ai_report.ts';
+import type {
     InsightsExplorerCreateRequest,
     InsightsExplorerModifyRequest,
     InsightsExplorerHideRequest,
@@ -480,6 +495,19 @@ export default {
             return Promise.reject('Parameter Invalid');
         }
     },
+    downloadFullBackup: (): Promise<AxiosResponse<Blob>> => {
+        return axios.get<Blob>('v1/data/full-backup.zip', {
+            responseType: 'blob',
+            timeout: DEFAULT_EXPORT_API_TIMEOUT
+        } as ApiRequestConfig);
+    },
+    restoreFullBackup: (backup: File): ApiResponsePromise<{ restarting: boolean }> => {
+        return axios.postForm<ApiResponse<{ restarting: boolean }>>('v1/data/full-backup/restore.json', {
+            backup
+        }, {
+            timeout: DEFAULT_IMPORT_API_TIMEOUT
+        } as ApiRequestConfig);
+    },
     clearAllData: (req: ClearDataRequest): ApiResponsePromise<boolean> => {
         return axios.post<ApiResponse<boolean>>('v1/data/clear/all.json', req, {
             timeout: DEFAULT_CLEAR_ALL_TRANSACTIONS_API_TIMEOUT
@@ -521,6 +549,30 @@ export default {
     },
     deleteSubAccount: (req: AccountDeleteRequest): ApiResponsePromise<boolean> => {
         return axios.post<ApiResponse<boolean>>('v1/accounts/sub_account/delete.json', req);
+    },
+    getAllProductAssets: ({ status = 0 }: { status?: number } = {}): ApiResponsePromise<ProductAssetInfoResponse[]> => {
+        return axios.get<ApiResponse<ProductAssetInfoResponse[]>>('v1/product/assets/list.json?status=' + status);
+    },
+    addProductAsset: (req: ProductAssetCreateRequest): ApiResponsePromise<ProductAssetInfoResponse> => {
+        return axios.post<ApiResponse<ProductAssetInfoResponse>>('v1/product/assets/add.json', req);
+    },
+    modifyProductAsset: (req: ProductAssetModifyRequest): ApiResponsePromise<ProductAssetInfoResponse> => {
+        return axios.post<ApiResponse<ProductAssetInfoResponse>>('v1/product/assets/modify.json', req);
+    },
+    sellProductAsset: (req: ProductAssetSellRequest): ApiResponsePromise<ProductAssetInfoResponse> => {
+        return axios.post<ApiResponse<ProductAssetInfoResponse>>('v1/product/assets/sell.json', req);
+    },
+    deleteProductAsset: (req: ProductAssetDeleteRequest): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/product/assets/delete.json', req);
+    },
+    getMonthlyBudget: ({ yearMonth }: { yearMonth: number }): ApiResponsePromise<MonthlyBudgetInfoResponse | null> => {
+        return axios.get<ApiResponse<MonthlyBudgetInfoResponse | null>>('v1/budget/monthly/get.json?yearMonth=' + yearMonth);
+    },
+    setMonthlyBudget: (req: MonthlyBudgetSetRequest): ApiResponsePromise<MonthlyBudgetInfoResponse> => {
+        return axios.post<ApiResponse<MonthlyBudgetInfoResponse>>('v1/budget/monthly/set.json', req);
+    },
+    deleteMonthlyBudget: (req: MonthlyBudgetDeleteRequest): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/budget/monthly/delete.json', req);
     },
     getTransactions: (req: TransactionListByMaxTimeRequest): ApiResponsePromise<TransactionInfoPageWrapperResponse> => {
         const tagFilter = encodeURIComponent(req.tagFilter);
@@ -866,6 +918,36 @@ export default {
         }, {
             timeout: DEFAULT_LLM_API_TIMEOUT,
             cancelableUuid: cancelableUuid
+        } as ApiRequestConfig);
+    },
+    recognizeLocalOCR: ({ imageFile }: { imageFile: File }): ApiResponsePromise<LocalOCRResponse> => {
+        return axios.postForm<ApiResponse<LocalOCRResponse>>('v1/ocr/recognize.json', {
+            image: imageFile
+        }, {
+            timeout: DEFAULT_LLM_API_TIMEOUT * 2
+        } as ApiRequestConfig);
+    },
+    listAIReviewItems: (): ApiResponsePromise<AIReviewItemInfoResponse[]> => {
+        return axios.get<ApiResponse<AIReviewItemInfoResponse[]>>('v1/ai/review/list.json');
+    },
+    createAIReviewItem: (req: AIReviewItemCreateRequest): ApiResponsePromise<AIReviewItemInfoResponse> => {
+        return axios.post<ApiResponse<AIReviewItemInfoResponse>>('v1/ai/review/create.json', req);
+    },
+    resolveAIReviewItem: ({ id }: { id: string }): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/ai/review/resolve.json', { id });
+    },
+    dismissAIReviewItem: ({ id }: { id: string }): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/ai/review/dismiss.json', { id });
+    },
+    deleteAIReviewItem: ({ id }: { id: string }): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/ai/review/delete.json', { id });
+    },
+    listAIReports: (): ApiResponsePromise<AIReportInfoResponse[]> => {
+        return axios.get<ApiResponse<AIReportInfoResponse[]>>('v1/ai/reports/list.json');
+    },
+    generateAIReport: ({ yearMonth }: { yearMonth: number }): ApiResponsePromise<AIReportInfoResponse> => {
+        return axios.post<ApiResponse<AIReportInfoResponse>>('v1/ai/reports/generate.json', { yearMonth }, {
+            timeout: DEFAULT_LLM_API_TIMEOUT * 2
         } as ApiRequestConfig);
     },
     getLatestExchangeRates: (param: { ignoreError?: boolean }): ApiResponsePromise<LatestExchangeRateResponse> => {

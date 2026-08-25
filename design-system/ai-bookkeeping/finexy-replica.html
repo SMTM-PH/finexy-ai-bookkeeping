@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Finexy — Finance Dashboard (Replica Study)</title>
+<!-- 复刻研究：Oripio Product — Finance Dashboard (dribbble.com/shots/27091056)，仅用于设计学习，版权归原作者 -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+:root{
+  --page:#F1F2F6; --card:#FFFFFF; --panel:#F7F8FA; --line:#EFF0F4;
+  --ink:#12141A; --muted:#6E7684; --faint:#9AA1AD;
+  --orange:#F05537; --orange-2:#EE4E31;
+  --green:#1DBF73; --red:#F04444; --olive:#A8A832; --blue:#4F46E5;
+  --r-lg:22px; --r-md:16px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--page);font-family:"Inter","Segoe UI",system-ui,sans-serif;color:var(--ink);
+  padding:34px 92px;min-width:1160px;-webkit-font-smoothing:antialiased}
+button{font:inherit;background:none;border:0;cursor:pointer;color:inherit}
+svg{display:block}
+/* ================= 白色大容器 ================= */
+.app{background:var(--card);border-radius:30px;padding:16px 22px 22px;box-shadow:0 1px 2px rgba(16,24,40,.03)}
+/* ================= 顶部导航 ================= */
+.topbar{display:flex;align-items:center;height:56px}
+.brand{display:flex;align-items:center;gap:10px;background:var(--panel);border-radius:14px;padding:7px 14px 7px 8px;font-weight:800;font-size:15.5px;letter-spacing:-.02em}
+.logo{display:grid;place-items:center;width:34px;height:34px;border-radius:11px;color:#fff;font-weight:900;font-size:19px;font-style:italic;
+  background:linear-gradient(135deg,#F36447,var(--orange-2));box-shadow:inset 0 1px 0 rgba(255,255,255,.3)}
+.tabs{display:flex;align-items:center;gap:34px;margin-left:64px}
+.tabs a{font-size:13.5px;font-weight:500;color:var(--muted);cursor:pointer;padding:9px 4px;border-radius:999px;white-space:nowrap}
+.tabs a.active{background:var(--ink);color:#fff;padding:9px 22px;font-weight:600}
+.top-actions{margin-left:auto;display:flex;align-items:center;gap:10px}
+.ic{position:relative;display:grid;place-items:center;width:38px;height:38px;border-radius:50%;background:#fff;border:1px solid var(--line)}
+.ic:hover{background:var(--panel)}
+.ic .dot{position:absolute;top:9px;right:10px;width:6px;height:6px;border-radius:50%;background:var(--orange)}
+.user{display:flex;align-items:center;gap:9px;border:1px solid var(--line);border-radius:999px;padding:4px 12px 4px 5px}
+.user:hover{background:var(--panel)}
+.avatar{display:grid;place-items:center;width:32px;height:32px;border-radius:50%;color:#fff;font-size:11px;font-weight:800;
+  background:linear-gradient(135deg,#8D5524,#5C3A1E)}
+.uinfo{text-align:left;line-height:1.25}
+.uinfo b{display:block;font-size:12px;font-weight:700}
+.uinfo small{display:block;font-size:10.5px;color:var(--faint);max-width:118px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* ================= 主体：轨道 + 内容 ================= */
+.body{display:flex;gap:26px;margin-top:14px}
+.rail{display:flex;flex-direction:column;gap:12px;width:56px;flex:none}
+.stack{display:flex;flex-direction:column;align-items:center;gap:4px;background:var(--panel);border-radius:18px;padding:8px 0}
+.stack.bottom{margin-top:auto}
+.ric{display:grid;place-items:center;width:40px;height:40px;border-radius:50%;color:#4A4F5A}
+.ric:hover{background:#EDEFF3}
+.ric.active{background:var(--ink);color:#fff}
+main{flex:1;min-width:0}
+h1{font-size:36px;font-weight:800;letter-spacing:-.03em}
+.sub{margin-top:6px;font-size:13.5px;color:var(--muted)}
+/* ================= Bento 网格 ================= */
+.grid{display:grid;grid-template-columns:1.04fr .94fr 1.02fr;gap:18px;margin-top:24px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);padding:22px}
+.panel{background:var(--panel);border-radius:var(--r-lg)}
+.col-left{display:grid;gap:18px;align-content:start}
+.activities{grid-column:2/4}
+/* ================= Total Balance ================= */
+.bhead{display:flex;align-items:center;justify-content:space-between}
+.bhead>span{font-size:13px;color:var(--muted);font-weight:500}
+.cur{display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:9px;padding:5px 10px;font-size:12px;font-weight:600}
+.cur .flag{width:15px;height:15px}
+.amount{margin-top:10px;font-size:31px;font-weight:800;letter-spacing:-.03em}
+.trend{display:flex;align-items:center;gap:7px;margin-top:6px;font-size:12px}
+.trend b{color:var(--green);font-weight:700}
+.trend span{color:var(--faint)}
+.bactions{display:flex;gap:12px;margin-top:18px}
+.btn-dark,.btn-light{flex:1;display:flex;align-items:center;justify-content:center;gap:9px;height:45px;border-radius:999px;font-size:13.5px;font-weight:600}
+.btn-dark{background:var(--ink);color:#fff}
+.btn-dark:hover{background:#262932}
+.btn-light{background:#F3F4F6;color:var(--ink)}
+.btn-light:hover{background:#E9EBEE}
+/* Wallets 内嵌面板 */
+.wallets{margin-top:20px;background:var(--panel);border-radius:var(--r-md);padding:16px}
+.whead{display:flex;align-items:baseline;gap:8px;font-size:12.5px}
+.whead b{font-weight:700}
+.whead span{color:var(--faint);font-size:11.5px}
+.wrow{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
+.w{background:#fff;border-radius:13px;padding:12px}
+.wt{display:flex;align-items:center;gap:6px}
+/* 圆形 CSS 国旗（Windows 下 emoji 国旗会退化为字母码） */
+.flag{position:relative;display:inline-block;width:17px;height:17px;border-radius:50%;overflow:hidden;flex:none;box-shadow:inset 0 0 0 1px rgba(0,0,0,.08)}
+.flag.us{background:repeating-linear-gradient(180deg,#B22234 0 2.6px,#fff 2.6px 5.2px)}
+.flag.us:after{content:"";position:absolute;left:0;top:0;width:8px;height:8px;background:#3C3B6E}
+.flag.de{background:linear-gradient(180deg,#151515 33.3%,#DD0000 33.3% 66.6%,#FFCE00 66.6%)}
+.flag.gb{background:#012169}
+.flag.gb:before{content:"";position:absolute;left:0;top:7px;width:17px;height:3px;background:#fff}
+.flag.gb:after{content:"";position:absolute;left:7px;top:0;width:3px;height:17px;background:#fff}
+.flag.gb i{position:absolute;left:0;top:8px;width:17px;height:2px;background:#C8102E;z-index:1}
+.flag.gb u{position:absolute;left:8px;top:0;width:2px;height:17px;background:#C8102E;z-index:1;text-decoration:none}
+.wt b{font-size:12px;font-weight:700}
+.wt i{margin-left:auto;font-style:normal;color:var(--faint);font-size:13px;cursor:pointer}
+.w strong{display:block;margin-top:9px;font-size:14px;font-weight:800;letter-spacing:-.01em}
+.w small{display:block;margin-top:3px;font-size:9.5px;color:var(--faint)}
+.w em{display:block;margin-top:7px;font-size:10.5px;font-weight:700;font-style:normal}
+.w em.ok{color:var(--green)} .w em.off{color:var(--red)}
+/* ================= 2x2 统计卡 ================= */
+.stats{display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:1fr;gap:10px;padding:10px}
+.stat{background:#fff;border-radius:var(--r-md);padding:16px}
+.shead{display:flex;align-items:center;justify-content:space-between}
+.shead span{font-size:13px;font-weight:600;color:#3A3F4A}
+.sic{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:#F3F4F6;color:#3A3F4A;font-size:13px;font-style:normal}
+.stat strong{display:block;margin-top:12px;font-size:26px;font-weight:800;letter-spacing:-.02em}
+.strend{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:11.5px}
+.strend b{font-weight:700} .strend span{color:var(--faint)}
+.strend.up b{color:var(--green)} .strend.down b{color:var(--red)}
+.stat.orange{background:linear-gradient(135deg,#F36447,var(--orange-2));color:#fff}
+.stat.orange .shead span{color:rgba(255,255,255,.92)}
+.stat.orange .sic{background:rgba(255,255,255,.16);color:#fff}
+.stat.orange .strend b{color:#fff} .stat.orange .strend span{color:rgba(255,255,255,.72)}
+/* ================= 图表卡 ================= */
+.chart-card h3{font-size:16px;font-weight:800;letter-spacing:-.01em}
+.csub{margin-top:4px;font-size:11.5px;color:var(--faint)}
+.plot-wrap{margin-top:14px;background:var(--panel);border-radius:var(--r-md);padding:16px 16px 8px}
+.plot-head{display:flex;align-items:center;justify-content:space-between;font-size:12.5px;font-weight:700}
+.legend{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:500;color:var(--muted)}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:2.5px;margin:0 2px 0 12px}
+.legend .b{background:var(--blue)} .legend .k{background:var(--ink)}
+.plot{position:relative;height:196px;margin-top:12px;padding-left:30px}
+.gl{position:absolute;left:30px;right:0;border-top:1.5px dashed #E6E8ED}
+.ylab{position:absolute;left:0;transform:translateY(-50%);font-size:10px;color:var(--faint);font-weight:500}
+.bars{position:absolute;inset:0 0 24px 30px;display:flex;align-items:flex-end;justify-content:space-around}
+.grp{position:relative;display:flex;align-items:flex-end;gap:4px;height:100%}
+.grp i{width:15px;border-radius:5px 5px 0 0}
+.grp .p{background:repeating-linear-gradient(-45deg,rgba(255,255,255,.42) 0 3px,transparent 3px 9px),linear-gradient(180deg,#F36447,var(--orange-2))}
+.grp .l{background:var(--ink)}
+.grp span{position:absolute;left:50%;transform:translateX(-50%);bottom:-20px;font-size:10.5px;color:var(--faint);white-space:nowrap}
+/* ================= Monthly Spending Limit ================= */
+.limit h3,.mycards h3{font-size:15px;font-weight:800;display:flex;align-items:center;gap:8px}
+.limitbar{display:flex;height:10px;border-radius:999px;overflow:hidden;margin-top:18px}
+.limitbar .used{background:linear-gradient(90deg,#F36447,var(--orange-2));width:25.5%;border-radius:999px 0 0 999px}
+.limitbar .rest{flex:1;background:repeating-linear-gradient(-45deg,#E9EAEF 0 4px,#F4F5F8 4px 9px)}
+.limitmeta{display:flex;justify-content:space-between;margin-top:10px;font-size:12px}
+.limitmeta span{color:var(--faint)} .limitmeta b{font-weight:700}
+/* ================= My Cards ================= */
+.mycards .add{margin-left:auto;background:#F3F4F6;border-radius:999px;padding:8px 14px;font-size:11.5px;font-weight:700}
+.mycards .add:hover{background:#E9EBEE}
+.mhead{display:flex;align-items:center}
+.cards{display:flex;gap:12px;margin-top:16px}
+.cc{position:relative;flex:1;height:158px;border-radius:18px;padding:14px;color:#fff;overflow:hidden}
+.cc.black{background:linear-gradient(140deg,#262932,#101216)}
+.cc.black:after{content:"";position:absolute;right:-46px;top:-46px;width:150px;height:150px;border:26px solid rgba(255,255,255,.045);border-radius:50%}
+.cc.orange{background:linear-gradient(140deg,#F4674B,var(--orange-2))}
+.cc .spark{position:absolute;color:rgba(255,255,255,.75);font-size:15px}
+.cc .nfc{position:absolute;left:14px;top:14px;opacity:.85}
+.cc .active-pill{position:absolute;left:44px;top:13px;display:flex;align-items:center;gap:5px;background:#fff;color:var(--ink);border-radius:999px;padding:4px 10px;font-size:9.5px;font-weight:800}
+.cc .active-pill:before{content:"";width:5px;height:5px;border-radius:50%;background:var(--green)}
+.mc{position:absolute;right:14px;top:14px;display:flex}
+.mc i{width:22px;height:22px;border-radius:50%}
+.mc i:first-child{background:#EB001B;margin-right:-9px}
+.mc i:last-child{background:#F79E1B;opacity:.92}
+.cc .cnum{position:absolute;left:14px;bottom:14px;right:10px;display:flex;gap:10px;align-items:flex-end}
+.cc .cnum>div{flex:none;min-width:0}
+.cc label{display:block;font-size:7.5px;color:rgba(255,255,255,.55);text-transform:uppercase;letter-spacing:.03em;white-space:nowrap}
+.cc .cnum b{display:block;margin-top:3px;font-size:10.5px;font-weight:700;letter-spacing:.03em;white-space:nowrap}
+/* ================= Recent Activities ================= */
+.activities{display:flex;flex-direction:column}
+.ahead{display:flex;align-items:center;gap:12px}
+.ahead h3{font-size:16px;font-weight:800;letter-spacing:-.01em}
+.searchbox{margin-left:auto;display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:11px;padding:0 12px;height:38px;width:212px;color:var(--faint)}
+.searchbox input{border:0;outline:0;background:none;font-size:12.5px;width:100%;color:var(--ink)}
+.searchbox input::placeholder{color:var(--faint)}
+.filter{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:11px;height:38px;padding:0 15px;font-size:12.5px;font-weight:600}
+.filter:hover{background:var(--panel)}
+table{width:100%;border-collapse:collapse;margin-top:8px}
+th{font-size:11.5px;font-weight:600;color:var(--faint);text-align:left;padding:12px 8px;border-bottom:1px solid var(--line)}
+td{font-size:12.5px;padding:13px 8px;border-bottom:1px solid #F4F5F8;color:#3A3F4A;vertical-align:middle;white-space:nowrap}
+tr:last-child td{border-bottom:0}
+td.id{font-weight:600;color:var(--ink)}
+td.price{font-weight:700;color:var(--ink)}
+td.date{color:var(--muted)}
+.act{display:flex;align-items:center;gap:11px;font-weight:600;color:var(--ink)}
+.aic{display:grid;place-items:center;width:28px;height:28px;border-radius:8px;color:#fff;font-size:12px;font-weight:800;flex:none}
+.status{display:flex;align-items:center;gap:8px;font-size:12.5px}
+.status i{width:7px;height:7px;border-radius:50%;flex:none}
+.status .c{background:var(--green)} .status .p{background:var(--red)} .status .g{background:var(--olive)}
+.more{color:var(--faint);font-size:15px;letter-spacing:.05em;padding:0 4px}
+.cb{appearance:none;width:16px;height:16px;border:1.5px solid #D8DBE1;border-radius:5px;cursor:pointer;vertical-align:middle;position:relative}
+.cb:checked{background:var(--ink);border-color:var(--ink)}
+.cb:checked:after{content:"✓";position:absolute;inset:0;display:grid;place-items:center;color:#fff;font-size:10px;font-weight:900}
+/* 行点击态 */
+tbody tr{transition:background .15s}
+tbody tr:hover{background:#FAFBFC}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/></symbol>
+    <symbol id="i-wallet" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7H6a3 3 0 0 1 0-6h12a2 2 0 0 1 2 2v2"/><path d="M20 7a1 1 0 0 1 1 1v11a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V4"/><path d="M16.5 14h.01"/></symbol>
+    <symbol id="i-coins" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v6c0 1.66 3.13 3 7 3s7-1.34 7-3V6"/><path d="M5 12v6c0 1.66 3.13 3 7 3s7-1.34 7-3v-6"/></symbol>
+    <symbol id="i-bag" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4.5h6M8 7.5h8l1.6 4.2a7.2 7.2 0 1 1-11.2 0L8 7.5z"/><path d="M9.5 13.5c0 1.4 1.1 2 2.5 2s2.5-.6 2.5-1.7c0-2.3-5-1.5-5-3.8 0-1.1 1.1-1.7 2.5-1.7s2.5.6 2.5 2M12 8v9.5"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></symbol>
+    <symbol id="i-swap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3l4 4-4 4M21 7H8M7 13l-4 4 4 4M3 17h13"/></symbol>
+    <symbol id="i-filter" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18l-7 8v5.5l-4 2v-7.5L3 5z"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.3 11.3 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.8"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.8"/></symbol>
+    <symbol id="i-cal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3.5" y="5" width="17" height="16" rx="2.5"/><path d="M8 3v4M16 3v4M3.5 10h17"/></symbol>
+    <symbol id="i-mail" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3.5 7l8.5 6 8.5-6"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.7a3.5 3.5 0 0 1 0 6.6M21.5 20a6.5 6.5 0 0 0-4.5-6.2"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13.5l9 5 9-5"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.9 2.9l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.2a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.9-2.9l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.2a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.9-2.9l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.2a1.7 1.7 0 0 0 1 1.5h.1a1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.9 2.9l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5 1h.2a2 2 0 1 1 0 4h-.2a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+    <symbol id="i-out" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></symbol>
+    <symbol id="i-q" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5A2.5 2.5 0 0 1 12 7.5a2.5 2.5 0 0 1 2.5 2.5c0 1.5-2.5 2-2.5 3.5M12 17.5h.01"/></symbol>
+    <symbol id="i-nfc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6.5 8.5a7 7 0 0 1 0 7M10 6a11 11 0 0 1 0 12M13.5 3.5a15 15 0 0 1 0 17"/></symbol>
+    <symbol id="i-card" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M2.5 10h19" stroke-linecap="round"/></symbol>
+  </defs>
+</svg>
+
+<div class="app">
+  <!-- ================= 顶部导航 ================= -->
+  <header class="topbar">
+    <div class="brand"><span class="logo">F</span>Finexy</div>
+    <nav class="tabs">
+      <a class="active">Overview</a><a>Activity</a><a>Manage</a><a>Program</a><a>Account</a><a>Reports</a>
+    </nav>
+    <div class="top-actions">
+      <button class="ic" aria-label="Search"><svg width="17" height="17"><use href="#i-search"/></svg></button>
+      <button class="ic" aria-label="Notifications"><svg width="17" height="17"><use href="#i-bell"/></svg><span class="dot"></span></button>
+      <button class="ic" aria-label="Info"><svg width="17" height="17"><use href="#i-info"/></svg></button>
+      <button class="user">
+        <span class="avatar">SR</span>
+        <span class="uinfo"><b>Demo User</b><small>user@example.com</small></span>
+        <svg width="14" height="14" style="color:var(--faint)"><use href="#i-chev"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="body">
+    <!-- ================= 左侧图标轨道 ================= -->
+    <aside class="rail">
+      <div class="stack">
+        <button class="ric" aria-label="Light mode"><svg width="18" height="18"><use href="#i-sun"/></svg></button>
+        <button class="ric" aria-label="Dark mode"><svg width="18" height="18"><use href="#i-moon"/></svg></button>
+      </div>
+      <div class="stack">
+        <button class="ric active" aria-label="Dashboard"><svg width="18" height="18"><use href="#i-grid"/></svg></button>
+        <button class="ric" aria-label="Calendar"><svg width="18" height="18"><use href="#i-cal"/></svg></button>
+        <button class="ric" aria-label="Messages"><svg width="18" height="18"><use href="#i-mail"/></svg></button>
+        <button class="ric" aria-label="Documents"><svg width="18" height="18"><use href="#i-file"/></svg></button>
+        <button class="ric" aria-label="Contacts"><svg width="18" height="18"><use href="#i-users"/></svg></button>
+        <button class="ric" aria-label="Layers"><svg width="18" height="18"><use href="#i-layers"/></svg></button>
+        <button class="ric" aria-label="Settings"><svg width="18" height="18"><use href="#i-gear"/></svg></button>
+      </div>
+      <div class="stack bottom">
+        <button class="ric" aria-label="Help"><svg width="18" height="18"><use href="#i-q"/></svg></button>
+        <button class="ric" aria-label="Log out"><svg width="18" height="18"><use href="#i-out"/></svg></button>
+      </div>
+    </aside>
+
+    <main>
+      <h1>Good morning, Sujon</h1>
+      <p class="sub">Stay on top of your tasks, monitor progress, and track status.</p>
+
+      <div class="grid">
+        <!-- ============ Total Balance ============ -->
+        <section class="card">
+          <div class="bhead">
+            <span>Total Balance</span>
+            <button class="cur"><span class="flag us"></span>USD <svg width="12" height="12" style="color:var(--faint)"><use href="#i-chev"/></svg></button>
+          </div>
+          <div class="amount">$689,372.00</div>
+          <div class="trend"><b>↑ 5%</b><span>than last month</span></div>
+          <div class="bactions">
+            <button class="btn-dark"><svg width="15" height="15"><use href="#i-swap"/></svg>Transfer</button>
+            <button class="btn-light"><svg width="15" height="15"><use href="#i-swap"/></svg>Request</button>
+          </div>
+          <div class="wallets">
+            <div class="whead"><b>Wallets</b><span>|&nbsp;&nbsp;Total 6 wallets</span></div>
+            <div class="wrow">
+              <div class="w"><div class="wt"><span class="flag us"></span><b>USD</b><i>⋮</i></div><strong>$22,678.00</strong><small>Limit is $10k a month</small><em class="ok">Active</em></div>
+              <div class="w"><div class="wt"><span class="flag de"></span><b>EUR</b><i>⋮</i></div><strong>€18,345.00</strong><small>Limit is €6k a month</small><em class="ok">Active</em></div>
+              <div class="w"><div class="wt"><span class="flag gb"><i></i><u></u></span><b>GBP</b><i>⋮</i></div><strong>£15,000.00</strong><small>Limit is £7.5k a month</small><em class="off">Inactive</em></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ 2x2 统计 ============ -->
+        <section class="panel stats">
+          <div class="stat orange">
+            <div class="shead"><span>Total Earnings</span><i class="sic"><svg width="15" height="15"><use href="#i-wallet"/></svg></i></div>
+            <strong>$950</strong>
+            <div class="strend"><b>↑ 7%</b><span>This month</span></div>
+          </div>
+          <div class="stat">
+            <div class="shead"><span>Total Spending</span><i class="sic"><svg width="15" height="15"><use href="#i-card"/></svg></i></div>
+            <strong>$700</strong>
+            <div class="strend down"><b>↓ 5%</b><span>This month</span></div>
+          </div>
+          <div class="stat">
+            <div class="shead"><span>Total Income</span><i class="sic"><svg width="15" height="15"><use href="#i-coins"/></svg></i></div>
+            <strong>$1,050</strong>
+            <div class="strend up"><b>↑ 8%</b><span>This month</span></div>
+          </div>
+          <div class="stat">
+            <div class="shead"><span>Total Revenue</span><i class="sic"><svg width="15" height="15"><use href="#i-bag"/></svg></i></div>
+            <strong>$850</strong>
+            <div class="strend up"><b>↑ 4%</b><span>This month</span></div>
+          </div>
+        </section>
+
+        <!-- ============ Profit and Loss 图表 ============ -->
+        <section class="card chart-card">
+          <h3>Total Income</h3>
+          <p class="csub">View your income in a certain period of time</p>
+          <div class="plot-wrap">
+            <div class="plot-head"><b>Profit and Loss</b>
+              <span class="legend"><i class="b"></i>Profit<i class="k"></i>Loss</span>
+            </div>
+            <div class="plot" id="plot">
+              <div class="gl" style="top:0%"></div><div class="gl" style="top:20%"></div><div class="gl" style="top:40%"></div>
+              <div class="gl" style="top:60%"></div><div class="gl" style="top:80%"></div><div class="gl" style="top:calc(100% - 24px)"></div>
+              <span class="ylab" style="top:0%">50k</span><span class="ylab" style="top:20%">40k</span><span class="ylab" style="top:40%">30k</span>
+              <span class="ylab" style="top:60%">20k</span><span class="ylab" style="top:80%">10k</span><span class="ylab" style="top:calc(100% - 24px)">00</span>
+              <div class="bars" id="bars"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ 左列：Spending Limit + My Cards ============ -->
+        <div class="col-left">
+          <section class="card limit">
+            <h3>Monthly Spending Limit</h3>
+            <div class="limitbar"><div class="used"></div><div class="rest"></div></div>
+            <div class="limitmeta"><span><b style="color:var(--ink)">$1,400.00</b> spent out of</span><b>$5,500.00</b></div>
+          </section>
+          <section class="card mycards">
+            <div class="mhead">
+              <h3><svg width="16" height="16" style="color:var(--muted)"><use href="#i-card"/></svg>My Cards</h3>
+              <button class="add">+ Add new</button>
+            </div>
+            <div class="cards">
+              <div class="cc black">
+                <svg class="nfc" width="19" height="19"><use href="#i-nfc"/></svg>
+                <span class="active-pill">Active</span>
+                <span class="mc"><i></i><i></i></span>
+                <div class="cnum">
+                  <div><label>Card Number</label><b>**** **** 6782</b></div>
+                  <div><label>EXP</label><b>09/29</b></div>
+                  <div><label>CVV</label><b>611</b></div>
+                </div>
+              </div>
+              <div class="cc orange">
+                <svg class="nfc" width="19" height="19"><use href="#i-nfc"/></svg>
+                <span class="active-pill">Active</span>
+                <span class="spark" style="right:18px;top:38px">✦</span>
+                <span class="spark" style="right:36px;top:66px;font-size:10px">✧</span>
+                <span class="spark" style="right:16px;top:84px;font-size:9px">✦</span>
+                <div class="cnum">
+                  <div><label>Card Number</label><b>**** **** 4356</b></div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- ============ Recent Activities ============ -->
+        <section class="card activities">
+          <div class="ahead">
+            <h3>Recent Activities</h3>
+            <label class="searchbox"><svg width="14" height="14"><use href="#i-search"/></svg><input placeholder="Search" id="q"></label>
+            <button class="filter"><svg width="14" height="14"><use href="#i-filter"/></svg>Filter</button>
+          </div>
+          <table>
+            <thead><tr>
+              <th style="width:30px"><input type="checkbox" class="cb" aria-label="Select all"></th>
+              <th>Order ID</th><th>Activity</th><th>Price</th><th>Status</th><th>Date</th><th style="width:34px"></th>
+            </tr></thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>
+/* ===== Profit / Loss 柱图（高度按 50k 满刻度百分比） ===== */
+const DATA = [
+  ['Jan',70,36],['Feb',84,32],['Mar',66,24],['Apr',76,34],
+  ['May',74,42],['Jun',94,56],['Jul',78,32],['Aug',60,26]
+];
+document.getElementById('bars').innerHTML = DATA.map(([m,p,l]) =>
+  `<div class="grp"><i class="p" style="height:${p}%"></i><i class="l" style="height:${l}%"></i><span>${m}</span></div>`).join('');
+
+/* ===== Recent Activities 表格 ===== */
+const ROWS = [
+  {id:'INV_000076', ic:'A',  c:'#2563EB', name:'Mobile App Purchase',  price:'$25,500', st:['c','Completed'],  date:'17 Apr, 2026 03:45 PM', on:false},
+  {id:'INV_000075', ic:'✈', c:'#1E2A78', name:'Hotel Booking',        price:'$32,750', st:['p','Pending'],    date:'15 Apr, 2026 11:30 AM', on:false},
+  {id:'INV_000074', ic:'✈', c:'#2E9BFF', name:'Flight Ticket Booking',price:'$40,200', st:['c','Completed'],  date:'15 Apr, 2026 12:00 PM', on:false},
+  {id:'INV_000073', ic:'✳', c:'#F05537', name:'Grocery Purchase',     price:'$50,200', st:['g','In Progress'],date:'14 Apr, 2026 09:15 PM', on:true},
+  {id:'INV_000073', ic:'A',  c:'#EF4444', name:'Software License',     price:'$15,900', st:['c','Completed'],  date:'10 Apr, 2026 06:00 AM', on:false}
+];
+function renderRows(list){
+  document.getElementById('rows').innerHTML = list.map(r => `<tr>
+    <td><input type="checkbox" class="cb" ${r.on ? 'checked' : ''} aria-label="Select ${r.id}"></td>
+    <td class="id">${r.id}</td>
+    <td><span class="act"><span class="aic" style="background:${r.c}">${r.ic}</span>${r.name}</span></td>
+    <td class="price">${r.price}</td>
+    <td><span class="status"><i class="${r.st[0]}"></i>${r.st[1]}</span></td>
+    <td class="date">${r.date}</td>
+    <td><button class="more" aria-label="More">⋯</button></td>
+  </tr>`).join('');
+}
+renderRows(ROWS);
+document.getElementById('q').addEventListener('input', e => {
+  const q = e.target.value.trim().toLowerCase();
+  renderRows(ROWS.filter(r => !q || (r.id + r.name + r.st[1]).toLowerCase().includes(q)));
+});
+/* ===== Tab 切换态 ===== */
+document.querySelectorAll('.tabs a').forEach(a => a.addEventListener('click', () => {
+  document.querySelectorAll('.tabs a').forEach(x => x.classList.remove('active'));
+  a.classList.add('active');
+}));
+</script>
+</body>
+</html>

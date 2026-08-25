@@ -1,0 +1,15 @@
+interface:
+  display_name: "AI 记账"
+  short_description: "通过 MCP 安全记录、查询、转账并分析个人账务数据"
+  default_prompt: "Use $ezbookkeeping to record or analyze my personal finances through the configured MCP server."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "ezbookkeeping"
+      description: "Authenticated ezBookkeeping personal finance MCP server"
+      transport: "streamable_http"
+      url: "http://localhost:8080/mcp"
+
+policy:
+  allow_implicit_invocation: true

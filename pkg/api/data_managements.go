@@ -1,13 +1,21 @@
 package api
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"math"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/mayswind/ezbookkeeping/pkg/backup"
 	"github.com/mayswind/ezbookkeeping/pkg/converters"
 	"github.com/mayswind/ezbookkeeping/pkg/core"
+	"github.com/mayswind/ezbookkeeping/pkg/datastore"
 	"github.com/mayswind/ezbookkeeping/pkg/errs"
 	"github.com/mayswind/ezbookkeeping/pkg/log"
 	"github.com/mayswind/ezbookkeeping/pkg/models"
@@ -18,6 +26,8 @@ import (
 
 const pageCountForClearTransactions = 1000
 const pageCountForDataExport = 1000
+
+var exitForFullBackupRestore = os.Exit
 
 // DataManagementsApi represents data management api
 type DataManagementsApi struct {
@@ -33,6 +43,10 @@ type DataManagementsApi struct {
 	templates               *services.TransactionTemplateService
 	userCustomExchangeRates *services.UserCustomExchangeRatesService
 	insightsExploreres      *services.InsightsExplorerService
+	productAssets           *services.ProductAssetService
+	monthlyBudgets          *services.MonthlyBudgetService
+	aiReviewItems           *services.AIReviewItemService
+	aiReports               *services.AIReportService
 }
 
 // Initialize a data management api singleton instance
@@ -52,6 +66,10 @@ var (
 		templates:               services.TransactionTemplates,
 		userCustomExchangeRates: services.UserCustomExchangeRates,
 		insightsExploreres:      services.InsightsExplorers,
+		productAssets:           services.ProductAssets,
+		monthlyBudgets:          services.MonthlyBudgets,
+		aiReviewItems:           services.AIReviewItems,
+		aiReports:               services.AIReports,
 	}
 )
 
@@ -63,6 +81,136 @@ func (a *DataManagementsApi) ExportDataToEzbookkeepingCSVHandler(c *core.WebCont
 // ExportDataToEzbookkeepingTSVHandler returns exported data in csv format
 func (a *DataManagementsApi) ExportDataToEzbookkeepingTSVHandler(c *core.WebContext) ([]byte, string, *errs.Error) {
 	return a.getExportedFileContent(c, "tsv")
+}
+
+// DownloadFullBackupHandler returns a consistent SQLite snapshot and local object storage archive.
+func (a *DataManagementsApi) DownloadFullBackupHandler(c *core.WebContext) ([]byte, string, *errs.Error) {
+	config := a.CurrentConfig()
+	if !supportsFullBackup(config) {
+		return nil, "", errs.ErrFullBackupNotSupported
+	}
+	databasePath := config.DatabaseConfig.DatabasePath
+	temporaryDirectory, err := os.MkdirTemp(filepath.Dir(databasePath), ".full-backup-")
+	if err != nil {
+		log.Errorf(c, "[data_managements.DownloadFullBackupHandler] failed to create temporary directory, because %s", err.Error())
+		return nil, "", errs.ErrOperationFailed
+	}
+	defer os.RemoveAll(temporaryDirectory)
+	snapshotPath := filepath.Join(temporaryDirectory, backup.DatabaseName)
+	session := datastore.Container.UserDataStore.Get(0).NewSession(c)
+	_, err = session.Exec("VACUUM INTO ?", snapshotPath)
+	session.Close()
+	if err != nil {
+		log.Errorf(c, "[data_managements.DownloadFullBackupHandler] failed to create SQLite snapshot, because %s", err.Error())
+		return nil, "", errs.ErrOperationFailed
+	}
+	estimatedSize, err := fullBackupSourceSize(snapshotPath, config.LocalFileSystemPath)
+	if err != nil {
+		return nil, "", errs.ErrOperationFailed
+	}
+	if estimatedSize > int64(config.MaxFullBackupFileSize) {
+		return nil, "", errs.ErrFullBackupTooLarge
+	}
+	var content bytes.Buffer
+	if err = backup.WriteArchive(&content, snapshotPath, config.LocalFileSystemPath, time.Now()); err != nil {
+		log.Errorf(c, "[data_managements.DownloadFullBackupHandler] failed to create archive, because %s", err.Error())
+		return nil, "", errs.ErrOperationFailed
+	}
+	if content.Len() > int(config.MaxFullBackupFileSize) {
+		return nil, "", errs.ErrFullBackupTooLarge
+	}
+	return content.Bytes(), "ai-bookkeeping-full-backup_" + time.Now().Format("20060102_150405") + ".zip", nil
+}
+
+// RestoreFullBackupHandler validates and stages a backup. Compose restarts the process and applies it before opening SQLite.
+func (a *DataManagementsApi) RestoreFullBackupHandler(c *core.WebContext) (any, *errs.Error) {
+	config := a.CurrentConfig()
+	if !supportsFullBackup(config) {
+		return nil, errs.ErrFullBackupNotSupported
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, int64(config.MaxFullBackupFileSize)+1024*1024)
+	form, err := c.MultipartForm()
+	if err != nil {
+		var maxBytesError *http.MaxBytesError
+		if errors.As(err, &maxBytesError) {
+			return nil, errs.ErrFullBackupTooLarge
+		}
+		return nil, errs.ErrParameterInvalid
+	}
+	defer form.RemoveAll()
+	files := form.File["backup"]
+	if len(files) < 1 || files[0].Size < 1 {
+		return nil, errs.ErrFullBackupInvalid
+	}
+	if files[0].Size > int64(config.MaxFullBackupFileSize) {
+		return nil, errs.ErrFullBackupTooLarge
+	}
+	pendingPath := config.DatabaseConfig.DatabasePath + backup.PendingFileSuffix
+	if _, statErr := os.Stat(pendingPath); statErr == nil {
+		return nil, errs.ErrFullBackupInProgress
+	} else if !os.IsNotExist(statErr) {
+		return nil, errs.ErrOperationFailed
+	}
+	source, err := files[0].Open()
+	if err != nil {
+		return nil, errs.ErrOperationFailed
+	}
+	defer source.Close()
+	temporary, err := os.CreateTemp(filepath.Dir(pendingPath), ".restore-upload-")
+	if err != nil {
+		return nil, errs.ErrOperationFailed
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	written, copyErr := io.Copy(temporary, io.LimitReader(source, int64(config.MaxFullBackupFileSize)+1))
+	closeErr := temporary.Close()
+	if copyErr != nil || closeErr != nil {
+		return nil, errs.ErrOperationFailed
+	}
+	if written > int64(config.MaxFullBackupFileSize) {
+		return nil, errs.ErrFullBackupTooLarge
+	}
+	if err = backup.ValidateArchive(temporaryPath, int64(config.MaxFullBackupFileSize)); err != nil {
+		log.Warnf(c, "[data_managements.RestoreFullBackupHandler] rejected invalid backup for user \"uid:%d\", because %s", c.GetCurrentUid(), err.Error())
+		return nil, errs.ErrFullBackupInvalid
+	}
+	if err = os.Rename(temporaryPath, pendingPath); err != nil {
+		return nil, errs.ErrOperationFailed
+	}
+	go func() {
+		time.Sleep(2 * time.Second)
+		exitForFullBackupRestore(0)
+	}()
+	return map[string]bool{"restarting": true}, nil
+}
+
+func supportsFullBackup(config *settings.Config) bool {
+	return config.DatabaseConfig != nil && config.DatabaseConfig.DatabaseType == settings.Sqlite3DbType &&
+		config.StorageType == settings.LocalFileSystemObjectStorageType
+}
+
+func fullBackupSourceSize(databasePath string, storagePath string) (int64, error) {
+	info, err := os.Stat(databasePath)
+	if err != nil {
+		return 0, err
+	}
+	total := info.Size()
+	if storagePath == "" {
+		return total, nil
+	}
+	err = filepath.Walk(storagePath, func(_ string, item os.FileInfo, walkErr error) error {
+		if os.IsNotExist(walkErr) {
+			return nil
+		}
+		if walkErr != nil {
+			return walkErr
+		}
+		if item.Mode().IsRegular() {
+			total += item.Size()
+		}
+		return nil
+	})
+	return total, err
 }
 
 // DataStatisticsHandler returns user data statistics
@@ -213,6 +361,34 @@ func (a *DataManagementsApi) ClearAllDataHandler(c *core.WebContext) (any, *errs
 
 	if err != nil {
 		log.Errorf(c, "[data_managements.ClearAllDataHandler] failed to delete all explorations, because %s", err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	err = a.productAssets.DeleteAllProductAssets(c, uid)
+
+	if err != nil {
+		log.Errorf(c, "[data_managements.ClearAllDataHandler] failed to delete all product assets, because %s", err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	err = a.monthlyBudgets.DeleteAllMonthlyBudgets(c, uid)
+
+	if err != nil {
+		log.Errorf(c, "[data_managements.ClearAllDataHandler] failed to delete all monthly budgets, because %s", err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	err = a.aiReviewItems.DeleteAll(c, uid)
+
+	if err != nil {
+		log.Errorf(c, "[data_managements.ClearAllDataHandler] failed to delete all AI review items, because %s", err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	err = a.aiReports.DeleteAll(c, uid)
+
+	if err != nil {
+		log.Errorf(c, "[data_managements.ClearAllDataHandler] failed to delete all AI reports, because %s", err.Error())
 		return nil, errs.Or(err, errs.ErrOperationFailed)
 	}
 

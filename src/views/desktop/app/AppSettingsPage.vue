@@ -1,5 +1,5 @@
 <template>
-    <div>
+    <div class="settings-page">
         <v-tabs show-arrows v-model="activeTab">
             <v-tab value="basicSetting" @click="pushRouter('basicSetting')">
                 <v-icon size="20" start :icon="mdiCogOutline"/>
