@@ -1,6 +1,7 @@
 # Finexy AI Bookkeeping
 
 [![GitHub](https://img.shields.io/badge/GitHub-Public-2ea44f?logo=github)](https://github.com/SMTM-PH/finexy-ai-bookkeeping)
+[![Releases](https://img.shields.io/badge/GitHub-Releases-8250df?logo=github)](https://github.com/SMTM-PH/finexy-ai-bookkeeping/releases)
 [![Docker Image](https://img.shields.io/badge/Docker%20Hub-ph97%2Ffinexy--bookkeeping-2496ed?logo=docker)](https://hub.docker.com/r/ph97/finexy-bookkeeping)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-AMD64-blue)](#部署要求)
@@ -19,6 +20,10 @@ Finexy 是基于 [ezBookkeeping](https://github.com/mayswind/ezbookkeeping) 二�
 - MCP 接口，可连接 Codex 等支持 MCP 的客户端
 - Web、PWA 和 Windows 桌面客户端
 - Docker Compose、群晖、威联通及其他 AMD64 NAS 部署
+
+## 下载与发布
+
+版本说明、Windows 客户端和其他发行文件将发布在 [**Releases**](https://github.com/SMTM-PH/finexy-ai-bookkeeping/releases) 页面。Docker 镜像继续通过 [Docker Hub](https://hub.docker.com/r/ph97/finexy-bookkeeping) 提供。
 
 ## 部署要求
 
