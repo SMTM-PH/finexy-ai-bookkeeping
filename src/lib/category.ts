@@ -1,12 +1,54 @@
 import { reversed, keys, values } from '@/core/base.ts';
 import { NormalizedText } from '@/core/text.ts';
-import { type LocalizedPresetCategory, CategoryType } from '@/core/category.ts';
+import { type LocalizedPresetCategory, type PresetCategory, CategoryType, ALL_CATEGORY_TYPES } from '@/core/category.ts';
 import { TransactionType } from '@/core/transaction.ts';
+import { DEFAULT_EXPENSE_CATEGORIES, DEFAULT_INCOME_CATEGORIES, DEFAULT_TRANSFER_CATEGORIES } from '@/consts/category.ts';
+import { ALL_LANGUAGES, DEFAULT_LANGUAGE } from '@/locales/index.ts';
 import {
     type TransactionCategoryCreateRequest,
     type TransactionCategoryCreateWithSubCategories,
     TransactionCategory
 } from '@/models/transaction_category.ts';
+
+interface CategoryLocaleMessages {
+    readonly category?: Record<string, string>;
+}
+
+export function getAllLocalizedTransactionDefaultCategories(categoryType: 0 | CategoryType, locale: string): Record<string, LocalizedPresetCategory[]> {
+    const allCategories: Record<string, LocalizedPresetCategory[]> = {};
+    const categoryTypes: CategoryType[] = categoryType === 0 ? [...ALL_CATEGORY_TYPES] : [categoryType];
+    const fallbackMessages = (ALL_LANGUAGES[DEFAULT_LANGUAGE]?.content as CategoryLocaleMessages | undefined)?.category || {};
+    const localeMessages = (ALL_LANGUAGES[locale]?.content as CategoryLocaleMessages | undefined)?.category || fallbackMessages;
+
+    const translateCategoryName = (name: string): string => localeMessages[name] || fallbackMessages[name] || name;
+
+    for (const currentCategoryType of categoryTypes) {
+        let defaultCategories: PresetCategory[] = [];
+
+        if (currentCategoryType === CategoryType.Income) {
+            defaultCategories = DEFAULT_INCOME_CATEGORIES;
+        } else if (currentCategoryType === CategoryType.Expense) {
+            defaultCategories = DEFAULT_EXPENSE_CATEGORIES;
+        } else if (currentCategoryType === CategoryType.Transfer) {
+            defaultCategories = DEFAULT_TRANSFER_CATEGORIES;
+        }
+
+        allCategories[`${currentCategoryType}`] = defaultCategories.map(category => ({
+            name: translateCategoryName(category.name),
+            type: currentCategoryType,
+            icon: category.categoryIconId,
+            color: category.color,
+            subCategories: category.subCategories.map(subCategory => ({
+                name: translateCategoryName(subCategory.name),
+                type: currentCategoryType,
+                icon: subCategory.categoryIconId,
+                color: subCategory.color
+            }))
+        }));
+    }
+
+    return allCategories;
+}
 
 export function transactionTypeToCategoryType(transactionType: TransactionType): CategoryType | null {
     if (transactionType === TransactionType.Income) {

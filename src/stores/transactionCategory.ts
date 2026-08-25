@@ -6,6 +6,8 @@ import type { BeforeResolveFunction } from '@/core/base.ts';
 import { itemAndIndex, values } from '@/core/base.ts';
 import { CategoryType } from '@/core/category.ts';
 
+import { useUserStore } from './user.ts';
+
 import {
     type TransactionCategoryInfoResponse,
     type TransactionCategoryCreateBatchRequest,
@@ -13,15 +15,21 @@ import {
     TransactionCategory,
 } from '@/models/transaction_category.ts';
 
-import { isEquals } from '@/lib/common.ts';
-import { getFirstVisibleCategoryId } from '@/lib/category.ts';
+import { categorizedArrayToPlainArray, isEquals } from '@/lib/common.ts';
+import {
+    getAllLocalizedTransactionDefaultCategories,
+    getFirstVisibleCategoryId,
+    localizedPresetCategoriesToTransactionCategoryCreateWithSubCategories
+} from '@/lib/category.ts';
 import services, { type ApiResponsePromise } from '@/lib/services.ts';
 import logger from '@/lib/logger.ts';
 
 export const useTransactionCategoriesStore = defineStore('transactionCategories', () =>{
+    const userStore = useUserStore();
     const allTransactionCategories = ref<Record<number, TransactionCategory[]>>({});
     const allTransactionCategoriesMap = ref<Record<string, TransactionCategory>>({});
     const transactionCategoryListStateInvalid = ref<boolean>(true);
+    let defaultCategoriesBackfillPromise: Promise<Record<number, TransactionCategory[]>> | null = null;
 
     const allAvailablePrimaryCategoriesCount = computed<number>(() => {
         let count = 0;
@@ -202,9 +210,48 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
         allTransactionCategories.value = {};
         allTransactionCategoriesMap.value = {};
         transactionCategoryListStateInvalid.value = true;
+        defaultCategoriesBackfillPromise = null;
+    }
+
+    function hasNoCategories(categories: Record<number, TransactionCategory[]>): boolean {
+        for (const categoryList of values(categories)) {
+            if (categoryList.length > 0) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    function backfillDefaultCategories(): Promise<Record<number, TransactionCategory[]>> {
+        if (defaultCategoriesBackfillPromise) {
+            return defaultCategoriesBackfillPromise;
+        }
+
+        const localizedCategories = getAllLocalizedTransactionDefaultCategories(0, userStore.currentUserLanguage);
+        const presetCategories = categorizedArrayToPlainArray(localizedCategories);
+        const categories = localizedPresetCategoriesToTransactionCategoryCreateWithSubCategories(presetCategories);
+
+        defaultCategoriesBackfillPromise = services.addTransactionCategoryBatch({ categories }).then(response => {
+            const data = response.data;
+
+            if (!data || !data.success || !data.result) {
+                throw { message: 'Unable to add preset categories' };
+            }
+
+            return TransactionCategory.ofMap(data.result);
+        }).finally(() => {
+            defaultCategoriesBackfillPromise = null;
+        });
+
+        return defaultCategoriesBackfillPromise;
     }
 
     function loadAllCategories({ force }: { force?: boolean }): Promise<Record<number, TransactionCategory[]>> {
+        if (defaultCategoriesBackfillPromise) {
+            return defaultCategoriesBackfillPromise;
+        }
+
         if (!force && !transactionCategoryListStateInvalid.value) {
             return new Promise((resolve) => {
                 resolve(allTransactionCategories.value);
@@ -243,8 +290,18 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
                     return;
                 }
 
-                loadTransactionCategoryList(transactionCategories);
+                if (hasNoCategories(transactionCategories)) {
+                    backfillDefaultCategories().then(backfilledCategories => {
+                        loadTransactionCategoryList(backfilledCategories);
+                        resolve(backfilledCategories);
+                    }).catch(error => {
+                        updateTransactionCategoryListInvalidState(true);
+                        reject(error);
+                    });
+                    return;
+                }
 
+                loadTransactionCategoryList(transactionCategories);
                 resolve(transactionCategories);
             }).catch(error => {
                 if (force) {

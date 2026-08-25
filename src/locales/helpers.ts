@@ -125,11 +125,8 @@ import {
 } from '@/core/account.ts';
 
 import {
-    type PresetCategory,
     type LocalizedPresetCategory,
-    type LocalizedPresetSubCategory,
-    CategoryType,
-    ALL_CATEGORY_TYPES
+    CategoryType
 } from '@/core/category.ts';
 
 import {
@@ -178,7 +175,6 @@ import type { ErrorResponse } from '@/core/api.ts';
 import { AMOUNT_FACTOR, DISPLAY_HIDDEN_AMOUNT, INCOMPLETE_AMOUNT_SUFFIX } from '@/consts/numeral.ts';
 import { UTC_TIMEZONE, ALL_TIMEZONES } from '@/consts/timezone.ts';
 import { ALL_CURRENCIES } from '@/consts/currency.ts';
-import { DEFAULT_EXPENSE_CATEGORIES, DEFAULT_INCOME_CATEGORIES, DEFAULT_TRANSFER_CATEGORIES } from '@/consts/category.ts';
 import { KnownErrorCode, SPECIFIED_API_NOT_FOUND_ERRORS, PARAMETERIZED_ERRORS } from '@/consts/api.ts';
 import { OAUTH2_PROVIDER_DISPLAY_NAME } from '@/consts/oauth2.ts';
 import { DEFAULT_DOCUMENT_LANGUAGE_FOR_IMPORT_FILE, SUPPORTED_DOCUMENT_LANGUAGES_FOR_IMPORT_FILE, SUPPORTED_IMPORT_FILE_CATEGORY_AND_TYPES } from '@/consts/file.ts';
@@ -198,6 +194,7 @@ import {
     isNumber,
     isBoolean
 } from '@/lib/common.ts';
+import { getAllLocalizedTransactionDefaultCategories } from '@/lib/category.ts';
 
 import {
     getCurrentDateTime,
@@ -1486,54 +1483,7 @@ export function useI18n() {
     }
 
     function getAllTransactionDefaultCategories(categoryType: 0 | CategoryType, locale: string): Record<string, LocalizedPresetCategory[]> {
-        const allCategories: Record<string, LocalizedPresetCategory[]> = {};
-        const categoryTypes: CategoryType[] = [];
-
-        if (categoryType === 0) {
-            categoryTypes.push(...ALL_CATEGORY_TYPES);
-        } else {
-            categoryTypes.push(categoryType);
-        }
-
-        for (const categoryType of categoryTypes) {
-            const categories: LocalizedPresetCategory[] = [];
-            let defaultCategories: PresetCategory[] = [];
-
-            if (categoryType === CategoryType.Income) {
-                defaultCategories = DEFAULT_INCOME_CATEGORIES;
-            } else if (categoryType === CategoryType.Expense) {
-                defaultCategories = DEFAULT_EXPENSE_CATEGORIES;
-            } else if (categoryType === CategoryType.Transfer) {
-                defaultCategories = DEFAULT_TRANSFER_CATEGORIES;
-            }
-
-            for (const category of defaultCategories) {
-                const submitCategory: LocalizedPresetCategory = {
-                    name: t('category.' + category.name, {}, { locale: locale }),
-                    type: categoryType,
-                    icon: category.categoryIconId,
-                    color: category.color,
-                    subCategories: []
-                };
-
-                for (const subCategory of category.subCategories) {
-                    const submitSubCategory: LocalizedPresetSubCategory = {
-                        name: t('category.' + subCategory.name, {}, { locale: locale }),
-                        type: categoryType,
-                        icon: subCategory.categoryIconId,
-                        color: subCategory.color
-                    };
-
-                    submitCategory.subCategories.push(submitSubCategory);
-                }
-
-                categories.push(submitCategory);
-            }
-
-            allCategories[`${categoryType}`] = categories;
-        }
-
-        return allCategories;
+        return getAllLocalizedTransactionDefaultCategories(categoryType, locale);
     }
 
     function getAllDisplayExchangeRates(exchangeRatesData?: LatestExchangeRateResponse): LocalizedLatestExchangeRate[] {
