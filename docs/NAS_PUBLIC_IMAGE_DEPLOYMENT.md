@@ -28,6 +28,14 @@ uname -m
 
 两个镜像位于同一个公开仓库，通过不同标签区分，任何人都可以直接拉取。
 
+仓库直达地址：[Docker Hub - ph97/finexy-bookkeeping](https://hub.docker.com/r/ph97/finexy-bookkeeping)
+
+如果 Docker Hub 网页搜索没有显示仓库，请搜索完整名称 `ph97/finexy-bookkeeping`，并清除 Official Images、Verified Publisher、Trusted Content 等筛选条件。网页搜索结果不影响镜像拉取，也可以在终端确认：
+
+```bash
+docker search ph97/finexy-bookkeeping
+```
+
 ## 3. 创建部署目录
 
 群晖示例：
