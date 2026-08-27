@@ -1,5 +1,5 @@
 # Build backend binary file
-FROM golang:1.26.4-alpine3.24 AS be-builder
+FROM golang:1.27.0-alpine3.24 AS be-builder
 ARG GOPROXY=https://proxy.golang.org,direct
 ARG RELEASE_BUILD
 ARG BUILD_PIPELINE
