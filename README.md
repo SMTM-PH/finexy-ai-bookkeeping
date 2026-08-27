@@ -55,10 +55,19 @@ Windows 包当前未进行代码签名，首次运行时 SmartScreen 可能显�
 
 ## Docker Hub
 
-公开镜像无需登录：
+公开镜像仓库：[**ph97/finexy-bookkeeping**](https://hub.docker.com/r/ph97/finexy-bookkeeping)
+
+Docker Hub 网页搜索时请使用包含命名空间的完整名称 `ph97/finexy-bookkeeping`，并关闭 Official Images、Verified Publisher 或 Trusted Content 等筛选条件。也可以通过命令行验证：
 
 ```bash
-docker pull ph97/finexy-bookkeeping:1.7.0-amd64
+docker search ph97/finexy-bookkeeping
+```
+
+公开镜像无需登录即可拉取：
+
+```bash
+docker pull ph97/finexy-bookkeeping:1.7.3-amd64
+docker pull ph97/finexy-bookkeeping:latest-amd64
 docker pull ph97/finexy-bookkeeping:ocr-1.0-amd64
 ```
 
@@ -97,6 +106,7 @@ go test ./...
 ```
 
 - [贡献指南](CONTRIBUTING.md)
+- [分支策略](CONTRIBUTING.md#分支策略)
 - [安全政策](SECURITY.md)
 - [行为准则](CODE_OF_CONDUCT.md)
 - [项目文档](docs/AI_BOOKKEEPING_MVP.md)

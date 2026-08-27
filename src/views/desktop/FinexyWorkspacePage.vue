@@ -327,8 +327,7 @@
                                     `tone-${index}`,
                                     {
                                         selected:
-                                            selectedAccount.title ===
-                                            item.title,
+                                            selectedAccount?.title === item.title,
                                     },
                                 ]"
                                 tabindex="0"
@@ -342,7 +341,7 @@
                                 ><em>{{ item.status }}</em>
                             </article>
                         </div>
-                        <aside class="panel account-detail">
+                        <aside v-if="selectedAccount" class="panel account-detail">
                             <PanelHead
                                 eyebrow="CURRENT ACCOUNT"
                                 title="账户详情"
@@ -353,25 +352,17 @@
                                 <small>可用余额</small
                                 ><strong>{{ selectedAccount.amount }}</strong>
                             </div>
-                            <dl>
-                                <div>
-                                    <dt>本月流入</dt>
-                                    <dd>¥12,680.00</dd>
-                                </div>
-                                <div>
-                                    <dt>本月流出</dt>
-                                    <dd>¥4,280.00</dd>
-                                </div>
-                                <div>
-                                    <dt>交易笔数</dt>
-                                    <dd>46 笔</dd>
-                                </div>
-                            </dl>
                             <div class="split-buttons">
                                 <router-link to="/transaction/list"
                                     >查看流水</router-link
                                 ><button @click="editAccount">编辑账户</button>
                             </div>
+                        </aside>
+                        <aside v-else class="panel account-detail empty-state">
+                            <PanelHead eyebrow="CURRENT ACCOUNT" title="账户详情" />
+                            <h2>还没有账户</h2>
+                            <p>添加第一个真实账户后，余额和账户详情会显示在这里。</p>
+                            <button class="primary" type="button" @click="primaryAction">添加账户</button>
                         </aside>
                     </section>
 
@@ -412,6 +403,9 @@
                                     "
                                 />
                             </article>
+                            <p v-if="!sortedSchedules.length" class="empty-copy">
+                                还没有周期计划。创建计划后，执行日期会显示在日历中。
+                            </p>
                         </div>
                         <div class="panel calendar">
                             <PanelHead
@@ -535,7 +529,7 @@
                             <div class="legend">
                                 <span><i></i>收入</span><span><i></i>支出</span>
                             </div>
-                            <div class="chart" role="img" :aria-label="`${reportPeriod}收入与支出趋势`">
+                            <div v-if="reportBars.length" class="chart" role="img" :aria-label="`${reportPeriod}收入与支出趋势`">
                                 <div
                                     v-for="line in 5"
                                     :key="line"
@@ -556,22 +550,23 @@
                                     ><span>{{ bars.label }}</span>
                                 </div>
                             </div>
+                            <p v-else class="empty-copy">暂无收支数据，记录流水后会自动生成趋势。</p>
                         </div>
                         <aside class="panel breakdown">
                             <PanelHead eyebrow="BREAKDOWN" title="支出构成" />
                             <div class="donut">
-                                <span><b>¥9,684</b><small>总支出</small></span>
+                                <span><b>{{ formatBookkeepingMoney(reportExpenseTotal) }}</b><small>本月总支出</small></span>
                             </div>
                             <ul>
                                 <li
-                                    v-for="item in categories.slice(0, 4)"
+                                    v-for="item in expenseBreakdown"
                                     :key="item.title"
                                 >
                                     <i :style="{ background: item.color }"></i
                                     ><span>{{ item.title }}</span
                                     ><b>{{ item.percent }}%</b>
                                 </li>
-                                <li v-if="!categories.length" class="breakdown-empty">
+                                <li v-if="!expenseBreakdown.length" class="breakdown-empty">
                                     暂无支出分类数据
                                 </li>
                             </ul>
@@ -922,9 +917,13 @@
                         </article>
                         <div v-if="!templates.length" class="template-empty">
                             <v-icon :icon="mdiFileDocumentOutline" size="28" />
-                            <b>还没有交易模板</b>
-                            <span>保存高频交易后，“编辑”和“使用模板”都会直接操作真实模板。</span>
-                            <button type="button" @click="primaryAction">新增第一个模板</button>
+                            <b>常用模板推荐</b>
+                            <span>推荐项不包含虚构金额或账户；选择后请绑定自己的真实账户并保存。</span>
+                            <div class="recommended-template-list">
+                                <button v-for="item in recommendedTemplates" :key="item.title" type="button" @click="createRecommendedTemplate(item)">
+                                    <b>{{ item.title }}</b><small>{{ item.description }}</small>
+                                </button>
+                            </div>
                         </div>
                     </section>
 
@@ -1786,6 +1785,7 @@ import { useProductAssetsStore } from "@/stores/productAsset.ts";
 import { useSettingsStore } from "@/stores/setting.ts";
 import { useTransactionsStore } from "@/stores/transaction.ts";
 import { useAIReviewItemsStore } from "@/stores/aiReviewItem.ts";
+import { useOverviewStore } from "@/stores/overview.ts";
 import { useUserStore } from "@/stores/user.ts";
 import { useRootStore } from "@/stores/index.ts";
 import { TransactionTag } from "@/models/transaction_tag.ts";
@@ -1901,6 +1901,11 @@ interface Config {
     actionIcon: string;
     metrics: Metric[];
 }
+interface RecommendedTemplate {
+    title: string;
+    description: string;
+    type: number;
+}
 
 const PanelHead = defineComponent({
     props: {
@@ -1989,6 +1994,7 @@ const productAssetsStore = useProductAssetsStore();
 const settingsStore = useSettingsStore();
 const transactionsStore = useTransactionsStore();
 const aiReviewItemsStore = useAIReviewItemsStore();
+const overviewStore = useOverviewStore();
 const userStore = useUserStore();
 const rootStore = useRootStore();
 const { formatAmountToLocalizedNumeralsWithCurrency } = useI18n();
@@ -2044,10 +2050,10 @@ const configs: Record<PageKey, RawConfig> = {
         action: "新增交易",
         actionIcon: mdiPlus,
         values: [
-            ["本月收入", "¥18,500", "↑ 8% 较上月", "up"],
-            ["本月支出", "¥6,080", "↓ 5% 较上月", "down"],
-            ["待确认", "3 笔", "需要你的确认", "neutral"],
-            ["净收入", "¥12,420", "本月结余良好", "up"],
+            ["本月收入", "—", "正在读取账本", "neutral"],
+            ["本月支出", "—", "正在读取账本", "neutral"],
+            ["待确认", "—", "正在读取待处理记录", "neutral"],
+            ["净收入", "—", "正在计算", "neutral"],
         ],
     },
     manage: {
@@ -2057,10 +2063,10 @@ const configs: Record<PageKey, RawConfig> = {
         action: "添加账户",
         actionIcon: mdiPlus,
         values: [
-            ["净资产", "¥689,372", "↑ 4.2% 本月", "up"],
-            ["可用余额", "¥146,820", "全部活期账户", "neutral"],
-            ["负债", "¥5,260", "9月12日待还", "down"],
-            ["账户数量", "8 个", "7 个状态正常", "up"],
+            ["账户数量", "—", "正在读取账户", "neutral"],
+            ["可见账户", "—", "正在读取账户", "neutral"],
+            ["已隐藏", "—", "正在读取账户", "neutral"],
+            ["账户币种", "—", "正在读取账户", "neutral"],
         ],
     },
     program: {
@@ -2070,10 +2076,10 @@ const configs: Record<PageKey, RawConfig> = {
         action: "新建计划",
         actionIcon: mdiPlus,
         values: [
-            ["本月计划", "¥7,225", "5 项待执行", "neutral"],
-            ["已执行", "8 项", "完成率 61%", "up"],
-            ["预算剩余", "¥3,420", "可用 38%", "up"],
-            ["下次执行", "9月1日", "房租 ¥5,200", "neutral"],
+            ["计划数量", "—", "正在读取周期计划", "neutral"],
+            ["已启用", "—", "正在读取周期计划", "neutral"],
+            ["已暂停", "—", "正在读取周期计划", "neutral"],
+            ["最近执行日", "—", "正在读取周期计划", "neutral"],
         ],
     },
     account: {
@@ -2096,10 +2102,10 @@ const configs: Record<PageKey, RawConfig> = {
         action: "导出报表",
         actionIcon: mdiDownloadOutline,
         values: [
-            ["净收入", "¥12,420", "↑ 8% 较上月", "up"],
-            ["储蓄率", "67.1%", "↑ 5.4%", "up"],
-            ["最大支出", "居住", "¥5,620", "neutral"],
-            ["日均支出", "¥312", "↓ 6%", "down"],
+            ["本月净收入", "—", "正在读取账本", "neutral"],
+            ["本月收入", "—", "正在读取账本", "neutral"],
+            ["本月支出", "—", "正在读取账本", "neutral"],
+            ["交易笔数", "—", "正在读取流水", "neutral"],
         ],
     },
     categories: {
@@ -2198,18 +2204,44 @@ const config = computed<Config>(() => {
     const source = configs[pageKey.value];
     let values = source.values;
     if (pageKey.value === "activity") {
-        values = source.values.map((item, index) =>
-            index === 2
-                ? [
-                      "待确认",
-                      `${aiReviewItemsStore.items.length} 笔`,
-                      aiReviewItemsStore.items.length
-                          ? "完成入账或忽略后自动更新"
-                          : "当前没有待处理记录",
-                      "neutral",
-                  ]
-                : item,
-        );
+        const month = overviewStore.transactionOverview.thisMonth;
+        const income = month?.incomeAmount ?? 0;
+        const expense = month?.expenseAmount ?? 0;
+        values = [
+            ["本月收入", formatBookkeepingMoney(income), "来自当前账本", "up"],
+            ["本月支出", formatBookkeepingMoney(expense), "来自当前账本", "down"],
+            ["待确认", `${aiReviewItemsStore.items.length} 笔`, aiReviewItemsStore.items.length ? "完成入账或忽略后自动更新" : "当前没有待处理记录", "neutral"],
+            ["净收入", formatBookkeepingMoney(income - expense), "收入减去支出", income >= expense ? "up" : "down"],
+        ];
+    } else if (pageKey.value === "manage") {
+        const list = accountsStore.allVisiblePlainAccounts;
+        const currencies = new Set(list.map(item => item.currency));
+        values = [
+            ["账户数量", `${accountsStore.allPlainAccounts.length} 个`, "来自当前账本", "neutral"],
+            ["可见账户", `${list.length} 个`, "可用于记账", "neutral"],
+            ["已隐藏", `${accountsStore.allPlainAccounts.filter(item => item.hidden).length} 个`, "可在账户管理中恢复", "neutral"],
+            ["账户币种", `${currencies.size} 种`, "不直接混合不同币种余额", "neutral"],
+        ];
+    } else if (pageKey.value === "program") {
+        const list = schedules.value;
+        const enabled = list.filter(item => item.enabled);
+        values = [
+            ["计划数量", `${list.length} 项`, "来自周期交易模板", "neutral"],
+            ["已启用", `${enabled.length} 项`, "将在设定日期执行", "up"],
+            ["已暂停", `${list.length - enabled.length} 项`, "不会自动执行", "neutral"],
+            ["最近执行日", enabled.length ? `${Math.min(...enabled.map(item => Number(item.day)))} 日` : "暂无", "本月计划", "neutral"],
+        ];
+    } else if (pageKey.value === "reports") {
+        const month = overviewStore.transactionOverview.thisMonth;
+        const income = month?.incomeAmount ?? 0;
+        const expense = month?.expenseAmount ?? 0;
+        const transactionCount = transactions.value.length;
+        values = [
+            ["本月净收入", formatBookkeepingMoney(income - expense), "收入减去支出", income >= expense ? "up" : "down"],
+            ["本月收入", formatBookkeepingMoney(income), "来自当前账本", "up"],
+            ["本月支出", formatBookkeepingMoney(expense), "来自当前账本", "down"],
+            ["交易笔数", `${transactionCount} 笔`, "本月已入账流水", "neutral"],
+        ];
     } else if (pageKey.value === "assets" && productAssetsStore.loaded) {
         const list = productAssetsStore.assets;
         const purchase = list.reduce(
@@ -2312,107 +2344,7 @@ const config = computed<Config>(() => {
     };
 });
 
-const transactions = ref<Item[]>([
-    {
-        title: "日常采购",
-        meta: "超市与生活用品",
-        amount: "-¥128.00",
-        status: "已完成",
-        tone: "success",
-        icon: "食",
-        color: "#F05537",
-        kind: "支出",
-        category: "餐饮",
-        account: "日常账户",
-        date: "今天 12:42",
-        month: "2026-08",
-    },
-    {
-        title: "工资收入",
-        meta: "八月工资",
-        amount: "+¥18,500.00",
-        status: "已到账",
-        tone: "success",
-        icon: "薪",
-        color: "#149C63",
-        kind: "收入",
-        category: "工资",
-        account: "工资账户",
-        date: "8月18日",
-        month: "2026-08",
-    },
-    {
-        title: "会员订阅",
-        meta: "视频平台月费",
-        amount: "-¥68.00",
-        status: "已完成",
-        tone: "success",
-        icon: "订",
-        color: "#4F46E5",
-        kind: "支出",
-        category: "娱乐",
-        account: "信用账户",
-        date: "8月17日",
-        month: "2026-08",
-    },
-    {
-        title: "账户转账",
-        meta: "转入储蓄账户",
-        amount: "-¥2,000.00",
-        status: "已完成",
-        tone: "success",
-        icon: "转",
-        color: "#12141A",
-        kind: "转账",
-        category: "转账",
-        account: "日常账户",
-        date: "8月16日",
-        month: "2026-08",
-    },
-    {
-        title: "出行交通",
-        meta: "地铁与出租车",
-        amount: "-¥45.50",
-        status: "已完成",
-        tone: "success",
-        icon: "行",
-        color: "#2E9BFF",
-        kind: "支出",
-        category: "交通",
-        account: "支付宝",
-        date: "8月16日",
-        month: "2026-08",
-    },
-]);
-const accountFallback: Item[] = [
-    {
-        title: "日常账户",
-        meta: "人民币 · 尾号 6782",
-        amount: "¥22,678.00",
-        status: "正常",
-        tone: "success",
-        icon: "储",
-        color: "#12141A",
-    },
-    {
-        title: "旅行钱包",
-        meta: "美元 · 尾号 4356",
-        amount: "$18,345.00",
-        status: "正常",
-        tone: "success",
-        icon: "旅",
-        color: "#F05537",
-    },
-    {
-        title: "信用账户",
-        meta: "人民币 · 本月待还",
-        amount: "¥5,260.00",
-        status: "9月12日还款",
-        tone: "warning",
-        icon: "信",
-        color: "#4F46E5",
-    },
-];
+const transactions = ref<Item[]>([]);
 const accounts = computed<Item[]>(() => {
     const colors = ["#12141A", "#F05537", "#4F46E5"];
     const live = accountsStore.allVisiblePlainAccounts
@@ -2430,39 +2362,9 @@ const accounts = computed<Item[]>(() => {
             color: colors[index]!,
             raw: account,
         }));
-    return live.length ? live : accountFallback;
+    return live;
 });
-const selectedAccount = ref<Item>(accountFallback[0]!);
-const scheduleFallback = [
-    {
-        day: "01",
-        title: "房租",
-        meta: "日常账户 · 居住",
-        amount: "¥5,200.00",
-        enabled: true,
-    },
-    {
-        day: "12",
-        title: "信用卡还款",
-        meta: "工资账户 → 信用账户",
-        amount: "¥1,850.00",
-        enabled: true,
-    },
-    {
-        day: "16",
-        title: "视频会员",
-        meta: "信用账户 · 娱乐",
-        amount: "¥25.00",
-        enabled: true,
-    },
-    {
-        day: "20",
-        title: "定期储蓄",
-        meta: "日常账户 → 储蓄账户",
-        amount: "¥2,000.00",
-        enabled: true,
-    },
-];
+const selectedAccount = ref<Item | null>(null);
 const schedules = computed(() => {
     const live = (
         templatesStore.allTransactionTemplates[TemplateType.Schedule.type] || []
@@ -2476,106 +2378,20 @@ const schedules = computed(() => {
             meta: item.comment || "周期交易",
             amount: formatAmountToLocalizedNumeralsWithCurrency(
                 item.sourceAmount,
-                "CNY",
+                item.sourceAccount?.currency || userStore.currentUserDefaultCurrency,
             ),
             enabled: !item.hidden,
             raw: item,
         }));
-    return live.length ? live : scheduleFallback;
+    return live;
 });
-const reportDataset = [
-    {
-        label: "9月",
-        income: 48,
-        expense: 34,
-        incomeAmount: 13200,
-        expenseAmount: 6210,
-    },
-    {
-        label: "10月",
-        income: 57,
-        expense: 30,
-        incomeAmount: 15600,
-        expenseAmount: 5480,
-    },
-    {
-        label: "11月",
-        income: 51,
-        expense: 37,
-        incomeAmount: 14200,
-        expenseAmount: 6840,
-    },
-    {
-        label: "12月",
-        income: 68,
-        expense: 43,
-        incomeAmount: 18700,
-        expenseAmount: 7920,
-    },
-    {
-        label: "1月",
-        income: 55,
-        expense: 31,
-        incomeAmount: 15100,
-        expenseAmount: 5720,
-    },
-    {
-        label: "2月",
-        income: 63,
-        expense: 40,
-        incomeAmount: 17300,
-        expenseAmount: 7340,
-    },
-    {
-        label: "3月",
-        income: 42,
-        expense: 25,
-        incomeAmount: 12500,
-        expenseAmount: 5680,
-    },
-    {
-        label: "4月",
-        income: 58,
-        expense: 34,
-        incomeAmount: 15800,
-        expenseAmount: 6240,
-    },
-    {
-        label: "5月",
-        income: 52,
-        expense: 31,
-        incomeAmount: 18500,
-        expenseAmount: 6080,
-    },
-    {
-        label: "6月",
-        income: 70,
-        expense: 44,
-        incomeAmount: 19600,
-        expenseAmount: 8120,
-    },
-    {
-        label: "7月",
-        income: 62,
-        expense: 38,
-        incomeAmount: 17200,
-        expenseAmount: 7040,
-    },
-    {
-        label: "8月",
-        income: 82,
-        expense: 50,
-        incomeAmount: 22500,
-        expenseAmount: 9684,
-    },
-];
 const categories = computed<Item[]>(() => {
     const flat = Object.values(
         categoriesStore.allTransactionCategories,
     ).flat();
     const live = flat
         .slice(0, 8)
-        .map((item, index) => ({
+        .map((item) => ({
             title: item.name,
             meta: item.comment || `${item.subCategories?.length || 0} 个子分类`,
             amount: item.visible ? "使用中" : "已隐藏",
@@ -2583,7 +2399,6 @@ const categories = computed<Item[]>(() => {
             tone: (item.visible ? "success" : "warning") as Tone,
             icon: item.name.slice(0, 1),
             color: String(item.color),
-            percent: Math.max(12, 90 - index * 9),
             raw: item,
         }));
     return live;
@@ -2600,7 +2415,6 @@ const tags = computed<Item[]>(() => {
             tone: (item.hidden ? "warning" : "success") as Tone,
             icon: item.name.slice(0, 1),
             color: colors[index % colors.length]!,
-            percent: Math.max(15, 88 - index * 7),
             raw: item,
         }));
     return live;
@@ -2616,7 +2430,7 @@ const templates = computed(() => {
             meta: item.comment || "交易模板",
             amount: formatAmountToLocalizedNumeralsWithCurrency(
                 item.sourceAmount,
-                "CNY",
+                item.sourceAccount?.currency || userStore.currentUserDefaultCurrency,
             ),
             uses: 0,
             icon: item.name.slice(0, 1),
@@ -2625,43 +2439,6 @@ const templates = computed(() => {
         }));
     return live;
 });
-const rateFallback = [
-    {
-        name: "美元",
-        code: "USD",
-        symbol: "$",
-        rate: "7.1824",
-        change: "+0.12%",
-    },
-    {
-        name: "欧元",
-        code: "EUR",
-        symbol: "€",
-        rate: "8.3962",
-        change: "-0.08%",
-    },
-    {
-        name: "英镑",
-        code: "GBP",
-        symbol: "£",
-        rate: "9.7284",
-        change: "+0.21%",
-    },
-    {
-        name: "日元",
-        code: "JPY",
-        symbol: "¥",
-        rate: "0.0486",
-        change: "-0.16%",
-    },
-    {
-        name: "港币",
-        code: "HKD",
-        symbol: "HK$",
-        rate: "0.9216",
-        change: "+0.03%",
-    },
-];
 const rates = computed(() => {
     const names: Record<string, [string, string]> = {
         USD: ["美元", "$"],
@@ -2682,8 +2459,14 @@ const rates = computed(() => {
             rate: item.rate,
             change: "已更新",
         }));
-    return live.length ? live : rateFallback;
+    return live;
 });
+const recommendedTemplates: RecommendedTemplate[] = [
+    { title: "日常餐饮", description: "适合早餐、午餐等高频生活支出", type: TransactionType.Expense },
+    { title: "通勤交通", description: "适合公交、地铁和打车支出", type: TransactionType.Expense },
+    { title: "工资收入", description: "适合每月固定工资或劳务收入", type: TransactionType.Income },
+    { title: "固定订阅", description: "适合软件、影音等周期订阅", type: TransactionType.Expense },
+];
 const assets = computed<AssetItem[]>(() =>
     productAssetsStore.assets.map((item) => ({
         id: item.id,
@@ -2979,8 +2762,7 @@ const selectedCalendarLabel = computed(
         `${calendarDate.value.getMonth() + 1}月${selectedCalendarDay.value}日`,
 );
 const scheduleTotal = computed(
-    () =>
-        `预计 ${schedules.value.reduce((sum, item) => sum + (Number(item.amount.replace(/[^0-9.-]/g, "")) || 0), 0).toLocaleString("zh-CN", { style: "currency", currency: "CNY" })}`,
+    () => `共 ${schedules.value.length} 项周期计划`,
 );
 const calendarDays = computed(() =>
     new Date(
@@ -3002,13 +2784,67 @@ const calendarEyebrow = computed(() =>
         .toLocaleDateString("zh-CN", { year: "numeric", month: "long" })
         .toUpperCase(),
 );
-const reportBars = computed(() =>
-    reportPeriod.value === "近 6 个月"
-        ? reportDataset.slice(-6)
+const reportMonthKeys = [
+    "monthBeforeLast10Months",
+    "monthBeforeLast9Months",
+    "monthBeforeLast8Months",
+    "monthBeforeLast7Months",
+    "monthBeforeLast6Months",
+    "monthBeforeLast5Months",
+    "monthBeforeLast4Months",
+    "monthBeforeLast3Months",
+    "monthBeforeLast2Months",
+    "monthBeforeLastMonth",
+    "lastMonth",
+    "thisMonth",
+] as const;
+const reportDataset = computed(() => {
+    const items = reportMonthKeys.map((key, index) => {
+        const date = new Date();
+        date.setMonth(date.getMonth() - (reportMonthKeys.length - 1 - index));
+        const overview = overviewStore.transactionOverview[key];
+        return {
+            label: `${date.getMonth() + 1}月`,
+            incomeAmount: overview?.incomeAmount ?? 0,
+            expenseAmount: overview?.expenseAmount ?? 0,
+        };
+    });
+    const maximum = Math.max(0, ...items.flatMap(item => [item.incomeAmount, item.expenseAmount]));
+    return items.map(item => ({
+        ...item,
+        income: maximum ? Math.max(2, item.incomeAmount * 100 / maximum) : 0,
+        expense: maximum ? Math.max(2, item.expenseAmount * 100 / maximum) : 0,
+    }));
+});
+const reportBars = computed(() => {
+    const all = reportDataset.value;
+    const selected = reportPeriod.value === "近 6 个月"
+        ? all.slice(-6)
         : reportPeriod.value === "今年"
-          ? reportDataset.slice(-8)
-          : reportDataset,
-);
+          ? all.filter((_, index) => {
+                const date = new Date();
+                date.setMonth(date.getMonth() - (all.length - 1 - index));
+                return date.getFullYear() === new Date().getFullYear();
+            })
+          : all;
+    return selected.some(item => item.incomeAmount || item.expenseAmount) ? selected : [];
+});
+const expenseBreakdown = computed(() => {
+    const totals = new Map<string, { title: string; color: string; amount: number }>();
+    for (const item of transactions.value) {
+        if (!(item.raw instanceof Transaction) || item.raw.type !== TransactionType.Expense) continue;
+        const title = item.raw.category?.name || "未分类";
+        const current = totals.get(title) || { title, color: String(item.raw.category?.color || "#9AA1AD"), amount: 0 };
+        current.amount += item.raw.sourceAmount;
+        totals.set(title, current);
+    }
+    const sum = [...totals.values()].reduce((total, item) => total + item.amount, 0);
+    return [...totals.values()]
+        .sort((a, b) => b.amount - a.amount)
+        .slice(0, 4)
+        .map(item => ({ ...item, percent: sum ? Math.round(item.amount * 100 / sum) : 0 }));
+});
+const reportExpenseTotal = computed(() => overviewStore.transactionOverview.thisMonth?.expenseAmount ?? 0);
 const settingsDescription = computed(() => {
     if (pageKey.value === "account") return "更改会保存到当前个人账本。";
     if (selectedSetting.value === "AI 自动配置")
@@ -3036,6 +2872,12 @@ function formatAssetMoney(value: number) {
     return formatAmountToLocalizedNumeralsWithCurrency(
         Math.round(Number.isFinite(value) ? value : 0),
         "CNY",
+    );
+}
+function formatBookkeepingMoney(value: number) {
+    return formatAmountToLocalizedNumeralsWithCurrency(
+        Math.trunc(Number.isFinite(value) ? value : 0),
+        userStore.currentUserDefaultCurrency || "CNY",
     );
 }
 function formatAssetDate(unixTime: number) {
@@ -3232,8 +3074,21 @@ async function loadPageData(force = false) {
             });
         else if (pageKey.value === "assets")
             await productAssetsStore.loadAll(force);
-        else if (pageKey.value === "reports")
-            await categoriesStore.loadAllCategories({ force });
+        else if (pageKey.value === "reports") {
+            await Promise.all([
+                accountsStore.loadAllAccounts({ force: false }),
+                categoriesStore.loadAllCategories({ force }),
+                overviewStore.loadTransactionOverview({ force, loadLast11Months: true }),
+            ]);
+            const now = new Date();
+            const result = await transactionsStore.loadMonthlyAllTransactions({
+                year: now.getFullYear(),
+                month: now.getMonth() + 1,
+                autoExpand: true,
+                defaultCurrency: userStore.currentUserDefaultCurrency,
+            });
+            transactions.value = result.items.map(transactionToItem);
+        }
         else if (pageKey.value === "activity") {
             await Promise.all([
                 accountsStore.loadAllAccounts({ force: false }),
@@ -3244,6 +3099,7 @@ async function loadPageData(force = false) {
                     force: false,
                 }),
                 aiReviewItemsStore.load(),
+                overviewStore.loadTransactionOverview({ force, loadLast11Months: true }),
             ]);
             const now = new Date();
             const result = await transactionsStore.loadMonthlyAllTransactions({
@@ -3252,9 +3108,7 @@ async function loadPageData(force = false) {
                 autoExpand: true,
                 defaultCurrency: userStore.currentUserDefaultCurrency,
             });
-            transactions.value = result.items
-                .slice(0, 50)
-                .map(transactionToItem);
+            transactions.value = result.items.map(transactionToItem);
         }
         if (force) showToast(`${config.value.title}已刷新`);
     } catch (error) {
@@ -3363,6 +3217,23 @@ function useTemplate(item: { title: string; uses: number; raw?: unknown }) {
             item.uses++;
             showToast(`已使用模板：${item.title}`);
         })
+        .catch((error) => {
+            if (error) showError(error);
+        });
+}
+function createRecommendedTemplate(item: RecommendedTemplate) {
+    if (!accountsStore.allVisiblePlainAccounts.length) {
+        showToast("请先添加账户，再创建可用模板");
+        void router.push("/account/list");
+        return;
+    }
+    templateEditDialog.value
+        ?.open({
+            templateType: TemplateType.Normal.type,
+            type: item.type,
+            comment: item.title,
+        })
+        .then(() => loadPageData(false))
         .catch((error) => {
             if (error) showError(error);
         });
@@ -3559,9 +3430,14 @@ async function createItem() {
     }
 }
 function editAccount() {
+    if (!selectedAccount.value) {
+        primaryAction();
+        return;
+    }
+    const selectedAccountName = selectedAccount.value.title;
     const account =
         accountsStore.allVisiblePlainAccounts.find(
-            (item) => item.name === selectedAccount.value.title,
+            (item) => item.name === selectedAccountName,
         ) || accountsStore.allVisiblePlainAccounts[0];
     if (!account) {
         primaryAction();
@@ -3793,11 +3669,14 @@ watch(totalPages, (value) => {
     if (currentPage.value > value) currentPage.value = value;
 });
 watch(accounts, (value) => {
-    if (
-        value.length &&
-        !value.some((item) => item.title === selectedAccount.value.title)
-    )
+    if (!value.length) {
+        selectedAccount.value = null;
+    } else if (
+        !selectedAccount.value ||
+        !value.some((item) => item.title === selectedAccount.value?.title)
+    ) {
         selectedAccount.value = value[0]!;
+    }
 });
 </script>
 
@@ -7299,6 +7178,31 @@ dl > div {
     background: #12141a;
     font-size: 13px;
     font-weight: 700;
+}
+.recommended-template-list {
+    display: grid;
+    width: min(680px, 100%);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 8px;
+}
+.template-empty .recommended-template-list button {
+    display: grid;
+    width: 100%;
+    height: auto;
+    min-height: 68px;
+    margin: 0;
+    padding: 12px 14px;
+    gap: 4px;
+    border: 1px solid #e0e4eb;
+    border-radius: 12px;
+    color: #12141a;
+    background: #fff;
+    text-align: left;
+}
+.template-empty .recommended-template-list button small {
+    color: #687181;
+    font-weight: 500;
 }
 .category-children {
     margin-top: 18px;

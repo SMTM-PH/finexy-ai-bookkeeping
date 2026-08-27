@@ -242,7 +242,7 @@ const {
 
 const rootStore = useRootStore();
 
-const usePresetCategories = ref<boolean>(false);
+const usePresetCategories = ref<boolean>(true);
 const showLanguagePopup = ref<boolean>(false);
 const showDefaultCurrencyPopup = ref<boolean>(false);
 const showFirstDayOfWeekPopup = ref<boolean>(false);

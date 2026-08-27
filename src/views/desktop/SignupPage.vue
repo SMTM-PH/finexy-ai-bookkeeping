@@ -263,7 +263,7 @@ const rootStore = useRootStore();
 const snackbar = useTemplateRef<SnackBarType>('snackbar');
 
 const currentStep = ref<string>('basicSetting');
-const usePresetCategories = ref<boolean>(false);
+const usePresetCategories = ref<boolean>(true);
 const finalResultMessage = ref<string | null>(null);
 const navigateToHomePage = ref<boolean>(false);
 
