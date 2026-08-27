@@ -68,7 +68,7 @@
     "@types/jalaali-js": "1.2.0",
     "@types/node": "25.9.3",
     "@types/ua-parser-js": "0.7.39",
-    "@vitejs/plugin-vue": "6.0.7",
+    "@vitejs/plugin-vue": "6.0.8",
     "@vue/eslint-config-typescript": "14.8.0",
     "@vue/tsconfig": "0.9.1",
     "cross-env": "10.1.0",
