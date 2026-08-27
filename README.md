@@ -106,6 +106,7 @@ go test ./...
 ```
 
 - [贡献指南](CONTRIBUTING.md)
+- [分支策略](CONTRIBUTING.md#分支策略)
 - [安全政策](SECURITY.md)
 - [行为准则](CODE_OF_CONDUCT.md)
 - [项目文档](docs/AI_BOOKKEEPING_MVP.md)
