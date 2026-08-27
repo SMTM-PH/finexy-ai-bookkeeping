@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/boombuler/barcode v1.1.0
-	github.com/coreos/go-oidc/v3 v3.18.0
+	github.com/coreos/go-oidc/v3 v3.20.0
 	github.com/extrame/xls v0.0.2-0.20200426124601-4a6cf263071b
 	github.com/gin-contrib/cache v1.4.4
 	github.com/gin-contrib/gzip v1.2.6
