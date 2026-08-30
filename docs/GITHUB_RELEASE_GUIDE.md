@@ -112,6 +112,7 @@ npm run desktop:build
 
 ```powershell
 docker build --platform linux/amd64 `
+  --build-arg RELEASE_BUILD=true `
   -t ph97/finexy-bookkeeping:X.Y.Z-amd64 `
   -t ph97/finexy-bookkeeping:latest-amd64 .
 ```
