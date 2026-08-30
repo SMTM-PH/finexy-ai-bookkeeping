@@ -1,6 +1,6 @@
 services:
   bookkeeping:
-    image: ph97/finexy-bookkeeping:1.7.0-amd64
+    image: ph97/finexy-bookkeeping:1.7.3-amd64
     platform: linux/amd64
     restart: unless-stopped
     ports:
