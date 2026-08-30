@@ -70,6 +70,8 @@ docker compose build
 
 只有维护者可以创建版本标签和 GitHub Release。发布文件必须附带 SHA-256 校验值；未签名的 Windows 文件必须在发行说明中明确标注。
 
+完整的代码更新、版本准备、构建、上传与发布后验证流程见 [GitHub 发布指南](docs/GITHUB_RELEASE_GUIDE.md)。
+
 ## 安全问题
 
 安全漏洞不要提交公开 Issue。请按照 [SECURITY.md](SECURITY.md) 使用 GitHub Private Vulnerability Reporting。

@@ -26,7 +26,7 @@ docker compose ps
 docker load -i finexy-nas-amd64.tar
 ```
 
-正式发布的离线包文件名为 `Finexy-NAS-1.7.0-linux-amd64.tar`，其中已包含
-`ph97/finexy-bookkeeping:1.7.0-amd64` 和
+正式发布的离线包文件名为 `Finexy-NAS-1.7.3-linux-amd64.tar`，其中已包含
+`ph97/finexy-bookkeeping:1.7.3-amd64` 和
 `ph97/finexy-bookkeeping:ocr-1.0-amd64`。加载后可直接使用同目录的
 `compose.yaml` 启动，无需修改镜像名称。
