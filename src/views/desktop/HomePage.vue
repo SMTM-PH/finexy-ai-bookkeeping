@@ -252,7 +252,7 @@ import {
 type SnackBarType = InstanceType<typeof SnackBar>;
 type TransactionDialogType = InstanceType<typeof TransactionEditDialog>;
 type AccountDialogType = InstanceType<typeof AccountEditDialog>;
-type ActivityType = 'all' | 'expense' | 'income' | 'transfer';
+type ActivityType = 'all' | 'expense' | 'income' | 'transfer' | 'balance';
 interface ActivityRow {
     id: string;
     transactionId: string;
@@ -371,7 +371,7 @@ const activityQuery = ref<string>('');
 const activityFilterOpen = ref<boolean>(false);
 const activityType = ref<ActivityType>('all');
 const activityMenuId = ref<string | null>(null);
-const activityTypes: Array<{label:string;value:ActivityType}> = [{label:'全部',value:'all'},{label:'支出',value:'expense'},{label:'收入',value:'income'},{label:'转账',value:'transfer'}];
+const activityTypes: Array<{label:string;value:ActivityType}> = [{label:'全部',value:'all'},{label:'支出',value:'expense'},{label:'收入',value:'income'},{label:'转账',value:'transfer'},{label:'余额调整',value:'balance'}];
 const activityRows = ref<ActivityRow[]>([]);
 const filteredActivities = computed(() => {
     const query = activityQuery.value.trim().toLowerCase();
@@ -452,13 +452,14 @@ function openAccountEditor(account?: Account | null): void {
 }
 
 function transactionToActivity(transaction: Transaction): ActivityRow {
+    const isModifyBalance = transaction.type === TransactionType.ModifyBalance;
     const isIncome = transaction.type === TransactionType.Income;
     const isTransfer = transaction.type === TransactionType.Transfer;
-    const type: ActivityRow['type'] = isIncome ? 'income' : isTransfer ? 'transfer' : 'expense';
-    const typeLabel = isIncome ? '收入' : isTransfer ? '转账' : '支出';
+    const type: ActivityRow['type'] = isModifyBalance ? 'balance' : isIncome ? 'income' : isTransfer ? 'transfer' : 'expense';
+    const typeLabel = isModifyBalance ? '余额调整' : isIncome ? '收入' : isTransfer ? '转账' : '支出';
     const currency = transaction.sourceAccount?.currency || userStore.currentUserDefaultCurrency;
-    const amount = formatAmountToLocalizedNumeralsWithCurrency(transaction.sourceAmount, currency);
-    const prefix = isIncome ? '+' : isTransfer ? '↔ ' : '-';
+    const amount = formatAmountToLocalizedNumeralsWithCurrency(isModifyBalance ? Math.abs(transaction.sourceAmount) : transaction.sourceAmount, currency);
+    const prefix = isModifyBalance ? (transaction.sourceAmount >= 0 ? '+' : '-') : isIncome ? '+' : isTransfer ? '↔ ' : '-';
     const date = new Date(transaction.time * 1000);
     const title = transaction.comment || transaction.category?.name || typeLabel;
 

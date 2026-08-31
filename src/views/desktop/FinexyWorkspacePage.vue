@@ -216,6 +216,7 @@
                                     <option value="支出">支出</option>
                                     <option value="收入">收入</option>
                                     <option value="转账">转账</option>
+                                    <option value="余额调整">余额调整</option>
                                 </select></label
                             ><label
                                 >账户<select v-model="accountFilter">
@@ -3118,8 +3119,11 @@ async function loadPageData(force = false, showRefreshMessage = force) {
     }
 }
 function transactionToItem(transaction: Transaction): Item {
+    const isModifyBalance = transaction.type === TransactionType.ModifyBalance;
     const kind =
-        transaction.type === TransactionType.Income
+        isModifyBalance
+            ? "余额调整"
+            : transaction.type === TransactionType.Income
             ? "收入"
             : transaction.type === TransactionType.Transfer
               ? "转账"
@@ -3128,19 +3132,32 @@ function transactionToItem(transaction: Transaction): Item {
         transaction.sourceAccount?.currency ||
         userStore.currentUserDefaultCurrency;
     const amount = formatAmountToLocalizedNumeralsWithCurrency(
-        transaction.sourceAmount,
+        isModifyBalance ? Math.abs(transaction.sourceAmount) : transaction.sourceAmount,
         currency,
     );
+    const prefix = isModifyBalance
+        ? transaction.sourceAmount >= 0
+            ? "+"
+            : "-"
+        : transaction.type === TransactionType.Income
+          ? "+"
+          : transaction.type === TransactionType.Transfer
+            ? "↔ "
+            : "-";
     const date = new Date(transaction.time * 1000);
     return {
         title: transaction.comment || transaction.category?.name || kind,
-        meta: transaction.comment || "无备注",
-        amount: `${transaction.type === TransactionType.Income ? "+" : "-"}${amount}`,
+        meta: transaction.comment
+            ? transaction.category?.name || kind
+            : transaction.sourceAccount?.name || "无备注",
+        amount: `${prefix}${amount}`,
         status: transaction.editable ? "已完成" : "只读",
         tone: "success",
         icon: (transaction.category?.name || kind).slice(0, 1),
         color:
-            transaction.type === TransactionType.Income
+            isModifyBalance
+                ? "#6B7280"
+                : transaction.type === TransactionType.Income
                 ? "#149C63"
                 : transaction.type === TransactionType.Transfer
                   ? "#4F46E5"
