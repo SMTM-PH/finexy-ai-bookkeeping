@@ -151,6 +151,7 @@ func startWebServer(c *core.CliContext) error {
 	}
 
 	router.StaticFile("/mobile", filepath.Join(config.StaticRootPath, "mobile.html"))
+	router.StaticFile("/mobile.html", filepath.Join(config.StaticRootPath, "mobile.html"))
 	router.Match([]string{http.MethodHead, http.MethodGet}, "/mobile#/*fragment", bindLocalFile(filepath.Join(config.StaticRootPath, "mobile.html")))  // add compatibility for browsers that send the full URL with the fragment to the server
 	router.Match([]string{http.MethodHead, http.MethodGet}, "/mobile#!/*fragment", bindLocalFile(filepath.Join(config.StaticRootPath, "mobile.html"))) // add compatibility for browsers that send the full URL with the fragment to the server
 	router.Static("/mobile/js", filepath.Join(config.StaticRootPath, "js"))

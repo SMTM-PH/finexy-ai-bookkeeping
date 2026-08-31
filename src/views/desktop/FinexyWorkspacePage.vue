@@ -3024,7 +3024,7 @@ function openQuickTransactionFromRoute() {
     void router.replace({ path: route.path, query: nextQuery });
     transactionEditDialog.value
         ?.open({ type, noTransactionDraft: true })
-        .then(() => loadPageData(false))
+        .then(() => loadPageData(true, false))
         .catch((error) => {
             if (error) showError(error);
         });
@@ -3045,7 +3045,7 @@ async function logoutAccount() {
         showError(error);
     }
 }
-async function loadPageData(force = false) {
+async function loadPageData(force = false, showRefreshMessage = force) {
     busy.value = true;
     try {
         if (pageKey.value === "manage")
@@ -3110,7 +3110,7 @@ async function loadPageData(force = false) {
             });
             transactions.value = result.items.map(transactionToItem);
         }
-        if (force) showToast(`${config.value.title}已刷新`);
+        if (showRefreshMessage) showToast(`${config.value.title}已刷新`);
     } catch (error) {
         showError(error);
     } finally {
@@ -3281,7 +3281,7 @@ function primaryAction() {
     if (pageKey.value === "activity") {
         transactionEditDialog.value
             ?.open({})
-            .then(() => loadPageData(false))
+            .then(() => loadPageData(true, false))
             .catch((error) => {
                 if (error) showError(error);
             });
@@ -3461,7 +3461,7 @@ function editDetail() {
         void nextTick().then(() => transactionEditDialog.value
             ?.open({ id: transaction.id, currentTransaction: transaction })
             .then(() => {
-                return loadPageData(false);
+                return loadPageData(true, false);
             })
             .catch((error) => {
                 if (error) showError(error);
@@ -3562,7 +3562,7 @@ function postReviewItem() {
             if (!response?.transactionId) return;
             await aiReviewItemsStore.resolve(item.id);
             detail.value = null;
-            await loadPageData(false);
+            await loadPageData(true, false);
             showToast("已入账，待确认数量已更新");
         })
         .catch((error) => {
@@ -3659,7 +3659,7 @@ watch(pageKey, () => {
     currentPage.value = 1;
     selectedSetting.value =
         pageKey.value === "account" ? "个人资料" : "基础设置";
-    void loadPageData(false);
+    void loadPageData(true, false);
 });
 watch(() => route.query["action"], openQuickTransactionFromRoute);
 watch([typeFilter, accountFilter, monthFilter, query], () => {

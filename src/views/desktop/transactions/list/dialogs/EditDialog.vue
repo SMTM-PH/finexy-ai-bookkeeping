@@ -141,7 +141,7 @@
                                     <v-tooltip :disabled="hasVisibleExpenseCategories" :text="hasVisibleExpenseCategories ? '' : tt('No secondary expense categories are available')">
                                         <template v-slot:activator="{ props }">
                                             <div v-bind="props" class="d-block">
-                                                <two-column-select primary-key-field="id" primary-value-field="id" primary-title-field="name"
+                                                <two-column-select key="expense-category" primary-key-field="id" primary-value-field="id" primary-title-field="name"
                                                                    primary-icon-field="icon" primary-icon-type="category" primary-color-field="color"
                                                                    primary-hidden-field="hidden" primary-sub-items-field="subCategories"
                                                                    secondary-key-field="id" secondary-value-field="id" secondary-title-field="name"
@@ -165,7 +165,7 @@
                                     <v-tooltip :disabled="hasVisibleIncomeCategories" :text="hasVisibleIncomeCategories ? '' : tt('No secondary income categories are available')">
                                         <template v-slot:activator="{ props }">
                                             <div v-bind="props" class="d-block">
-                                                <two-column-select primary-key-field="id" primary-value-field="id" primary-title-field="name"
+                                                <two-column-select key="income-category" primary-key-field="id" primary-value-field="id" primary-title-field="name"
                                                                    primary-icon-field="icon" primary-icon-type="category" primary-color-field="color"
                                                                    primary-hidden-field="hidden" primary-sub-items-field="subCategories"
                                                                    secondary-key-field="id" secondary-value-field="id" secondary-title-field="name"
@@ -189,7 +189,7 @@
                                     <v-tooltip :disabled="hasVisibleTransferCategories" :text="hasVisibleTransferCategories ? '' : tt('No secondary transfer categories are available')">
                                         <template v-slot:activator="{ props }">
                                             <div v-bind="props" class="d-block">
-                                                <two-column-select primary-key-field="id" primary-value-field="id" primary-title-field="name"
+                                                <two-column-select key="transfer-category" primary-key-field="id" primary-value-field="id" primary-title-field="name"
                                                                    primary-icon-field="icon" primary-icon-type="category" primary-color-field="color"
                                                                    primary-hidden-field="hidden" primary-sub-items-field="subCategories"
                                                                    secondary-key-field="id" secondary-value-field="id" secondary-title-field="name"

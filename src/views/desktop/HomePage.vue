@@ -429,7 +429,7 @@ function refreshBalance(): void {
 function openQuickTransaction(type: number, account?: Account | null): void {
     balanceCurrencyMenuOpen.value = false;
     selectedWallet.value = null;
-    transactionEditDialog.value?.open({ type, accountId: account?.id, noTransactionDraft: true }).then(() => reload(false)).catch(error => {
+    transactionEditDialog.value?.open({ type, accountId: account?.id, noTransactionDraft: true }).then(() => reload(true, false)).catch(error => {
         if (error && !error.canceled && !error.processed) snackbar.value?.showError(error);
     });
 }
@@ -490,7 +490,7 @@ function resetActivityFilters(): void {
 
 function openActivity(row: ActivityRow): void {
     activityMenuId.value = null;
-    transactionEditDialog.value?.open({ id: row.transactionId, currentTransaction: row.raw }).then(() => reload(false)).catch(error => {
+    transactionEditDialog.value?.open({ id: row.transactionId, currentTransaction: row.raw }).then(() => reload(true, false)).catch(error => {
         if (error && !error.processed) snackbar.value?.showError(error);
     });
 }
@@ -566,7 +566,7 @@ function logoutAccount(): void {
     });
 }
 
-function reload(force: boolean): void {
+function reload(force: boolean, showRefreshMessage = force): void {
     loadingOverview.value = true;
     const now = new Date();
 
@@ -585,7 +585,7 @@ function reload(force: boolean): void {
     Promise.all(promises).then(() => {
         loadingOverview.value = false;
 
-        if (force) {
+        if (showRefreshMessage) {
             snackbar.value?.showMessage('余额数据已更新');
         }
     }).catch(error => {

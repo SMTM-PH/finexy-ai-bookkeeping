@@ -17,8 +17,23 @@ func TestGetPresetTransactionTagNames(t *testing.T) {
 			expected: []string{"必要支出", "可选消费", "待报销", "工作", "家庭", "旅行"},
 		},
 		{
+			name:     "simplified chinese region",
+			language: "zh-CN",
+			expected: []string{"必要支出", "可选消费", "待报销", "工作", "家庭", "旅行"},
+		},
+		{
+			name:     "simplified chinese underscore variant",
+			language: "zh_SG",
+			expected: []string{"必要支出", "可选消费", "待报销", "工作", "家庭", "旅行"},
+		},
+		{
 			name:     "traditional chinese locale variant",
 			language: "zh-Hant-TW",
+			expected: []string{"必要支出", "可選消費", "待報銷", "工作", "家庭", "旅行"},
+		},
+		{
+			name:     "traditional chinese region",
+			language: "zh-TW",
 			expected: []string{"必要支出", "可選消費", "待報銷", "工作", "家庭", "旅行"},
 		},
 		{
