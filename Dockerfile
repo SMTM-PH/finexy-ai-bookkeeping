@@ -21,7 +21,7 @@ RUN apk add git gcc g++ libc-dev
 RUN if [ "$SKIP_TESTS" = "true" ]; then ./build.sh backend --no-test; else ./build.sh backend; fi
 
 # Build frontend files
-FROM node:26.7.0-alpine3.24 AS fe-builder
+FROM node:26.8.1-alpine3.24 AS fe-builder
 ARG RELEASE_BUILD
 ARG BUILD_PIPELINE
 ARG BUILD_UNIXTIME
