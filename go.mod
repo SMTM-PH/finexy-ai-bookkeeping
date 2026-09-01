@@ -19,7 +19,7 @@ require (
 	github.com/minio/minio-go/v7 v7.2.0
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/pquerna/otp v1.5.0
-	github.com/sirupsen/logrus v1.9.4
+	github.com/sirupsen/logrus v1.10.2
 	github.com/stretchr/testify v1.12.1
 	github.com/urfave/cli/v3 v3.9.1
 	github.com/wk8/go-ordered-map/v2 v2.1.8
