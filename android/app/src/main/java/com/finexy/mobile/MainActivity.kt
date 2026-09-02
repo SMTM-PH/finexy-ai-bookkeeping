@@ -53,9 +53,16 @@ private fun FinexyApp() {
     var serverUrl by remember { mutableStateOf(store.get(FinexyApi.KEY_SERVER_URL).orEmpty()) }
     var configured by remember { mutableStateOf(serverUrl.isNotBlank()) }
     var authenticated by remember { mutableStateOf(!store.get(FinexyApi.KEY_TOKEN).isNullOrBlank()) }
+    var localMode by remember { mutableStateOf(store.get("local_mode") == "true") }
+    var balance by remember { mutableStateOf(0.0) }
+    var income by remember { mutableStateOf(0.0) }
+    var expense by remember { mutableStateOf(0.0) }
+    var activities by remember { mutableStateOf(emptyList<Activity>()) }
     var selectedTab by remember { mutableStateOf(0) }
     if (!configured) {
-        SetupScreen(serverUrl, { serverUrl = it }, { store.put(FinexyApi.KEY_SERVER_URL, serverUrl.trimEnd('/')); configured = true })
+        SetupScreen(serverUrl, { serverUrl = it },
+            onContinue = { store.put(FinexyApi.KEY_SERVER_URL, serverUrl.trimEnd('/')); localMode = false; configured = true },
+            onSkip = { store.put("local_mode", "true"); localMode = true; configured = true; authenticated = true })
         return
     }
     if (!authenticated) {
@@ -75,11 +82,17 @@ private fun FinexyApp() {
         }
     }) { padding ->
         when (selectedTab) {
-            0 -> HomeScreen(padding)
-            1 -> ActivityScreen(padding)
-            2 -> EntryScreen(padding)
-            3 -> AccountsScreen(padding)
-            else -> SettingsScreen(padding, serverUrl)
+            0 -> HomeScreen(padding, balance, income, expense, localMode)
+            1 -> ActivityScreen(padding, activities)
+            2 -> EntryScreen(padding) { amount, note, isIncome ->
+                amount.takeIf { it > 0 }?.let { value ->
+                    val row = Activity(note.ifBlank { if (isIncome) "收入" else "支出" }, "${if (isIncome) "+" else "-"}¥ %.2f".format(value), if (isIncome) "收入" else "支出")
+                    activities = listOf(row) + activities
+                    if (isIncome) { income += value; balance += value } else { expense += value; balance -= value }
+                }
+            }
+            3 -> AccountsScreen(padding, balance, localMode)
+            else -> SettingsScreen(padding, serverUrl, localMode, onConnect = { localMode = false; configured = false; authenticated = false })
         }
     }
 }
@@ -110,7 +123,7 @@ private fun LoginScreen(onLogin: suspend (String, String) -> Unit, onChangeServe
 }
 
 @Composable
-private fun SetupScreen(url: String, onUrlChange: (String) -> Unit, onContinue: () -> Unit) {
+private fun SetupScreen(url: String, onUrlChange: (String) -> Unit, onContinue: () -> Unit, onSkip: () -> Unit) {
     Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
         Text("Finexy", style = MaterialTheme.typography.displaySmall)
         Text("连接你的账本服务", style = MaterialTheme.typography.titleLarge)
@@ -118,19 +131,21 @@ private fun SetupScreen(url: String, onUrlChange: (String) -> Unit, onContinue: 
         OutlinedTextField(url, onUrlChange, Modifier.fillMaxWidth(), label = { Text("服务地址") }, placeholder = { Text("https://your-finexy.example.com") })
         Spacer(Modifier.height(12.dp))
         Button(onClick = onContinue, enabled = url.startsWith("http"), modifier = Modifier.fillMaxWidth()) { Text("继续") }
+        TextButton(onClick = onSkip, modifier = Modifier.fillMaxWidth()) { Text("暂时跳过，直接使用本地账本") }
+        Text("无需服务器也可以记录本地收支，之后可在设置中连接同步。", style = MaterialTheme.typography.bodySmall)
     }
 }
 
 @Composable
-private fun HomeScreen(padding: PaddingValues) {
+private fun HomeScreen(padding: PaddingValues, balance: Double, income: Double, expense: Double, localMode: Boolean) {
     Column(Modifier.padding(padding).padding(20.dp)) {
         Text("早上好", style = MaterialTheme.typography.headlineMedium)
-        Text("实时账本概览")
+        Text(if (localMode) "本地账本 · 数据保存在此设备" else "实时账本概览")
         Spacer(Modifier.height(20.dp))
-        Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(20.dp)) { Text("总余额"); Text("¥ 0.00", style = MaterialTheme.typography.displaySmall) } }
+        Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(20.dp)) { Text("总余额"); Text("¥ %.2f".format(balance), style = MaterialTheme.typography.displaySmall) } }
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            SummaryCard("本月收入", "¥ 0.00", Modifier.weight(1f)); SummaryCard("本月支出", "¥ 0.00", Modifier.weight(1f))
+            SummaryCard("本月收入", "¥ %.2f".format(income), Modifier.weight(1f)); SummaryCard("本月支出", "¥ %.2f".format(expense), Modifier.weight(1f))
         }
     }
 }
@@ -139,26 +154,27 @@ private fun HomeScreen(padding: PaddingValues) {
 private fun SummaryCard(label: String, value: String, modifier: Modifier) { Card(modifier) { Column(Modifier.padding(16.dp)) { Text(label); Text(value, style = MaterialTheme.typography.titleLarge) } } }
 
 @Composable
-private fun ActivityScreen(padding: PaddingValues) {
-    val items = remember { listOf(Activity("暂无流水", "", "")) }
-    Column(Modifier.padding(padding).padding(20.dp)) { Text("全部流水", style = MaterialTheme.typography.headlineMedium); Spacer(Modifier.height(12.dp)); LazyColumn { items(items) { Text(it.title, Modifier.padding(vertical = 16.dp)) } } }
+private fun ActivityScreen(padding: PaddingValues, activities: List<Activity>) {
+    Column(Modifier.padding(padding).padding(20.dp)) { Text("全部流水", style = MaterialTheme.typography.headlineMedium); Spacer(Modifier.height(12.dp)); if (activities.isEmpty()) Text("暂无流水，去记账页记录第一笔") else LazyColumn { items(activities) { row -> Row(Modifier.fillMaxWidth().padding(vertical = 16.dp), horizontalArrangement = Arrangement.SpaceBetween) { Text(row.title); Text(row.amount) } } } }
 }
 
 @Composable
-private fun EntryScreen(padding: PaddingValues) {
+private fun EntryScreen(padding: PaddingValues, onSave: (Double, String, Boolean) -> Unit) {
     var amount by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
+    var isIncome by remember { mutableStateOf(false) }
     Column(Modifier.padding(padding).padding(20.dp)) {
         Text("快速记账", style = MaterialTheme.typography.headlineMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { TextButton(onClick = { isIncome = false }) { Text(if (!isIncome) "✓ 支出" else "支出") }; TextButton(onClick = { isIncome = true }) { Text(if (isIncome) "✓ 收入" else "收入") } }
         Spacer(Modifier.height(16.dp))
         OutlinedTextField(amount, { amount = it }, Modifier.fillMaxWidth(), label = { Text("金额") })
         OutlinedTextField(note, { note = it }, Modifier.fillMaxWidth(), label = { Text("描述") })
-        Spacer(Modifier.height(12.dp)); Button(onClick = {}, Modifier.fillMaxWidth()) { Text("保存支出") }
+        Spacer(Modifier.height(12.dp)); Button(onClick = { amount.toDoubleOrNull()?.let { onSave(it, note, isIncome); amount = ""; note = "" } }, enabled = amount.toDoubleOrNull()?.let { it > 0 } == true, modifier = Modifier.fillMaxWidth()) { Text(if (isIncome) "保存收入" else "保存支出") }
     }
 }
 
 @Composable
-private fun AccountsScreen(padding: PaddingValues) { Column(Modifier.padding(padding).padding(20.dp)) { Text("账户", style = MaterialTheme.typography.headlineMedium); Spacer(Modifier.height(12.dp)); Text("登录后加载账户") } }
+private fun AccountsScreen(padding: PaddingValues, balance: Double, localMode: Boolean) { Column(Modifier.padding(padding).padding(20.dp)) { Text("账户", style = MaterialTheme.typography.headlineMedium); Spacer(Modifier.height(12.dp)); Text(if (localMode) "本地钱包" else "Finexy 账户"); Text("余额：¥ %.2f".format(balance)) } }
 
 @Composable
-private fun SettingsScreen(padding: PaddingValues, serverUrl: String) { Column(Modifier.padding(padding).padding(20.dp)) { Text("设置", style = MaterialTheme.typography.headlineMedium); Spacer(Modifier.height(12.dp)); Text("服务地址"); Text(serverUrl); TextButton(onClick = {}) { Text("立即同步") } } }
+private fun SettingsScreen(padding: PaddingValues, serverUrl: String, localMode: Boolean, onConnect: () -> Unit) { Column(Modifier.padding(padding).padding(20.dp)) { Text("设置", style = MaterialTheme.typography.headlineMedium); Spacer(Modifier.height(12.dp)); Text(if (localMode) "当前为本地模式" else "服务地址"); Text(if (localMode) "数据仅保存在本设备" else serverUrl); TextButton(onClick = onConnect) { Text(if (localMode) "连接服务器" else "更换服务器") } } }
