@@ -1,7 +1,0 @@
-#Wed Sep 02 10:12:50 CST 2026
-base.0=E\:\\project\\ai-bookkeeping\\android\\app\\build\\intermediates\\dex\\release\\mergeDexRelease\\classes.dex
-base.1=E\:\\project\\ai-bookkeeping\\android\\app\\build\\intermediates\\dex\\release\\mergeDexRelease\\classes2.dex
-path.0=classes.dex
-path.1=classes2.dex
-renamed.0=classes.dex
-renamed.1=classes2.dex

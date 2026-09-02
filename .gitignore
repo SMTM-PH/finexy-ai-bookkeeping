@@ -176,3 +176,7 @@ ezbookkeeping
 /data/
 /storage/
 /log/
+
+# Android build outputs
+android/.gradle/
+android/app/build/
