@@ -36,6 +36,8 @@ import com.finexy.mobile.data.FinexyApi
 import com.finexy.mobile.data.SecureStore
 import kotlinx.coroutines.launch
 import androidx.compose.material3.CircularProgressIndicator
+import org.json.JSONArray
+import org.json.JSONObject
 
 private data class Activity(val title: String, val amount: String, val kind: String)
 
@@ -54,10 +56,10 @@ private fun FinexyApp() {
     var configured by remember { mutableStateOf(serverUrl.isNotBlank()) }
     var authenticated by remember { mutableStateOf(!store.get(FinexyApi.KEY_TOKEN).isNullOrBlank()) }
     var localMode by remember { mutableStateOf(store.get("local_mode") == "true") }
-    var balance by remember { mutableStateOf(0.0) }
-    var income by remember { mutableStateOf(0.0) }
-    var expense by remember { mutableStateOf(0.0) }
-    var activities by remember { mutableStateOf(emptyList<Activity>()) }
+    var balance by remember { mutableStateOf(store.get("local_balance")?.toDoubleOrNull() ?: 0.0) }
+    var income by remember { mutableStateOf(store.get("local_income")?.toDoubleOrNull() ?: 0.0) }
+    var expense by remember { mutableStateOf(store.get("local_expense")?.toDoubleOrNull() ?: 0.0) }
+    var activities by remember { mutableStateOf(loadLocalActivities(store)) }
     var selectedTab by remember { mutableStateOf(0) }
     if (!configured) {
         SetupScreen(serverUrl, { serverUrl = it },
@@ -89,12 +91,22 @@ private fun FinexyApp() {
                     val row = Activity(note.ifBlank { if (isIncome) "收入" else "支出" }, "${if (isIncome) "+" else "-"}¥ %.2f".format(value), if (isIncome) "收入" else "支出")
                     activities = listOf(row) + activities
                     if (isIncome) { income += value; balance += value } else { expense += value; balance -= value }
+                    store.put("local_balance", balance.toString()); store.put("local_income", income.toString()); store.put("local_expense", expense.toString()); saveLocalActivities(store, activities)
                 }
             }
             3 -> AccountsScreen(padding, balance, localMode)
             else -> SettingsScreen(padding, serverUrl, localMode, onConnect = { localMode = false; configured = false; authenticated = false })
         }
     }
+}
+
+private fun loadLocalActivities(store: SecureStore): List<Activity> = runCatching {
+    val array = JSONArray(store.get("local_activities") ?: return emptyList())
+    (0 until array.length()).map { index -> array.getJSONObject(index).let { Activity(it.getString("title"), it.getString("amount"), it.getString("kind")) } }
+}.getOrDefault(emptyList())
+
+private fun saveLocalActivities(store: SecureStore, activities: List<Activity>) {
+    val array = JSONArray(); activities.forEach { array.put(JSONObject().put("title", it.title).put("amount", it.amount).put("kind", it.kind)) }; store.put("local_activities", array.toString())
 }
 
 @Composable
