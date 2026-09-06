@@ -558,6 +558,14 @@ func (s *TransactionService) GetTransactionCount(c core.Context, uid int64, maxT
 
 // CreateTransaction saves a new transaction to database
 func (s *TransactionService) CreateTransaction(c core.Context, transaction *models.Transaction, tagIds []int64, pictureIds []int64) error {
+	return s.createTransactionWithHooks(c, transaction, tagIds, pictureIds, nil, nil)
+}
+
+// Hooks run in the same database transaction as ledger and balance writes.
+// Scheduled confirmation can claim its occurrence before posting and persist
+// the resulting transaction ID afterwards; any hook failure rolls back both.
+func (s *TransactionService) createTransactionWithHooks(c core.Context, transaction *models.Transaction, tagIds []int64, pictureIds []int64,
+	before func(*xorm.Session) error, after func(*xorm.Session) error) error {
 	if transaction.Uid <= 0 {
 		return errs.ErrUserIdInvalid
 	}
@@ -624,7 +632,18 @@ func (s *TransactionService) CreateTransaction(c core.Context, transaction *mode
 	userDataDb := s.UserDataDB(transaction.Uid)
 
 	return userDataDb.DoTransaction(c, func(sess *xorm.Session) error {
-		return s.doCreateTransaction(c, userDataDb, sess, transaction, transactionTagIndexes, tagIds, pictureIds, pictureUpdateModel)
+		if before != nil {
+			if err := before(sess); err != nil {
+				return err
+			}
+		}
+		if err := s.doCreateTransaction(c, userDataDb, sess, transaction, transactionTagIndexes, tagIds, pictureIds, pictureUpdateModel); err != nil {
+			return err
+		}
+		if after != nil {
+			return after(sess)
+		}
+		return nil
 	})
 }
 
@@ -895,52 +914,25 @@ func (s *TransactionService) CreateScheduledTransactions(c core.Context, current
 			continue
 		}
 
-		var transactionDbType models.TransactionDbType
-
-		if template.Type == models.TRANSACTION_TYPE_EXPENSE {
-			transactionDbType = models.TRANSACTION_DB_TYPE_EXPENSE
-		} else if template.Type == models.TRANSACTION_TYPE_INCOME {
-			transactionDbType = models.TRANSACTION_DB_TYPE_INCOME
-		} else if template.Type == models.TRANSACTION_TYPE_TRANSFER {
-			transactionDbType = models.TRANSACTION_DB_TYPE_TRANSFER_OUT
-		} else {
+		if template.Type < models.TRANSACTION_TYPE_INCOME || template.Type > models.TRANSACTION_TYPE_TRANSFER {
 			skipCount++
 			log.Warnf(c, "[transactions.CreateScheduledTransactions] transaction template \"id:%d\" has invalid transaction type", template.TemplateId)
 			continue
 		}
 
-		transaction := &models.Transaction{
-			Uid:               template.Uid,
-			Type:              transactionDbType,
-			CategoryId:        template.CategoryId,
-			TransactionTime:   utils.GetMinTransactionTimeFromUnixTime(transactionTime.Unix()),
-			TimezoneUtcOffset: template.ScheduledTimezoneUtcOffset,
-			AccountId:         template.AccountId,
-			Amount:            template.Amount,
-			HideAmount:        template.HideAmount,
-			Comment:           template.Comment,
-			CreatedIp:         c.ClientIP(),
-			ScheduledCreated:  true,
-		}
-
-		if template.Type == models.TRANSACTION_TYPE_TRANSFER {
-			transaction.RelatedAccountId = template.RelatedAccountId
-			transaction.RelatedAccountAmount = template.RelatedAccountAmount
-		}
-
-		tagIds := template.GetTagIds()
-		err = s.CreateTransaction(c, transaction, tagIds, nil)
+		// Due schedules enter review; only an authenticated confirmation posts money.
+		_, err = ScheduledOccurrences.Enqueue(c, template, transactionTime.Unix())
 
 		if err == nil {
 			successCount++
-			log.Infof(c, "[transactions.CreateScheduledTransactions] transaction template \"id:%d\" has created a new trasaction \"id:%d\"", template.TemplateId, transaction.TransactionId)
+			log.Infof(c, "[transactions.CreateScheduledTransactions] template \"id:%d\" occurrence is queued for review", template.TemplateId)
 		} else {
 			failedCount++
-			log.Errorf(c, "[transactions.CreateScheduledTransactions] transaction template \"id:%d\" failed to create new trasaction, because %s", template.TemplateId, err.Error())
+			log.Errorf(c, "[transactions.CreateScheduledTransactions] template \"id:%d\" failed to enqueue review, because %s", template.TemplateId, err.Error())
 		}
 	}
 
-	log.Infof(c, "[transactions.CreateScheduledTransactions] %d transactions has been created successfully, %d templates does not need to create transactions and %d transactions failed to create", successCount, skipCount, failedCount)
+	log.Infof(c, "[transactions.CreateScheduledTransactions] %d occurrences queued or already present, %d skipped, %d failed", successCount, skipCount, failedCount)
 
 	return nil
 }

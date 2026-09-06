@@ -22,7 +22,7 @@ var RemoveExpiredTokensJob = &CronJob{
 // CreateScheduledTransactionJob represents the cron job which periodically create transaction by scheduled transaction template
 var CreateScheduledTransactionJob = &CronJob{
 	Name:        "CreateScheduledTransaction",
-	Description: "Periodically create transaction by scheduled transaction template.",
+	Description: "Periodically queue scheduled occurrences for user confirmation.",
 	Period: CronJobEvery15MinutesPeriod{
 		Second: 0,
 	},
