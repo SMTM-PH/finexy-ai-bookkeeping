@@ -153,6 +153,7 @@ dist/
 .planning
 .playwright-cli/
 artifacts/
+archive/ui-legacy/**/reference-captures/
 
 # Local UI audit captures and generated release packages
 /*.png
@@ -176,3 +177,9 @@ ezbookkeeping
 /data/
 /storage/
 /log/
+
+# Android build outputs
+android/.gradle/
+android/.kotlin/
+android/app/build/
+/.gradle-home/

@@ -1,0 +1,18 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <application
+        android:usesCleartextTraffic="true"
+        tools:replace="android:usesCleartextTraffic">
+        <activity android:name=".PrivacyQaActivity" android:exported="false" android:theme="@style/Theme.Finexy" />
+        <activity android:name=".ConflictQaActivity" android:exported="false" android:theme="@style/Theme.Finexy" />
+        <activity android:name=".AccountMappingQaActivity" android:exported="false" android:theme="@style/Theme.Finexy" />
+        <activity android:name=".LedgerSwitchQaActivity" android:exported="false" android:theme="@style/Theme.Finexy" />
+        <activity android:name=".AccountDetailsQaActivity" android:exported="false" android:theme="@style/Theme.Finexy" />
+        <activity android:name=".AccountManagementQaActivity" android:exported="false" android:theme="@style/Theme.Finexy" />
+        <activity android:name=".CategoryManagementQaActivity" android:exported="false" android:theme="@style/Theme.Finexy" />
+        <activity android:name=".TagManagementQaActivity" android:exported="false" android:theme="@style/Theme.Finexy" />
+        <activity android:name=".TemplateManagementQaActivity" android:exported="false" android:theme="@style/Theme.Finexy" />
+        <activity android:name=".ActivityFilterQaActivity" android:exported="false" android:theme="@style/Theme.Finexy" />
+        <activity android:name=".ScheduleQaActivity" android:exported="false" android:theme="@style/Theme.Finexy" />
+    </application>
+</manifest>

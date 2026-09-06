@@ -151,6 +151,7 @@ func startWebServer(c *core.CliContext) error {
 	}
 
 	router.StaticFile("/mobile", filepath.Join(config.StaticRootPath, "mobile.html"))
+	router.StaticFile("/mobile.html", filepath.Join(config.StaticRootPath, "mobile.html"))
 	router.Match([]string{http.MethodHead, http.MethodGet}, "/mobile#/*fragment", bindLocalFile(filepath.Join(config.StaticRootPath, "mobile.html")))  // add compatibility for browsers that send the full URL with the fragment to the server
 	router.Match([]string{http.MethodHead, http.MethodGet}, "/mobile#!/*fragment", bindLocalFile(filepath.Join(config.StaticRootPath, "mobile.html"))) // add compatibility for browsers that send the full URL with the fragment to the server
 	router.Static("/mobile/js", filepath.Join(config.StaticRootPath, "js"))
@@ -490,6 +491,11 @@ func startWebServer(c *core.CliContext) error {
 			apiV1Route.POST("/budget/monthly/set.json", bindApi(api.MonthlyBudgets.MonthlyBudgetSetHandler, config))
 			apiV1Route.POST("/budget/monthly/delete.json", bindApi(api.MonthlyBudgets.MonthlyBudgetDeleteHandler, config))
 
+			// Scheduled occurrence review queue
+			apiV1Route.GET("/schedule/review/list.json", bindApi(api.ScheduledOccurrences.ListHandler, config))
+			apiV1Route.POST("/schedule/review/confirm.json", bindApi(api.ScheduledOccurrences.ConfirmHandler, config))
+			apiV1Route.POST("/schedule/review/dismiss.json", bindApi(api.ScheduledOccurrences.DismissHandler, config))
+			apiV1Route.POST("/schedule/review/restore.json", bindApi(api.ScheduledOccurrences.RestoreHandler, config))
 			// AI review queue
 			apiV1Route.GET("/ai/review/list.json", bindApi(api.AIReviewItems.ListHandler, config))
 			apiV1Route.POST("/ai/review/create.json", bindApi(api.AIReviewItems.CreateHandler, config))

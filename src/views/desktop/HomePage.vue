@@ -252,7 +252,7 @@ import {
 type SnackBarType = InstanceType<typeof SnackBar>;
 type TransactionDialogType = InstanceType<typeof TransactionEditDialog>;
 type AccountDialogType = InstanceType<typeof AccountEditDialog>;
-type ActivityType = 'all' | 'expense' | 'income' | 'transfer';
+type ActivityType = 'all' | 'expense' | 'income' | 'transfer' | 'balance';
 interface ActivityRow {
     id: string;
     transactionId: string;
@@ -371,7 +371,7 @@ const activityQuery = ref<string>('');
 const activityFilterOpen = ref<boolean>(false);
 const activityType = ref<ActivityType>('all');
 const activityMenuId = ref<string | null>(null);
-const activityTypes: Array<{label:string;value:ActivityType}> = [{label:'全部',value:'all'},{label:'支出',value:'expense'},{label:'收入',value:'income'},{label:'转账',value:'transfer'}];
+const activityTypes: Array<{label:string;value:ActivityType}> = [{label:'全部',value:'all'},{label:'支出',value:'expense'},{label:'收入',value:'income'},{label:'转账',value:'transfer'},{label:'余额调整',value:'balance'}];
 const activityRows = ref<ActivityRow[]>([]);
 const filteredActivities = computed(() => {
     const query = activityQuery.value.trim().toLowerCase();
@@ -429,7 +429,7 @@ function refreshBalance(): void {
 function openQuickTransaction(type: number, account?: Account | null): void {
     balanceCurrencyMenuOpen.value = false;
     selectedWallet.value = null;
-    transactionEditDialog.value?.open({ type, accountId: account?.id, noTransactionDraft: true }).then(() => reload(false)).catch(error => {
+    transactionEditDialog.value?.open({ type, accountId: account?.id, noTransactionDraft: true }).then(() => reload(true, false)).catch(error => {
         if (error && !error.canceled && !error.processed) snackbar.value?.showError(error);
     });
 }
@@ -452,13 +452,14 @@ function openAccountEditor(account?: Account | null): void {
 }
 
 function transactionToActivity(transaction: Transaction): ActivityRow {
+    const isModifyBalance = transaction.type === TransactionType.ModifyBalance;
     const isIncome = transaction.type === TransactionType.Income;
     const isTransfer = transaction.type === TransactionType.Transfer;
-    const type: ActivityRow['type'] = isIncome ? 'income' : isTransfer ? 'transfer' : 'expense';
-    const typeLabel = isIncome ? '收入' : isTransfer ? '转账' : '支出';
+    const type: ActivityRow['type'] = isModifyBalance ? 'balance' : isIncome ? 'income' : isTransfer ? 'transfer' : 'expense';
+    const typeLabel = isModifyBalance ? '余额调整' : isIncome ? '收入' : isTransfer ? '转账' : '支出';
     const currency = transaction.sourceAccount?.currency || userStore.currentUserDefaultCurrency;
-    const amount = formatAmountToLocalizedNumeralsWithCurrency(transaction.sourceAmount, currency);
-    const prefix = isIncome ? '+' : isTransfer ? '↔ ' : '-';
+    const amount = formatAmountToLocalizedNumeralsWithCurrency(isModifyBalance ? Math.abs(transaction.sourceAmount) : transaction.sourceAmount, currency);
+    const prefix = isModifyBalance ? (transaction.sourceAmount >= 0 ? '+' : '-') : isIncome ? '+' : isTransfer ? '↔ ' : '-';
     const date = new Date(transaction.time * 1000);
     const title = transaction.comment || transaction.category?.name || typeLabel;
 
@@ -490,7 +491,7 @@ function resetActivityFilters(): void {
 
 function openActivity(row: ActivityRow): void {
     activityMenuId.value = null;
-    transactionEditDialog.value?.open({ id: row.transactionId, currentTransaction: row.raw }).then(() => reload(false)).catch(error => {
+    transactionEditDialog.value?.open({ id: row.transactionId, currentTransaction: row.raw }).then(() => reload(true, false)).catch(error => {
         if (error && !error.processed) snackbar.value?.showError(error);
     });
 }
@@ -566,7 +567,7 @@ function logoutAccount(): void {
     });
 }
 
-function reload(force: boolean): void {
+function reload(force: boolean, showRefreshMessage = force): void {
     loadingOverview.value = true;
     const now = new Date();
 
@@ -585,7 +586,7 @@ function reload(force: boolean): void {
     Promise.all(promises).then(() => {
         loadingOverview.value = false;
 
-        if (force) {
+        if (showRefreshMessage) {
             snackbar.value?.showMessage('余额数据已更新');
         }
     }).catch(error => {

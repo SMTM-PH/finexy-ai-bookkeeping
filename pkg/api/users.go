@@ -171,11 +171,13 @@ func (a *UsersApi) UserRegisterHandler(c *core.WebContext) (any, *errs.Error) {
 }
 
 func getPresetTransactionTagNames(language string) []string {
-	if strings.HasPrefix(language, "zh-Hans") {
+	normalizedLanguage := strings.ToLower(strings.ReplaceAll(language, "_", "-"))
+
+	if normalizedLanguage == "zh" || strings.HasPrefix(normalizedLanguage, "zh-hans") || strings.HasPrefix(normalizedLanguage, "zh-cn") || strings.HasPrefix(normalizedLanguage, "zh-sg") {
 		return []string{"必要支出", "可选消费", "待报销", "工作", "家庭", "旅行"}
 	}
 
-	if strings.HasPrefix(language, "zh-Hant") {
+	if strings.HasPrefix(normalizedLanguage, "zh-hant") || strings.HasPrefix(normalizedLanguage, "zh-tw") || strings.HasPrefix(normalizedLanguage, "zh-hk") || strings.HasPrefix(normalizedLanguage, "zh-mo") {
 		return []string{"必要支出", "可選消費", "待報銷", "工作", "家庭", "旅行"}
 	}
 
