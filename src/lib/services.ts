@@ -146,6 +146,7 @@ import type {
 } from '@/models/monthly_budget.ts';
 import type { LocalOCRResponse } from '@/models/local_ocr.ts';
 import type { AIReviewItemCreateRequest, AIReviewItemInfoResponse } from '@/models/ai_review_item.ts';
+import type { ScheduledOccurrenceActionRequest, ScheduledOccurrenceInfoResponse } from '@/models/scheduled_occurrence.ts';
 import type { AIReportInfoResponse } from '@/models/ai_report.ts';
 import type {
     InsightsExplorerCreateRequest,
@@ -883,6 +884,18 @@ export default {
     },
     deleteTransactionTemplate: (req: TransactionTemplateDeleteRequest): ApiResponsePromise<boolean> => {
         return axios.post<ApiResponse<boolean>>('v1/transaction/templates/delete.json', req);
+    },
+    listScheduledOccurrences: ({ status, offset, limit }: { status: number, offset?: number, limit?: number }): ApiResponsePromise<ScheduledOccurrenceInfoResponse[]> => {
+        return axios.get<ApiResponse<ScheduledOccurrenceInfoResponse[]>>('v1/schedule/review/list.json', { params: { status: status, offset: offset, limit: limit } });
+    },
+    confirmScheduledOccurrence: (req: ScheduledOccurrenceActionRequest): ApiResponsePromise<{ transactionId: string }> => {
+        return axios.post<ApiResponse<{ transactionId: string }>>('v1/schedule/review/confirm.json', req);
+    },
+    dismissScheduledOccurrence: (req: ScheduledOccurrenceActionRequest): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/schedule/review/dismiss.json', req);
+    },
+    restoreScheduledOccurrence: (req: ScheduledOccurrenceActionRequest): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/schedule/review/restore.json', req);
     },
     getAllExplorations: (): ApiResponsePromise<InsightsExplorerInfoResponse[]> => {
         return axios.get<ApiResponse<InsightsExplorerInfoResponse[]>>('v1/insights/explorers/list.json');

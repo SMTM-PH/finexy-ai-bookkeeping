@@ -384,6 +384,92 @@
                                     }}
                                 </button></PanelHead
                             >
+                            <div
+                                v-if="pendingOccurrences.length || dismissedOccurrences.length"
+                                class="review-block"
+                            >
+                                <header class="review-head">
+                                    <b>待确认入账</b
+                                    ><span
+                                        >到期计划不会自动入账，确认后才计入账本</span
+                                    >
+                                </header>
+                                <article
+                                    v-for="item in pendingOccurrences"
+                                    :key="`${item.templateId}-${item.scheduledUnixTime}`"
+                                    class="schedule-row occurrence-row"
+                                >
+                                    <time
+                                        ><b>{{ occurrenceDayLabel(item) }}</b
+                                        ><small>{{
+                                            occurrenceMonthLabel(item)
+                                        }}</small></time
+                                    ><span
+                                        ><b>{{
+                                            item.name || "周期计划"
+                                        }}</b
+                                        ><small>{{
+                                            occurrenceMetaLabel(item)
+                                        }}</small></span
+                                    ><strong>{{
+                                        occurrenceAmountLabel(item)
+                                    }}</strong>
+                                    <div class="row-actions">
+                                        <button
+                                            class="text-btn"
+                                            :aria-label="`确认入账：${item.name || '周期计划'}`"
+                                            @click="confirmOccurrence(item)"
+                                        >
+                                            确认入账
+                                        </button>
+                                        <button
+                                            class="text-btn danger"
+                                            :aria-label="`忽略：${item.name || '周期计划'}`"
+                                            @click="dismissOccurrence(item)"
+                                        >
+                                            忽略
+                                        </button>
+                                    </div>
+                                </article>
+                                <article
+                                    v-for="item in dismissedOccurrences"
+                                    :key="`dismissed-${item.templateId}-${item.scheduledUnixTime}`"
+                                    class="schedule-row occurrence-row dismissed"
+                                >
+                                    <time
+                                        ><b>{{ occurrenceDayLabel(item) }}</b
+                                        ><small>{{
+                                            occurrenceMonthLabel(item)
+                                        }}</small></time
+                                    ><span
+                                        ><b>{{
+                                            item.name || "周期计划"
+                                        }}</b
+                                        ><small
+                                            >已忽略 · {{
+                                                occurrenceMetaLabel(item)
+                                            }}</small
+                                        ></span
+                                    ><strong>{{
+                                        occurrenceAmountLabel(item)
+                                    }}</strong>
+                                    <div class="row-actions">
+                                        <button
+                                            class="text-btn"
+                                            :aria-label="`恢复：${item.name || '周期计划'}`"
+                                            @click="restoreOccurrence(item)"
+                                        >
+                                            恢复
+                                        </button>
+                                    </div>
+                                </article>
+                            </div>
+                            <p
+                                v-else-if="!occurrencesFeatureDisabled"
+                                class="empty-copy"
+                            >
+                                当前没有待确认的周期计划。到期计划会出现在这里，确认后才入账。
+                            </p>
                             <article
                                 v-for="item in sortedSchedules"
                                 :key="item.title"
@@ -1786,6 +1872,7 @@ import { useProductAssetsStore } from "@/stores/productAsset.ts";
 import { useSettingsStore } from "@/stores/setting.ts";
 import { useTransactionsStore } from "@/stores/transaction.ts";
 import { useAIReviewItemsStore } from "@/stores/aiReviewItem.ts";
+import { useScheduledOccurrencesStore } from "@/stores/scheduledOccurrence.ts";
 import { useOverviewStore } from "@/stores/overview.ts";
 import { useUserStore } from "@/stores/user.ts";
 import { useRootStore } from "@/stores/index.ts";
@@ -1802,6 +1889,8 @@ import {
 import { CategoryType } from "@/core/category.ts";
 import { TemplateType } from "@/core/template.ts";
 import { TransactionType } from "@/core/transaction.ts";
+import { ScheduledOccurrence } from "@/models/scheduled_occurrence.ts";
+import { generateRandomUUID } from "@/lib/misc.ts";
 import { AMOUNT_FACTOR } from "@/consts/numeral.ts";
 import { getCurrentUnixTime } from "@/lib/datetime.ts";
 import {
@@ -1995,6 +2084,7 @@ const productAssetsStore = useProductAssetsStore();
 const settingsStore = useSettingsStore();
 const transactionsStore = useTransactionsStore();
 const aiReviewItemsStore = useAIReviewItemsStore();
+const occurrencesStore = useScheduledOccurrencesStore();
 const overviewStore = useOverviewStore();
 const userStore = useUserStore();
 const rootStore = useRootStore();
@@ -3064,10 +3154,13 @@ async function loadPageData(force = false, showRefreshMessage = force) {
                 force,
             });
         else if (pageKey.value === "program")
-            await templatesStore.loadAllTemplates({
-                templateType: TemplateType.Schedule.type,
-                force,
-            });
+            await Promise.all([
+                templatesStore.loadAllTemplates({
+                    templateType: TemplateType.Schedule.type,
+                    force,
+                }),
+                occurrencesStore.load(),
+            ]);
         else if (pageKey.value === "rates")
             await exchangeRatesStore.getLatestExchangeRates({
                 silent: !force,
@@ -3145,11 +3238,19 @@ function transactionToItem(transaction: Transaction): Item {
             ? "↔ "
             : "-";
     const date = new Date(transaction.time * 1000);
+    // The list renders title and meta side by side; when the comment repeats
+    // the category name, fall back to the account so the same text never
+    // appears in both lines.
+    const title = transaction.comment || transaction.category?.name || kind;
+    const meta = transaction.comment
+        ? transaction.category?.name || kind
+        : transaction.sourceAccount?.name || "无备注";
     return {
-        title: transaction.comment || transaction.category?.name || kind,
-        meta: transaction.comment
-            ? transaction.category?.name || kind
-            : transaction.sourceAccount?.name || "无备注",
+        title,
+        meta:
+            meta === title
+                ? transaction.sourceAccount?.name || kind
+                : meta,
         amount: `${prefix}${amount}`,
         status: transaction.editable ? "已完成" : "只读",
         tone: "success",
@@ -3280,19 +3381,161 @@ function toggleSchedule(
     enabled: boolean,
 ) {
     if (item.raw instanceof TransactionTemplate) {
+        const template = item.raw;
         busy.value = true;
-        templatesStore
-            .hideTemplate({ template: item.raw, hidden: !enabled })
+
+        let action: Promise<unknown>;
+        if (!enabled && template.scheduledFrequencyType !== 0) {
+            // Real pause: blank the execution rule on the server and stash the
+            // previous frequency locally so resuming can restore it. Hiding
+            // must never be presented as pausing.
+            pausedScheduleBackups.value[template.id] = {
+                frequencyType: template.scheduledFrequencyType as number,
+                frequency: template.scheduledFrequency as string,
+            };
+            template.scheduledFrequencyType = 0;
+            template.scheduledFrequency = "";
+            action = templatesStore.saveTemplateContent({
+                template,
+                isEdit: true,
+                clientSessionId: newOccurrenceClientSessionId(),
+            });
+        } else if (enabled && template.scheduledFrequencyType === 0) {
+            const backup = pausedScheduleBackups.value[template.id];
+            if (!backup) {
+                busy.value = false;
+                showError({
+                    message:
+                        "缺少暂停前的周期规则，请编辑该计划重新设置频率后再启用",
+                });
+                return;
+            }
+            template.scheduledFrequencyType = backup.frequencyType;
+            template.scheduledFrequency = backup.frequency;
+            action = templatesStore.saveTemplateContent({
+                template,
+                isEdit: true,
+                clientSessionId: newOccurrenceClientSessionId(),
+            });
+        } else {
+            action = templatesStore.hideTemplate({
+                template,
+                hidden: !enabled,
+            });
+        }
+
+        action
             .then(() => {
-                showToast(`${item.title}已${enabled ? "启用" : "暂停"}`);
+                showToast(
+                    `${item.title}已${enabled ? "启用，到期后将进入待确认队列" : "暂停，到期后不再生成待确认记录"}`,
+                );
                 return loadPageData(false);
             })
-            .catch(showError)
+            .catch((error) => {
+                showError(error);
+                return loadPageData(true);
+            })
             .finally(() => (busy.value = false));
     } else {
         item.enabled = enabled;
         showToast(`${item.title}已${enabled ? "启用" : "暂停"}`);
     }
+}
+
+const pausedScheduleBackups = ref<
+    Record<string, { frequencyType: number; frequency: string }>
+>({});
+
+function newOccurrenceClientSessionId(): string {
+    return generateRandomUUID();
+}
+
+const pendingOccurrences = computed(() => occurrencesStore.pendingOccurrences);
+const dismissedOccurrences = computed(
+    () => occurrencesStore.dismissedOccurrences,
+);
+const occurrencesFeatureDisabled = computed(
+    () => occurrencesStore.featureDisabled,
+);
+
+function occurrenceTypeLabel(type: number): string {
+    if (type === TransactionType.Income) return "收入";
+    if (type === TransactionType.Transfer) return "转账";
+    return "支出";
+}
+
+function occurrenceDayLabel(item: ScheduledOccurrence): string {
+    const date = new Date(item.scheduledUnixTime * 1000);
+    return String(date.getDate()).padStart(2, "0");
+}
+
+function occurrenceMonthLabel(item: ScheduledOccurrence): string {
+    const date = new Date(item.scheduledUnixTime * 1000);
+    return `${date.getMonth() + 1}月`;
+}
+
+function occurrenceMetaLabel(item: ScheduledOccurrence): string {
+    const parts: string[] = [occurrenceTypeLabel(item.type)];
+    const account = accountsStore.allAccounts.find(
+        (account) => account.id === item.sourceAccountId,
+    );
+    parts.push(account ? account.name : `#${item.sourceAccountId}`);
+    if (item.type === TransactionType.Transfer) {
+        const destination = accountsStore.allAccounts.find(
+            (account) => account.id === item.destinationAccountId,
+        );
+        parts.push(`→ ${destination ? destination.name : `#${item.destinationAccountId}`}`);
+    }
+    if (item.comment) parts.push(item.comment);
+    return parts.join(" · ");
+}
+
+function occurrenceAmountLabel(item: ScheduledOccurrence): string {
+    if (item.hideAmount) return "¥ ····";
+    const currency =
+        accountsStore.allAccounts.find(
+            (account) => account.id === item.sourceAccountId,
+        )?.currency || userStore.currentUserDefaultCurrency;
+    const source = formatAmountToLocalizedNumeralsWithCurrency(
+        item.sourceAmount,
+        currency,
+    );
+    if (item.type !== TransactionType.Transfer) return source;
+    const destination = formatAmountToLocalizedNumeralsWithCurrency(
+        item.destinationAmount,
+        currency,
+    );
+    return `${source} → ${destination}`;
+}
+
+function confirmOccurrence(item: ScheduledOccurrence) {
+    busy.value = true;
+    occurrencesStore
+        .confirm(item)
+        .then(() => {
+            showToast("已确认入账，流水已生成");
+            return loadPageData(false);
+        })
+        .catch(showError)
+        .finally(() => (busy.value = false));
+}
+
+function dismissOccurrence(item: ScheduledOccurrence) {
+    busy.value = true;
+    occurrencesStore
+        .dismiss(item)
+        .then(() => showToast("已忽略，可在此恢复"))
+        .catch(showError)
+        .finally(() => (busy.value = false));
+}
+
+function restoreOccurrence(item: ScheduledOccurrence) {
+    busy.value = true;
+    occurrencesStore
+        .restore(item)
+        .then(() => showToast("已恢复到待确认"))
+        .catch(showError)
+        .finally(() => (busy.value = false));
 }
 function primaryAction() {
     if (pageKey.value === "activity") {
@@ -4415,6 +4658,39 @@ dd {
 .schedule-row span b,
 .schedule-row > strong {
     font-size: 10.5px;
+}
+.review-block {
+    display: grid;
+    gap: 2px;
+    padding: 10px 0 14px;
+    margin-bottom: 6px;
+    border-bottom: 1px solid var(--line);
+}
+.review-head {
+    display: grid;
+    gap: 2px;
+    padding-bottom: 8px;
+}
+.review-head b {
+    font-size: 12px;
+}
+.review-head span {
+    color: var(--faint);
+    font-size: 10px;
+}
+.schedule-row.occurrence-row {
+    grid-template-columns: 46px 1fr auto auto;
+}
+.schedule-row.occurrence-row.dismissed {
+    opacity: 0.62;
+}
+.row-actions {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+.text-btn.danger {
+    color: var(--danger, #b3261e);
 }
 .switch input {
     position: absolute;
