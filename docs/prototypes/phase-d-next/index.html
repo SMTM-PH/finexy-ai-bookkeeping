@@ -1,0 +1,1017 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Finexy 阶段 D 后续 · Android UI 原型</title>
+<style>
+  :root, [data-theme="light"] {
+    --canvas:#F7F5F2; --panel:#FFFFFF; --panel-raised:#EEEAE5; --wallet-hl:#E4DED7;
+    --hairline:#C8C0B8; --ink:#1A1917; --muted:#625D57;
+    --coral:#F05537; --coral-btn:#CB4027; --green:#16845B; --error:#B3261E; --warning:#B25309;
+    --blue:#2E9BFF; --indigo:#4F46E5; --purple:#7C3AED;
+    --scrim:rgba(18,20,26,.45); --page:#EDEBE7; --page-ink:#1A1917; --page-muted:#625D57;
+  }
+  [data-theme="dark"] {
+    --canvas:#101113; --panel:#202226; --panel-raised:#292C31; --wallet-hl:#36393E;
+    --hairline:#666B75; --ink:#F5F5F6; --muted:#ADB2BC;
+    --coral:#F05537; --coral-btn:#CB4027; --green:#62D3A0; --error:#FF9D91; --warning:#FDB022;
+    --blue:#2E9BFF; --indigo:#818CF8; --purple:#A78BFA;
+    --scrim:rgba(0,0,0,.55); --page:#17181B; --page-ink:#F5F5F6; --page-muted:#ADB2BC;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body {
+    font-family:"Microsoft YaHei UI","Microsoft YaHei","PingFang SC","Noto Sans CJK SC",system-ui,sans-serif;
+    background:var(--page); color:var(--page-ink); font-size:14px; line-height:1.5;
+  }
+  .ic { width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; flex:none; }
+  .ic.s { width:16px; height:16px; } .ic.m { width:19px; height:19px; }
+  .muted { color:var(--muted); } .f12 { font-size:12px; } .f11 { font-size:11px; }
+  .grow { flex:1; min-width:0; }
+
+  /* ===== 页面框架 ===== */
+  header.top {
+    display:flex; align-items:center; gap:14px; padding:14px 24px;
+    border-bottom:1px solid var(--hairline); position:sticky; top:0; background:var(--page); z-index:50;
+  }
+  .logo { width:34px; height:34px; border-radius:11px; background:var(--coral); color:#fff;
+    display:flex; align-items:center; justify-content:center; font-weight:900; font-size:22px; flex:none; }
+  header.top h1 { font-size:17px; font-weight:700; letter-spacing:-.4px; }
+  header.top .sub { color:var(--page-muted); font-size:12px; }
+  .proto-badge { font-size:11px; font-weight:600; color:var(--warning);
+    border:1px solid var(--warning); border-radius:999px; padding:3px 10px; }
+  .spacer { flex:1; }
+  .theme-btn { display:flex; align-items:center; gap:8px; border:1px solid var(--hairline); background:transparent;
+    color:var(--page-ink); border-radius:999px; padding:8px 16px; font-size:13px; cursor:pointer; }
+
+  main.wrap { display:flex; gap:28px; padding:28px 24px 60px; max-width:1280px; margin:0 auto; align-items:flex-start; }
+
+  /* ===== 侧栏 ===== */
+  aside.nav { width:340px; flex:none; display:flex; flex-direction:column; gap:18px; position:sticky; top:76px; }
+  .nav-group b { display:block; font-size:11px; letter-spacing:.8px; color:var(--page-muted); margin:10px 0 6px 6px; }
+  .nav-item { display:flex; align-items:center; gap:10px; width:100%; text-align:left; border:0; cursor:pointer;
+    background:transparent; color:var(--page-ink); border-radius:12px; padding:9px 12px; font-size:13.5px; }
+  .nav-item:hover { background:color-mix(in srgb, var(--hairline) 22%, transparent); }
+  .nav-item.on { background:var(--panel); font-weight:700; box-shadow:0 1px 4px rgba(18,20,26,.08); }
+  .nav-item .ph { margin-left:auto; font-size:10.5px; color:var(--page-muted); border:1px solid var(--hairline); border-radius:999px; padding:1px 7px; }
+  .notes { background:var(--panel); border-radius:16px; padding:16px 18px; border:1px solid var(--hairline); }
+  .notes h3 { font-size:13px; margin-bottom:8px; }
+  .notes ul { padding-left:18px; display:flex; flex-direction:column; gap:6px; }
+  .notes li { font-size:12.5px; color:var(--page-muted); }
+  .notes li b { color:var(--page-ink); }
+
+  /* ===== 手机框 ===== */
+  .phone-zone { flex:1; display:flex; justify-content:center; }
+  .phone { width:412px; height:860px; border-radius:40px; background:var(--canvas); color:var(--ink);
+    border:8px solid #1c1d20; overflow:hidden; position:relative; display:flex; flex-direction:column;
+    box-shadow:0 24px 60px rgba(18,20,26,.25); }
+  .statusbar { height:30px; display:flex; align-items:center; justify-content:space-between;
+    padding:0 22px; font-size:12px; font-weight:600; flex:none; }
+  .statusbar .r { display:flex; gap:6px; align-items:center; color:var(--ink); }
+
+  .screens { flex:1; position:relative; overflow:hidden; }
+  .screen { position:absolute; inset:0; display:none; flex-direction:column; }
+  .screen.on { display:flex; }
+  .scr-body { flex:1; overflow-y:auto; padding:12px 20px 130px; display:flex; flex-direction:column; gap:16px; scrollbar-width:thin; }
+  .scr-body::-webkit-scrollbar { width:4px; } .scr-body::-webkit-scrollbar-thumb { background:var(--hairline); border-radius:4px; }
+
+  /* ===== 底栏 ===== */
+  .dock { flex:none; display:flex; padding:6px 12px 14px; gap:2px; background:var(--canvas); }
+  .dock .item { flex:1; display:flex; flex-direction:column; align-items:center; gap:5px; padding:6px 0;
+    border-radius:18px; color:var(--muted); font-size:11px; border:0; background:none; cursor:pointer; }
+  .dock .item.on { color:var(--ink); font-weight:700; }
+  .dock .add { width:48px; height:48px; border-radius:50%; background:var(--coral); color:#fff;
+    display:flex; align-items:center; justify-content:center; }
+
+  /* ===== 通用组件（对齐 FinexyScreens.kt） ===== */
+  .heading h2 { font-size:26px; font-weight:600; letter-spacing:-.5px; }
+  .heading p { color:var(--muted); font-size:13px; }
+  .subhead { display:flex; align-items:center; gap:10px; }
+  .subhead .back { width:44px; height:44px; border-radius:50%; border:0; background:transparent; color:var(--ink);
+    display:flex; align-items:center; justify-content:center; cursor:pointer; flex:none; }
+  .subhead h2 { font-size:21px; font-weight:600; }
+  .card { background:var(--panel); border-radius:24px; padding:20px; display:flex; flex-direction:column; gap:12px; }
+  .row-card { background:var(--panel); border-radius:18px; padding:14px; display:flex; align-items:center; gap:12px;
+    border:0; width:100%; text-align:left; cursor:pointer; color:var(--ink); font-family:inherit; }
+  .row-card.static { cursor:default; }
+  .tile { width:42px; height:42px; border-radius:50%; background:var(--panel-raised); color:var(--ink);
+    display:flex; align-items:center; justify-content:center; flex:none; }
+  .t-main { font-size:15px; font-weight:500; }
+  .t-sub { font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .amt { font-size:15px; font-weight:600; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .amt.in { color:var(--green); } .amt.out { color:var(--ink); }
+  .badge { font-size:11px; border-radius:999px; padding:3px 10px; background:var(--panel-raised); color:var(--muted); white-space:nowrap; display:inline-flex; align-items:center; gap:4px; }
+  .badge.warn { color:var(--warning); background:color-mix(in srgb, var(--warning) 14%, transparent); font-weight:600; }
+  .badge.ok { color:var(--green); background:color-mix(in srgb, var(--green) 14%, transparent); font-weight:600; }
+  .badge.err { color:var(--error); background:color-mix(in srgb, var(--error) 12%, transparent); font-weight:600; }
+  .btn { border:0; cursor:pointer; font-family:inherit; font-size:14px; font-weight:600; border-radius:999px;
+    display:flex; align-items:center; justify-content:center; gap:8px; padding:10px 20px; }
+  .btn.primary { background:var(--coral-btn); color:#fff; min-height:54px; }
+  .btn.second { background:var(--panel-raised); color:var(--ink); min-height:48px; }
+  .btn.line { background:transparent; border:1px solid var(--hairline); color:var(--ink); min-height:48px; }
+  .btn.danger-text { background:transparent; color:var(--error); min-height:44px; }
+  .btn.text { background:transparent; color:var(--muted); min-height:40px; font-weight:500; }
+  .btn.coral-text { background:transparent; color:var(--coral); min-height:40px; }
+  .btn[disabled] { opacity:.45; cursor:not-allowed; }
+  .btn.wide { width:100%; }
+  .field { display:flex; flex-direction:column; gap:6px; }
+  .field label { font-size:12.5px; color:var(--muted); display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .field .box { border:1px solid var(--hairline); border-radius:16px; padding:12px 14px; font-size:14px;
+    background:transparent; color:var(--ink); display:flex; align-items:center; gap:10px; }
+  .field .box.low { border-color:color-mix(in srgb, var(--warning) 60%, transparent); }
+  .field input { border:0; outline:0; background:transparent; color:var(--ink); font-size:14px; flex:1; font-family:inherit; min-width:0; }
+  .segments { display:flex; background:var(--panel); border-radius:999px; padding:5px; gap:4px; }
+  .segments button { flex:1; border:0; background:transparent; border-radius:999px; min-height:48px;
+    color:var(--muted); font-size:14px; cursor:pointer; font-family:inherit; }
+  .segments button.on { background:var(--panel-raised); color:var(--ink); font-weight:700; }
+  .chips { display:flex; gap:8px; flex-wrap:wrap; }
+  .chip { border-radius:999px; border:1px solid var(--hairline); background:transparent; color:var(--muted);
+    font-size:13px; padding:8px 14px; cursor:pointer; display:flex; align-items:center; gap:6px; font-family:inherit; }
+  .chip.on { background:var(--panel-raised); border-color:transparent; color:var(--ink); font-weight:700; }
+  .chip[disabled] { opacity:.5; cursor:default; }
+  .sec-head { display:flex; align-items:center; gap:10px; }
+  .sec-head b { font-size:16px; font-weight:600; flex:1; }
+  .sec-head .act { border:0; background:none; color:var(--muted); font-size:12px; cursor:pointer; display:flex; align-items:center; gap:2px; font-family:inherit; }
+  .hr { height:1px; background:color-mix(in srgb, var(--hairline) 55%, transparent); border:0; }
+  .err-text { color:var(--error); font-size:12.5px; display:flex; align-items:center; gap:6px; }
+  .sync-badge { border:0; cursor:pointer; font-family:inherit; font-size:12px; font-weight:600; border-radius:999px;
+    padding:6px 12px; display:flex; align-items:center; gap:6px;
+    color:var(--warning); background:color-mix(in srgb, var(--warning) 14%, transparent); }
+  .sync-badge.syncing { color:var(--muted); background:var(--panel-raised); }
+  .dot { width:6px; height:6px; border-radius:50%; flex:none; }
+
+  /* AI / 识别新增 */
+  .ai-tag { display:inline-flex; align-items:center; gap:3px; font-size:10.5px; font-weight:600; color:var(--coral);
+    background:color-mix(in srgb, var(--coral) 10%, transparent); border-radius:999px; padding:2px 8px; }
+  .ai-tag.low { color:var(--warning); background:color-mix(in srgb, var(--warning) 13%, transparent); }
+  .kv { display:flex; font-size:13.5px; padding:7px 0; gap:8px; border-bottom:1px solid color-mix(in srgb, var(--hairline) 40%, transparent); }
+  .kv:last-of-type { border-bottom:0; }
+  .kv b { flex:1; font-weight:500; }
+  .kv span { color:var(--muted); text-align:right; }
+  .note { font-size:12px; color:var(--muted); background:var(--panel-raised); border-radius:12px; padding:10px 12px; }
+  .smart-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .smart-btn { border:1px solid var(--hairline); background:var(--panel); border-radius:20px; padding:16px 14px;
+    display:flex; flex-direction:column; align-items:flex-start; gap:8px; cursor:pointer; text-align:left;
+    color:var(--ink); font-family:inherit; min-height:96px; }
+  .smart-btn .tile { background:color-mix(in srgb, var(--coral) 12%, transparent); color:var(--coral); }
+  .smart-btn b { font-size:14.5px; font-weight:600; }
+  .smart-btn span { font-size:11.5px; color:var(--muted); }
+  .prog { height:10px; border-radius:999px; background:var(--panel-raised); overflow:hidden; }
+  .prog .fill { height:100%; border-radius:999px; }
+  .prog-lg { height:14px; }
+  .money-hero { font-size:34px; font-weight:600; letter-spacing:-1.2px; font-variant-numeric:tabular-nums; }
+  .thumb { width:44px; height:44px; border-radius:12px; background:var(--panel-raised); color:var(--muted);
+    display:flex; align-items:center; justify-content:center; flex:none; }
+  .ticket { background:var(--panel); border-radius:20px; padding:16px; display:flex; flex-direction:column; gap:10px; }
+  .ticket.dim { opacity:.62; }
+  .capture { border:1.5px dashed var(--hairline); border-radius:20px; padding:22px 18px;
+    display:flex; flex-direction:column; gap:14px; align-items:center; text-align:center; }
+  .stat2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .stat-cell { background:var(--panel-raised); border-radius:14px; padding:12px 14px; display:flex; flex-direction:column; gap:2px; }
+  .stat-cell span { font-size:11.5px; color:var(--muted); }
+  .stat-cell b { font-size:16px; font-weight:600; font-variant-numeric:tabular-nums; }
+  .delta { display:inline-flex; align-items:center; gap:3px; font-size:12px; font-weight:600; }
+  .delta.good { color:var(--green); } .delta.bad { color:var(--error); }
+  .mini-bar { display:flex; flex-direction:column; gap:5px; }
+  .mini-bar .top { display:flex; font-size:13px; align-items:center; gap:6px; }
+  .mini-bar .top b { font-weight:500; flex:1; }
+  .mini-bar .track { height:8px; border-radius:999px; background:var(--panel-raised); overflow:hidden; }
+  .mini-bar .fill { height:100%; border-radius:999px; }
+  .spin { animation:rot 1.1s linear infinite; }
+  @keyframes rot { to { transform:rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spin { animation:none; } }
+
+  /* 图表 */
+  .bars { display:flex; align-items:flex-end; gap:12px; height:170px; padding-top:22px; }
+  .bar-col { flex:1; display:flex; flex-direction:column; align-items:center; gap:6px; height:100%; justify-content:flex-end; }
+  .bar-col .v { font-size:10px; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .bar-col .bar { width:100%; border-radius:8px 8px 4px 4px; background:color-mix(in srgb, var(--coral) 55%, transparent); }
+  .bar-col.now .bar { background:var(--coral); }
+  .bar-col.now .v { color:var(--ink); font-weight:700; }
+  .bar-col .m { font-size:11px; color:var(--muted); }
+
+  /* 设置行 */
+  .set-row { display:flex; align-items:center; gap:12px; padding:14px 4px; width:100%; border:0; background:none;
+    color:var(--ink); cursor:pointer; text-align:left; font-family:inherit; border-radius:12px; }
+  .set-row:hover { background:color-mix(in srgb, var(--hairline) 18%, transparent); }
+  .set-row .val { color:var(--muted); font-size:12.5px; display:flex; align-items:center; gap:4px; }
+  .set-row[disabled] { opacity:.5; cursor:default; }
+  .group-title { font-size:11px; letter-spacing:.8px; color:var(--muted); margin-top:4px; }
+
+  /* 弹层 */
+  .overlay { position:absolute; inset:0; background:var(--scrim); display:none; z-index:30; }
+  .overlay.open { display:block; }
+  .sheet { position:absolute; left:0; right:0; bottom:0; background:var(--canvas); border-radius:28px 28px 0 0;
+    padding:20px 20px 28px; max-height:82%; overflow-y:auto; display:flex; flex-direction:column; gap:16px; }
+  .sheet h3, .dlg h3 { font-size:18px; font-weight:600; }
+  .dlg-wrap { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:28px; }
+  .dlg { background:var(--panel); border-radius:24px; padding:22px; width:100%; display:flex; flex-direction:column; gap:14px; }
+  .dlg .btns { display:flex; gap:10px; margin-top:4px; }
+  .dlg .btns .btn { flex:1; }
+
+  @media (max-width:1100px) {
+    main.wrap { flex-direction:column; align-items:center; }
+    aside.nav { width:100%; max-width:640px; position:static; }
+  }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 10 12 3l9 7"/><path d="M5 9v12h5v-6h4v6h5V9"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13"/><circle cx="3.5" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="3.5" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="3.5" cy="18" r="1.2" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-add" viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></symbol>
+    <symbol id="i-wallet" viewBox="0 0 24 24"><path d="M20 7H3v13h18V7H6V4h12"/><path d="M21 11h-6v5h6"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/></symbol>
+    <symbol id="i-in" viewBox="0 0 24 24"><path d="M18 5 6 18"/><path d="M6 8v10h10"/></symbol>
+    <symbol id="i-out" viewBox="0 0 24 24"><path d="M6 18 18 5"/><path d="M8 5h10v10"/></symbol>
+    <symbol id="i-transfer" viewBox="0 0 24 24"><path d="M4 8h13l-3-3M20 16H7l3 3"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10" cy="10" r="6.5"/><path d="m15 15 6 6"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="2.5"/><path d="M4 10h16M8 3v4M16 3v4"/></symbol>
+    <symbol id="i-tag" viewBox="0 0 24 24"><path d="M3 3h8.5L21 12.5 12.5 21 3 11.5V3z"/><circle cx="8" cy="8" r="1.5"/></symbol>
+    <symbol id="i-doc" viewBox="0 0 24 24"><rect x="6" y="3" width="12" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M5 7h14M9 4h6M7 7l1 13h8l1-13M10 10v7M14 10v7"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M14.5 4.5 19.5 9.5 8 21H3v-5L14.5 4.5z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 5 5L20 7"/></symbol>
+    <symbol id="i-check-c" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="m8.5 12.5 2.5 2.5 5-5.5"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2.5 20h19L12 3z"/><path d="M12 9.5v4.5"/><circle cx="12" cy="17" r=".6" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 3v4.5h-4.5"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3 2.7 5.6 6.1.8-4.5 4.3 1.1 6-5.4-2.9-5.4 2.9 1.1-6L3.2 9.4l6.1-.8L12 3z"/></symbol>
+    <symbol id="i-export" viewBox="0 0 24 24"><path d="M12 4v10M8 10l4 4 4-4M5 19h14"/></symbol>
+    <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18c1.5 0 2-.9 2-2 0-1.4-1-1.7-1-2.8 0-1 .8-1.7 2-1.7h1.8A4.2 4.2 0 0 0 21 10.5C21 6.3 17 3 12 3z"/><circle cx="7.5" cy="11" r="1.1"/><circle cx="10.5" cy="7" r="1.1"/><circle cx="15" cy="7.5" r="1.1"/></symbol>
+    <symbol id="i-server" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><circle cx="7" cy="7.5" r=".7" fill="currentColor" stroke="none"/><circle cx="7" cy="16.5" r=".7" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V4M4 20h16"/><path d="M8 16v-5M12 16V8M16 16v-3"/></symbol>
+    <symbol id="i-budget" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 3a9 9 0 0 1 9 9h-9V3z"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="M11 4l1.6 4.6L17 10.2l-4.4 1.6L11 16.4l-1.6-4.6L5 10.2l4.4-1.6L11 4z"/><path d="M18.5 14.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2z"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8h3.2L9 5h6l1.8 3H20v12H4V8z"/><circle cx="12" cy="13.5" r="3.4"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="m5 17.5 4.6-5.4 3.6 3.8 2.6-2.6 3.2 4.2"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 16v-5a6 6 0 1 1 12 0v5l1.6 2.6H4.4L6 16z"/><path d="M10 21a2.3 2.3 0 0 0 4 0"/></symbol>
+    <symbol id="i-box" viewBox="0 0 24 24"><path d="M12 3 4 7v10l8 4 8-4V7l-8-4z"/><path d="M4 7l8 4 8-4M12 11v10"/></symbol>
+    <symbol id="i-rate" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="m8.8 7.8 3.2 3.7 3.2-3.7M12 11.5V17M9.4 13h5.2M9.4 15.2h5.2"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.5 2"/></symbol>
+    <symbol id="i-scan" viewBox="0 0 24 24"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16M4 12h16"/></symbol>
+  </defs>
+</svg>
+
+<header class="top">
+  <div class="logo">F</div>
+  <div>
+    <h1>Finexy · 阶段 D 后续 Android UI 原型</h1>
+    <div class="sub">智能记账 · AI 待复核 · 预算 · 财务报告 · 资产与汇率 · 总览改版</div>
+  </div>
+  <span class="proto-badge">原型 · 示例数据 · 非交付功能</span>
+  <div class="spacer"></div>
+  <button class="theme-btn" onclick="toggleTheme()"><svg class="ic s"><use href="#i-palette"/></svg><span id="theme-label">深色主题</span></button>
+</header>
+
+<main class="wrap">
+  <aside class="nav">
+    <div>
+      <div class="nav-group">
+        <b>总览改版</b>
+        <button class="nav-item on" data-scr="home" onclick="show('home')"><svg class="ic s"><use href="#i-home"/></svg>总览 · 月度口径与角标</button>
+        <button class="nav-item" data-scr="sync" onclick="show('sync')"><svg class="ic s"><use href="#i-refresh"/></svg>同步详情</button>
+      </div>
+      <div class="nav-group">
+        <b>智能记账（§11.2）</b>
+        <button class="nav-item" data-scr="entry" onclick="show('entry')"><svg class="ic s"><use href="#i-add"/></svg>记账 · 智能入口</button>
+        <button class="nav-item" data-scr="ai-text" onclick="show('ai-text')"><svg class="ic s"><use href="#i-spark"/></svg>AI 文本记账</button>
+        <button class="nav-item" data-scr="ocr" onclick="show('ocr')"><svg class="ic s"><use href="#i-camera"/></svg>拍照识别</button>
+        <button class="nav-item" data-scr="ocr-review" onclick="show('ocr-review')"><svg class="ic s"><use href="#i-scan"/></svg>识别结果确认</button>
+      </div>
+      <div class="nav-group">
+        <b>确认与队列（§11.3）</b>
+        <button class="nav-item" data-scr="ai-review" onclick="show('ai-review')"><svg class="ic s"><use href="#i-check-c"/></svg>AI 待复核队列</button>
+        <button class="nav-item" data-scr="ai-review" onclick="show('ai-review');openOv('ov-dismiss')"><svg class="ic s"><use href="#i-alert"/></svg>忽略确认<span class="ph">弹层</span></button>
+      </div>
+      <div class="nav-group">
+        <b>预算与报告（§11.4 / §11.5）</b>
+        <button class="nav-item" data-scr="budget" onclick="show('budget')"><svg class="ic s"><use href="#i-budget"/></svg>预算设置</button>
+        <button class="nav-item" data-scr="budget" onclick="show('budget');openOv('ov-budget-edit')"><svg class="ic s"><use href="#i-edit"/></svg>编辑预算<span class="ph">弹层</span></button>
+        <button class="nav-item" data-scr="report" onclick="show('report')"><svg class="ic s"><use href="#i-chart"/></svg>财务报告 · 月报</button>
+      </div>
+      <div class="nav-group">
+        <b>账户扩展（§7 账户子页面）</b>
+        <button class="nav-item" data-scr="accounts" onclick="show('accounts')"><svg class="ic s"><use href="#i-wallet"/></svg>账户 · 资产与汇率入口</button>
+        <button class="nav-item" data-scr="assets" onclick="show('assets')"><svg class="ic s"><use href="#i-box"/></svg>资产管理</button>
+        <button class="nav-item" data-scr="rates" onclick="show('rates')"><svg class="ic s"><use href="#i-rate"/></svg>汇率</button>
+      </div>
+      <div class="nav-group">
+        <b>设置新增入口</b>
+        <button class="nav-item" data-scr="settings" onclick="show('settings')"><svg class="ic s"><use href="#i-settings"/></svg>设置 · AI 与通知</button>
+        <button class="nav-item" data-scr="ai-text" onclick="show('ai-text');openOv('ov-cloud')"><svg class="ic s"><use href="#i-spark"/></svg>云端识别二次确认<span class="ph">弹层</span></button>
+      </div>
+    </div>
+    <div class="notes" id="notes"></div>
+  </aside>
+
+  <div class="phone-zone">
+    <div class="phone">
+      <div class="statusbar"><span>14:32</span><span class="r">5G ▮▮▮ 100%</span></div>
+      <div class="screens" id="screens">
+
+        <!-- S1 总览（改版） -->
+        <section class="screen on" id="scr-home">
+          <div class="scr-body">
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <div class="heading grow"><h2>总览</h2><p>先看本月，再看趋势。</p></div>
+              <button class="sync-badge syncing" onclick="show('sync')"><svg class="ic s spin"><use href="#i-refresh"/></svg>同步中</button>
+            </div>
+            <div class="f12 muted" style="display:flex;align-items:center;gap:6px;margin-top:-6px">
+              <svg class="ic s" style="width:13px;height:13px"><use href="#i-refresh"/></svg>下拉刷新可手动同步 · 上次成功 今天 09:12
+            </div>
+            <div style="display:flex;gap:10px">
+              <button class="btn primary grow" onclick="show('entry')"><svg class="ic m"><use href="#i-out"/></svg>记录支出</button>
+              <button class="btn second grow" onclick="show('entry')"><svg class="ic m"><use href="#i-in"/></svg>记录收入</button>
+            </div>
+
+            <div class="card">
+              <div style="display:flex;align-items:center;gap:8px"><b style="font-size:16px;font-weight:600;flex:1">本月收支</b><span class="badge">9月1日 – 9月30日</span></div>
+              <div style="display:flex;gap:18px;flex-wrap:wrap" class="f12">
+                <span style="color:var(--green);font-weight:600;white-space:nowrap">收入 +¥8,740.00</span>
+                <span style="font-weight:600;white-space:nowrap">支出 −¥5,520.00</span>
+                <span class="muted" style="white-space:nowrap">结余 +¥3,220.00</span>
+              </div>
+              <div class="f12 muted">实时统计 · 不含转账与余额调整 · 含待同步流水</div>
+            </div>
+
+            <button class="row-card" style="border:1px solid color-mix(in srgb, var(--warning) 45%, transparent)" onclick="show('ai-review')">
+              <div class="tile" style="color:var(--warning)"><svg class="ic"><use href="#i-spark"/></svg></div>
+              <div class="grow"><div class="t-main" style="color:var(--warning)">2 条待复核</div><div class="t-sub">AI 识别的流水，确认后才会入账</div></div>
+              <svg class="ic s muted"><use href="#i-chevron"/></svg>
+            </button>
+
+            <button class="row-card" onclick="show('budget')">
+              <div class="tile" style="color:var(--warning)"><svg class="ic"><use href="#i-budget"/></svg></div>
+              <div class="grow" style="display:flex;flex-direction:column;gap:7px">
+                <div class="t-main">本月预算 · 已用 92%<span class="badge warn" style="margin-left:6px"><svg class="ic s" style="width:11px;height:11px"><use href="#i-alert"/></svg>已超 80%</span></div>
+                <div class="prog prog-lg"><div class="fill" style="width:92%;background:var(--warning)"></div></div>
+                <div class="t-sub">已用 ¥5,520.00 / ¥6,000.00 · 剩余 ¥480.00</div>
+              </div>
+              <svg class="ic s muted"><use href="#i-chevron"/></svg>
+            </button>
+
+            <button class="row-card" onclick="show('report')">
+              <div class="tile"><svg class="ic"><use href="#i-chart"/></svg></div>
+              <div class="grow"><div class="t-main">8 月财务报告</div><div class="t-sub">收支汇总 · 分类排行 · 环比变化</div></div>
+              <svg class="ic s muted"><use href="#i-chevron"/></svg>
+            </button>
+
+            <div class="row-card static">
+              <div class="tile"><svg class="ic"><use href="#i-clock"/></svg></div>
+              <div class="grow"><div class="t-main">1 笔周期待确认</div><div class="t-sub">房租 · 每月 1 日 · 在「周期与待确认」中处理</div></div>
+              <svg class="ic s muted"><use href="#i-chevron"/></svg>
+            </div>
+
+            <div class="sec-head"><b>近期流水</b><button class="act">查看全部<svg class="ic s" style="width:12px;height:12px"><use href="#i-chevron"/></svg></button></div>
+            <div class="row-card static">
+              <div class="tile" style="color:var(--coral)"><svg class="ic"><use href="#i-out"/></svg></div>
+              <div class="grow"><div class="t-main">午餐</div><div class="t-sub">餐饮 · 招行储蓄卡 <span class="badge warn" style="margin-left:4px">待同步</span></div></div>
+              <div class="amt out">−¥32.00</div>
+            </div>
+            <div class="row-card static">
+              <div class="tile" style="color:var(--green)"><svg class="ic"><use href="#i-in"/></svg></div>
+              <div class="grow"><div class="t-main">工资到账</div><div class="t-sub">工资 · 招行储蓄卡</div></div>
+              <div class="amt in">+¥8,500.00</div>
+            </div>
+            <div class="row-card static">
+              <div class="tile"><svg class="ic"><use href="#i-transfer"/></svg></div>
+              <div class="grow"><div class="t-main">转入支付宝</div><div class="t-sub">转账 · 招行储蓄卡 → 支付宝</div></div>
+              <div class="amt out">−¥500.00</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- S2 记账（智能入口） -->
+        <section class="screen" id="scr-entry">
+          <div class="scr-body">
+            <div class="heading"><h2>记账</h2><p>先选类型，再填金额。</p></div>
+            <div class="smart-grid">
+              <button class="smart-btn" onclick="show('ai-text')">
+                <div class="tile"><svg class="ic"><use href="#i-spark"/></svg></div>
+                <b>AI 文本记账</b><span>说或粘贴一句，自动填表</span>
+              </button>
+              <button class="smart-btn" onclick="show('ocr')">
+                <div class="tile"><svg class="ic"><use href="#i-camera"/></svg></div>
+                <b>拍照识别</b><span>小票自动识别金额与分类</span>
+              </button>
+            </div>
+            <div class="note">识别在本机完成，不上传原始内容；云端结构化默认关闭。</div>
+            <div class="segments">
+              <button class="on">支出</button><button>收入</button><button>转账</button><button>余额调整</button>
+            </div>
+            <div class="card" style="align-items:center;gap:6px">
+              <span class="f12 muted">金额</span>
+              <div style="font-size:40px;font-weight:600;letter-spacing:-1.2px;font-variant-numeric:tabular-nums">¥ 0.00</div>
+            </div>
+            <div class="field"><label>分类</label>
+              <div class="chips"><button class="chip on">餐饮</button><button class="chip">交通</button><button class="chip">购物</button><button class="chip">居住</button><button class="chip">娱乐</button></div>
+            </div>
+            <div class="field"><label>账户</label>
+              <div class="chips"><button class="chip on"><svg class="ic s" style="width:11px;height:11px"><use href="#i-star"/></svg>招行储蓄卡</button><button class="chip">支付宝</button><button class="chip">现金钱包</button></div>
+            </div>
+            <div class="field"><label>日期与标签</label>
+              <div class="chips"><button class="chip on"><svg class="ic s"><use href="#i-calendar"/></svg>今天</button><button class="chip">工作餐</button><button class="chip">社交</button></div>
+            </div>
+            <div class="field"><label>备注（可选）</label><div class="box"><input placeholder="示例：和同事的午饭"></div></div>
+            <button class="btn primary wide"><svg class="ic m"><use href="#i-check"/></svg>保存支出</button>
+          </div>
+        </section>
+
+        <!-- S3 AI 文本记账 -->
+        <section class="screen" id="scr-ai-text">
+          <div class="scr-body">
+            <div class="subhead">
+              <button class="back" onclick="show('entry')"><svg class="ic"><use href="#i-back"/></svg></button>
+              <h2>AI 文本记账</h2>
+            </div>
+            <div class="card">
+              <div class="sec-head"><b>原文</b><button class="act"><svg class="ic s" style="width:12px;height:12px"><use href="#i-refresh"/></svg>重新解析</button></div>
+              <div class="box" style="border:1px solid var(--hairline);border-radius:16px;padding:12px 14px;font-size:14px">昨天和同事吃火锅 186，招行卡，AA</div>
+            </div>
+            <div class="sec-head"><b>识别结果</b><span class="f12 muted">逐项确认后才能入账</span></div>
+            <div class="field"><label>金额 <span class="ai-tag"><svg class="ic s" style="width:10px;height:10px"><use href="#i-spark"/></svg>AI 识别 · 置信 98%</span></label>
+              <div class="box"><input value="¥186.00" inputmode="decimal"></div></div>
+            <div class="field"><label>日期 <span class="ai-tag"><svg class="ic s" style="width:10px;height:10px"><use href="#i-spark"/></svg>AI 识别 · 置信 95%</span></label>
+              <div class="box"><span class="grow">昨天 · 9月3日</span><svg class="ic s muted"><use href="#i-chevron"/></svg></div></div>
+            <div class="field"><label>类型 <span class="ai-tag"><svg class="ic s" style="width:10px;height:10px"><use href="#i-spark"/></svg>AI 识别 · 置信 99%</span></label>
+              <div class="box"><span class="grow">支出</span><svg class="ic s muted"><use href="#i-chevron"/></svg></div></div>
+            <div class="field"><label>分类 <span class="ai-tag"><svg class="ic s" style="width:10px;height:10px"><use href="#i-spark"/></svg>AI 识别 · 置信 92%</span></label>
+              <div class="box"><span class="grow">餐饮</span><svg class="ic s muted"><use href="#i-chevron"/></svg></div></div>
+            <div class="field"><label>账户 <span class="ai-tag"><svg class="ic s" style="width:10px;height:10px"><use href="#i-spark"/></svg>AI 识别 · 置信 88%</span></label>
+              <div class="box"><span class="grow">招行储蓄卡 (6621)</span><svg class="ic s muted"><use href="#i-chevron"/></svg></div></div>
+            <div class="field"><label>标签 <span class="ai-tag low"><svg class="ic s" style="width:10px;height:10px"><use href="#i-alert"/></svg>置信 61% · 请确认</span></label>
+              <div class="box low"><span class="grow">社交</span><svg class="ic s" style="color:var(--warning)"><use href="#i-chevron"/></svg></div></div>
+            <div class="field"><label>备注 <span class="ai-tag"><svg class="ic s" style="width:10px;height:10px"><use href="#i-spark"/></svg>AI 识别 · 置信 75%</span></label>
+              <div class="box"><input value="和同事吃火锅 AA"></div></div>
+            <div class="note"><b>隐私说明：</b>文本在本机解析，不上传原始内容。如开启云端大模型结构化，首次使用会再次询问。</div>
+            <div style="display:flex;gap:10px">
+              <button class="btn line grow" onclick="openOv('ov-cloud')">云端识别设置</button>
+              <button class="btn primary grow"><svg class="ic m"><use href="#i-check"/></svg>确认入账</button>
+            </div>
+            <button class="btn text wide">改为手动记账</button>
+          </div>
+        </section>
+
+        <!-- S4 拍照识别 -->
+        <section class="screen" id="scr-ocr">
+          <div class="scr-body">
+            <div class="subhead">
+              <button class="back" onclick="show('entry')"><svg class="ic"><use href="#i-back"/></svg></button>
+              <h2>拍照识别</h2>
+            </div>
+            <div class="capture">
+              <div class="tile" style="width:64px;height:64px"><svg class="ic" style="width:30px;height:30px"><use href="#i-camera"/></svg></div>
+              <div><b style="font-size:15px">拍一张小票</b><div class="f12 muted">只保留拍摄与相册选择，无滤镜</div></div>
+              <div style="display:flex;gap:10px;width:100%">
+                <button class="btn primary grow"><svg class="ic m"><use href="#i-camera"/></svg>拍摄</button>
+                <button class="btn second grow"><svg class="ic m"><use href="#i-image"/></svg>相册选择</button>
+              </div>
+            </div>
+            <div class="sec-head"><b>已选票据 · 2</b><button class="act">清空</button></div>
+            <div class="chips">
+              <button class="chip on"><svg class="ic s"><use href="#i-doc"/></svg>票据 1 <svg class="ic s" style="width:11px;height:11px"><use href="#i-trash"/></svg></button>
+              <button class="chip on"><svg class="ic s"><use href="#i-doc"/></svg>票据 2 <svg class="ic s" style="width:11px;height:11px"><use href="#i-trash"/></svg></button>
+            </div>
+            <div class="card">
+              <div style="display:flex;align-items:center;gap:10px">
+                <svg class="ic spin" style="color:var(--coral)"><use href="#i-refresh"/></svg>
+                <div class="grow"><b style="font-size:15px">正在识别 2 张票据…</b><div class="f12 muted">本机 OCR · 已用 4 秒 · 识别结果需要你逐项确认</div></div>
+              </div>
+              <button class="btn line wide">取消识别</button>
+            </div>
+            <div class="note">识别过程可随时取消；取消不会删除已选票据。</div>
+            <button class="btn second wide" onclick="show('ocr-review')"><svg class="ic m"><use href="#i-scan"/></svg>查看识别结果</button>
+          </div>
+        </section>
+
+        <!-- S5 识别结果确认 -->
+        <section class="screen" id="scr-ocr-review">
+          <div class="scr-body">
+            <div class="subhead">
+              <button class="back" onclick="show('ocr')"><svg class="ic"><use href="#i-back"/></svg></button>
+              <h2>确认识别结果</h2>
+              <span class="badge warn" style="margin-left:auto">1 / 2 已确认</span>
+            </div>
+            <div class="ticket" style="border:1px solid color-mix(in srgb, var(--green) 40%, transparent)">
+              <div style="display:flex;align-items:center;gap:12px">
+                <div class="thumb"><svg class="ic"><use href="#i-doc"/></svg></div>
+                <div class="grow"><div class="t-main">肯德基 · 午餐小票</div><div class="t-sub">票据 1 · 共 3 张</div></div>
+                <span class="badge ok"><svg class="ic s" style="width:11px;height:11px"><use href="#i-check"/></svg>识别成功</span>
+              </div>
+              <div>
+                <div class="kv"><b>金额 <span class="ai-tag"><svg class="ic s" style="width:10px;height:10px"><use href="#i-spark"/></svg>97%</span></b><span>¥45.00</span></div>
+                <div class="kv"><b>日期 <span class="ai-tag"><svg class="ic s" style="width:10px;height:10px"><use href="#i-spark"/></svg>96%</span></b><span>今天 · 9月4日</span></div>
+                <div class="kv"><b>分类 <span class="ai-tag"><svg class="ic s" style="width:10px;height:10px"><use href="#i-spark"/></svg>91%</span></b><span>餐饮</span></div>
+                <div class="kv"><b>账户 <span class="ai-tag"><svg class="ic s" style="width:10px;height:10px"><use href="#i-spark"/></svg>90%</span></b><span>招行储蓄卡 (6621)</span></div>
+              </div>
+              <div style="display:flex;gap:10px">
+                <button class="btn primary grow"><svg class="ic m"><use href="#i-check"/></svg>已确认</button>
+                <button class="btn line">修改</button>
+              </div>
+            </div>
+            <div class="ticket" style="border:1px solid color-mix(in srgb, var(--warning) 45%, transparent)">
+              <div style="display:flex;align-items:center;gap:12px">
+                <div class="thumb"><svg class="ic"><use href="#i-doc"/></svg></div>
+                <div class="grow"><div class="t-main">超市小票</div><div class="t-sub">票据 2 · 共 3 张</div></div>
+                <span class="badge warn"><svg class="ic s" style="width:11px;height:11px"><use href="#i-alert"/></svg>低置信度</span>
+              </div>
+              <div>
+                <div class="kv"><b>金额 <span class="ai-tag"><svg class="ic s" style="width:10px;height:10px"><use href="#i-spark"/></svg>95%</span></b><span>¥128.40</span></div>
+                <div class="kv"><b>分类 <span class="ai-tag low"><svg class="ic s" style="width:10px;height:10px"><use href="#i-alert"/></svg>54% · 请确认</span></b><span style="color:var(--warning);font-weight:600">购物</span></div>
+                <div class="kv"><b>商户 <span class="ai-tag low"><svg class="ic s" style="width:10px;height:10px"><use href="#i-alert"/></svg>48% · 请确认</span></b><span style="color:var(--warning);font-weight:600">图像模糊</span></div>
+              </div>
+              <button class="btn second wide"><svg class="ic m"><use href="#i-edit"/></svg>编辑后确认</button>
+            </div>
+            <div class="ticket dim" style="border:1px solid color-mix(in srgb, var(--error) 40%, transparent)">
+              <div style="display:flex;align-items:center;gap:12px">
+                <div class="thumb"><svg class="ic"><use href="#i-doc"/></svg></div>
+                <div class="grow"><div class="t-main">票据 3</div><div class="t-sub">共 3 张</div></div>
+                <span class="badge err"><svg class="ic s" style="width:11px;height:11px"><use href="#i-alert"/></svg>识别失败</span>
+              </div>
+              <div class="err-text"><svg class="ic s"><use href="#i-alert"/></svg>识别失败：图像模糊，无法读取金额。</div>
+              <div style="display:flex;gap:10px">
+                <button class="btn second grow"><svg class="ic m"><use href="#i-refresh"/></svg>重试识别</button>
+                <button class="btn line grow">改为手动记账</button>
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:10px">
+              <button class="btn primary wide"><svg class="ic m"><use href="#i-check"/></svg>入账已确认 1 张</button>
+              <div class="f12 muted">批量入账只处理你已逐项确认的票据；低置信度字段会以警示色标出，确认或修改后才能入账。</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- S6 AI 待复核队列 -->
+        <section class="screen" id="scr-ai-review">
+          <div class="scr-body">
+            <div class="subhead">
+              <button class="back" onclick="show('home')"><svg class="ic"><use href="#i-back"/></svg></button>
+              <h2>待复核</h2>
+              <span class="badge warn" style="margin-left:auto">2 条</span>
+            </div>
+            <div class="f12 muted">AI 识别的条目在这里等你确认，确认后才入账。</div>
+            <div class="chips">
+              <button class="chip on">全部</button><button class="chip">文本</button><button class="chip">票据</button>
+            </div>
+            <div class="ticket">
+              <div style="display:flex;align-items:center;gap:12px">
+                <div class="tile" style="color:var(--coral)"><svg class="ic"><use href="#i-spark"/></svg></div>
+                <div class="grow"><div class="t-main">午餐 <span class="badge" style="margin-left:4px">文本来源</span></div><div class="t-sub">¥32.00 · 餐饮 · 招行储蓄卡 · 今天</div></div>
+                <span class="badge ok">置信 96%</span>
+              </div>
+              <div style="display:flex;gap:10px">
+                <button class="btn primary grow"><svg class="ic m"><use href="#i-check"/></svg>确认入账</button>
+                <button class="btn line" onclick="openOv('ov-dismiss')">忽略</button>
+              </div>
+            </div>
+            <div class="ticket" style="border:1px solid color-mix(in srgb, var(--warning) 45%, transparent)">
+              <div style="display:flex;align-items:center;gap:12px">
+                <div class="tile" style="color:var(--coral)"><svg class="ic"><use href="#i-doc"/></svg></div>
+                <div class="grow"><div class="t-main">超市采购 <span class="badge" style="margin-left:4px">票据来源</span></div><div class="t-sub">¥128.40 · 分类置信 54% · 9月3日</div></div>
+                <span class="badge warn">置信 54%</span>
+              </div>
+              <div style="display:flex;gap:10px">
+                <button class="btn second grow"><svg class="ic m"><use href="#i-edit"/></svg>编辑后确认</button>
+                <button class="btn primary grow"><svg class="ic m"><use href="#i-check"/></svg>确认入账</button>
+                <button class="btn line" onclick="openOv('ov-dismiss')">忽略</button>
+              </div>
+            </div>
+            <div class="sec-head"><b>已忽略 · 1</b><span class="act">忽略的条目可在此恢复</span></div>
+            <div class="row-card static" style="opacity:.7">
+              <div class="tile"><svg class="ic"><use href="#i-spark"/></svg></div>
+              <div class="grow"><div class="t-main">快递费 ¥12.00</div><div class="t-sub">文本来源 · 9月2日 忽略</div></div>
+              <button class="btn coral-text" style="min-height:44px"><svg class="ic m"><use href="#i-refresh"/></svg>恢复</button>
+            </div>
+            <div class="note">确认入账走正常同步链路；忽略需要确认，且始终可以恢复。周期交易的待确认在「周期与待确认」队列单独处理。</div>
+          </div>
+        </section>
+
+        <!-- S7 预算设置 -->
+        <section class="screen" id="scr-budget">
+          <div class="scr-body">
+            <div class="subhead">
+              <button class="back" onclick="show('settings')"><svg class="ic"><use href="#i-back"/></svg></button>
+              <h2>预算设置</h2>
+            </div>
+            <div class="card">
+              <div style="display:flex;align-items:center"><b style="font-size:16px;font-weight:600;flex:1">月度总预算</b><button class="btn second" style="min-height:40px;padding:6px 16px" onclick="openOv('ov-budget-edit')"><svg class="ic m"><use href="#i-edit"/></svg>编辑</button></div>
+              <div class="money-hero">¥6,000.00<span class="f12 muted" style="font-weight:400;letter-spacing:0"> / 每月</span></div>
+              <div class="f12 muted">金额按整数分保存；转账与余额调整不计入预算，只统计收入与支出。</div>
+            </div>
+            <div class="card">
+              <div class="sec-head"><b>本月执行</b><span class="badge warn">92%</span></div>
+              <div class="prog prog-lg"><div class="fill" style="width:92%;background:var(--warning)"></div></div>
+              <div class="f12 muted">已用 ¥5,520.00 · 剩余 ¥480.00 · 达到 80% 转为警示橙，超支转红</div>
+            </div>
+            <div class="sec-head"><b>分类预算</b><button class="act"><svg class="ic s" style="width:12px;height:12px"><use href="#i-add"/></svg>添加</button></div>
+            <div class="card" style="gap:14px">
+              <div class="mini-bar">
+                <div class="top"><b>餐饮</b><span class="badge warn">99% · 接近上限</span></div>
+                <div class="track"><div class="fill" style="width:99%;background:var(--warning)"></div></div>
+                <div class="f12 muted">已用 ¥1,480.00 / ¥1,500.00</div>
+              </div>
+              <div class="mini-bar">
+                <div class="top"><b>居住</b><span class="badge warn">100% · 已达上限</span></div>
+                <div class="track"><div class="fill" style="width:100%;background:var(--warning)"></div></div>
+                <div class="f12 muted">已用 ¥2,800.00 / ¥2,800.00</div>
+              </div>
+              <div class="mini-bar">
+                <div class="top"><b>娱乐</b><span class="badge err">120% · 已超支 ¥120.00</span></div>
+                <div class="track"><div class="fill" style="width:100%;background:var(--error)"></div></div>
+                <div class="f12 muted">已用 ¥720.00 / ¥600.00</div>
+              </div>
+              <div class="mini-bar">
+                <div class="top"><b>购物</b><span class="badge">0%</span></div>
+                <div class="track"><div class="fill" style="width:0%;background:var(--coral)"></div></div>
+                <div class="f12 muted">已用 ¥0.00 / ¥800.00</div>
+              </div>
+            </div>
+            <div class="row-card static">
+              <div class="tile"><svg class="ic"><use href="#i-bell"/></svg></div>
+              <div class="grow"><div class="t-main">超支提醒</div><div class="t-sub">本地通知 · 达到 80% 与超支时 · 每日最多一次</div></div>
+              <span class="badge ok">已开启</span>
+            </div>
+            <div class="f12 muted">预算颜色不是唯一表达：进度条旁始终有百分比、金额与状态文字。</div>
+          </div>
+        </section>
+
+        <!-- S8 财务报告 -->
+        <section class="screen" id="scr-report">
+          <div class="scr-body">
+            <div class="subhead">
+              <button class="back" onclick="show('home')"><svg class="ic"><use href="#i-back"/></svg></button>
+              <h2>财务报告</h2>
+              <span class="badge" style="margin-left:auto">只读</span>
+            </div>
+            <div class="segments"><button>7月</button><button class="on">8月</button><button>9月</button></div>
+            <div class="card">
+              <div class="sec-head"><b>收支汇总</b><span class="f12 muted">8月 · 单位 ¥</span></div>
+              <div>
+                <div class="kv"><b>收入</b><span style="color:var(--ink);font-weight:600">+¥13,240.00 <span class="delta good"><svg class="ic s" style="width:12px;height:12px"><use href="#i-up"/></svg>+6.2%</span></span></div>
+                <div class="kv"><b>支出</b><span style="color:var(--ink);font-weight:600">−¥9,860.00 <span class="delta good"><svg class="ic s" style="width:12px;height:12px"><use href="#i-down"/></svg>−4.8%</span></span></div>
+                <div class="kv"><b>结余</b><span style="color:var(--ink);font-weight:600">+¥3,380.00 <span class="delta bad"><svg class="ic s" style="width:12px;height:12px"><use href="#i-down"/></svg>−9.6%</span></span></div>
+              </div>
+              <div class="f12 muted">绿色表示对结余有利的变化；环比均与 7 月比较，图标加文字，不只靠颜色。</div>
+            </div>
+            <div class="card">
+              <div style="display:flex;align-items:baseline;gap:8px">
+                <b style="font-size:16px;font-weight:600;flex:1">支出构成</b><span class="f12 muted">8月 · 不含转账与余额调整</span>
+              </div>
+              <div class="mini-bar">
+                <div class="top"><b>居住</b><span class="muted">¥2,800.00 · 28%</span></div>
+                <div class="track"><div class="fill" style="width:28%;background:var(--coral)"></div></div>
+              </div>
+              <div class="mini-bar">
+                <div class="top"><b>餐饮</b><span class="muted">¥1,860.00 · 19%</span></div>
+                <div class="track"><div class="fill" style="width:19%;background:var(--blue)"></div></div>
+              </div>
+              <div class="mini-bar">
+                <div class="top"><b>购物</b><span class="muted">¥1,540.00 · 16%</span></div>
+                <div class="track"><div class="fill" style="width:16%;background:var(--indigo)"></div></div>
+              </div>
+              <div class="mini-bar">
+                <div class="top"><b>交通</b><span class="muted">¥940.00 · 10%</span></div>
+                <div class="track"><div class="fill" style="width:10%;background:var(--purple)"></div></div>
+              </div>
+              <div class="mini-bar">
+                <div class="top"><b>其他</b><span class="muted">¥2,720.00 · 27%</span></div>
+                <div class="track"><div class="fill" style="width:27%;background:var(--hairline)"></div></div>
+              </div>
+            </div>
+            <div class="card">
+              <div style="display:flex;align-items:baseline;gap:8px">
+                <b style="font-size:16px;font-weight:600;flex:1">月度支出对比</b><span class="f12 muted">3月 – 8月 · 单位 ¥</span>
+              </div>
+              <div class="bars">
+                <div class="bar-col"><span class="v">8,900</span><div class="bar" style="height:118px"></div><span class="m">3月</span></div>
+                <div class="bar-col"><span class="v">9,400</span><div class="bar" style="height:126px"></div><span class="m">4月</span></div>
+                <div class="bar-col"><span class="v">10,050</span><div class="bar" style="height:134px"></div><span class="m">5月</span></div>
+                <div class="bar-col"><span class="v">9,720</span><div class="bar" style="height:130px"></div><span class="m">6月</span></div>
+                <div class="bar-col"><span class="v">10,357</span><div class="bar" style="height:138px"></div><span class="m">7月</span></div>
+                <div class="bar-col now"><span class="v">9,860</span><div class="bar" style="height:132px"></div><span class="m">8月</span></div>
+              </div>
+            </div>
+            <button class="btn line wide"><svg class="ic m"><use href="#i-list"/></svg>查看 8 月全部流水</button>
+            <div class="f12 muted">报告只读；每个数字都可跳转到对应月份与分类的流水列表，沿用统一的五维筛选。</div>
+          </div>
+        </section>
+
+        <!-- S9 账户（资产与汇率入口） -->
+        <section class="screen" id="scr-accounts">
+          <div class="scr-body">
+            <div class="heading"><h2>账户</h2><p>一目了然。</p></div>
+            <div class="card">
+              <div style="display:flex;align-items:center"><span class="muted grow">总净资产</span><span class="badge">CNY</span></div>
+              <div class="money-hero">¥16,210.55</div>
+              <div class="f12 muted">3 个活跃账户 · 不含已停用账户余额</div>
+            </div>
+            <div class="sec-head"><b>资产与汇率</b></div>
+            <button class="row-card" onclick="show('assets')">
+              <div class="tile"><svg class="ic"><use href="#i-box"/></svg></div>
+              <div class="grow"><div class="t-main">资产管理</div><div class="t-sub">3 件在册 · 账面价值 ¥8,420.00</div></div>
+              <svg class="ic s muted"><use href="#i-chevron"/></svg>
+            </button>
+            <button class="row-card" onclick="show('rates')">
+              <div class="tile"><svg class="ic"><use href="#i-rate"/></svg></div>
+              <div class="grow"><div class="t-main">汇率</div><div class="t-sub">基准 CNY · 今天 08:00 已自动更新</div></div>
+              <svg class="ic s muted"><use href="#i-chevron"/></svg>
+            </button>
+            <div class="sec-head"><b>账户</b><button class="act"><svg class="ic s" style="width:12px;height:12px"><use href="#i-add"/></svg>添加账户</button></div>
+            <button class="row-card">
+              <div class="tile"><svg class="ic"><use href="#i-wallet"/></svg></div>
+              <div class="grow"><div class="t-main">招行储蓄卡 (6621) <span class="badge ok" style="margin-left:4px"><svg class="ic s" style="width:11px;height:11px"><use href="#i-star"/></svg> 默认</span></div><div class="t-sub">人民币 · 活跃</div></div>
+              <div class="amt">¥12,480.55</div>
+              <svg class="ic s muted"><use href="#i-chevron"/></svg>
+            </button>
+            <button class="row-card">
+              <div class="tile"><svg class="ic"><use href="#i-wallet"/></svg></div>
+              <div class="grow"><div class="t-main">支付宝</div><div class="t-sub">人民币 · 活跃</div></div>
+              <div class="amt">¥3,210.00</div>
+              <svg class="ic s muted"><use href="#i-chevron"/></svg>
+            </button>
+            <button class="row-card">
+              <div class="tile"><svg class="ic"><use href="#i-wallet"/></svg></div>
+              <div class="grow"><div class="t-main">现金钱包</div><div class="t-sub">人民币 · 活跃 · 本地钱包待映射</div></div>
+              <div class="amt">¥520.00</div>
+              <svg class="ic s muted"><use href="#i-chevron"/></svg>
+            </button>
+          </div>
+        </section>
+
+        <!-- S10 资产管理 -->
+        <section class="screen" id="scr-assets">
+          <div class="scr-body">
+            <div class="subhead">
+              <button class="back" onclick="show('accounts')"><svg class="ic"><use href="#i-back"/></svg></button>
+              <h2>资产管理</h2>
+              <button class="btn second" style="margin-left:auto;min-height:44px;padding:6px 16px"><svg class="ic m"><use href="#i-add"/></svg>添加</button>
+            </div>
+            <div class="card">
+              <div class="stat2">
+                <div class="stat-cell"><span>账面价值</span><b>¥8,420.00</b></div>
+                <div class="stat-cell"><span>购入总额</span><b>¥19,600.00</b></div>
+                <div class="stat-cell"><span>累计折旧</span><b>¥11,180.00</b></div>
+                <div class="stat-cell"><span>日均持有成本</span><b>¥2.90</b></div>
+              </div>
+            </div>
+            <div class="chips">
+              <button class="chip on">全部状态</button><button class="chip">使用中 · 2</button><button class="chip">已处置 · 1</button>
+            </div>
+            <div class="row-card static">
+              <div class="tile"><svg class="ic"><use href="#i-box"/></svg></div>
+              <div class="grow"><div class="t-main">MacBook Pro 14 · 2023</div><div class="t-sub">Apple · 使用中 · 每日折旧 ¥2.40</div></div>
+              <div class="amt">¥7,900.00</div>
+              <svg class="ic s muted"><use href="#i-chevron"/></svg>
+            </div>
+            <div class="row-card static">
+              <div class="tile"><svg class="ic"><use href="#i-box"/></svg></div>
+              <div class="grow"><div class="t-main">iPad Air</div><div class="t-sub">Apple · 使用中 · 每日折旧 ¥0.30</div></div>
+              <div class="amt">¥520.00</div>
+              <svg class="ic s muted"><use href="#i-chevron"/></svg>
+            </div>
+            <div class="row-card static" style="opacity:.62">
+              <div class="tile"><svg class="ic"><use href="#i-box"/></svg></div>
+              <div class="grow"><div class="t-main">外接显示器 <span class="badge" style="margin-left:4px">已处置</span></div><div class="t-sub">购入 ¥1,202.00 · 折旧已完成</div></div>
+              <div class="amt">¥0.00</div>
+              <svg class="ic s muted"><use href="#i-chevron"/></svg>
+            </div>
+            <div class="f12 muted">数据与 Web 工作台「已购产品」同源；详情含品牌、型号、购买时间、预计寿命与残值，编辑表单字段与 Web 一致。</div>
+          </div>
+        </section>
+
+        <!-- S11 汇率 -->
+        <section class="screen" id="scr-rates">
+          <div class="scr-body">
+            <div class="subhead">
+              <button class="back" onclick="show('accounts')"><svg class="ic"><use href="#i-back"/></svg></button>
+              <h2>汇率</h2>
+              <span class="badge" style="margin-left:auto">基准 CNY</span>
+            </div>
+            <button class="btn primary wide"><svg class="ic m"><use href="#i-refresh"/></svg>更新汇率</button>
+            <div class="card">
+              <div class="sec-head"><b>今日汇率</b><span class="f12 muted">自动更新 · 今天 08:00</span></div>
+              <div class="kv"><b>美元 USD · 1</b><span>¥7.1234 <span class="delta good"><svg class="ic s" style="width:12px;height:12px"><use href="#i-up"/></svg>+0.05%</span></span></div>
+              <div class="kv"><b>欧元 EUR · 1</b><span>¥7.8560 <span class="delta bad"><svg class="ic s" style="width:12px;height:12px"><use href="#i-down"/></svg>−0.12%</span></span></div>
+              <div class="kv"><b>日元 JPY · 100</b><span>¥4.8821 <span class="delta good"><svg class="ic s" style="width:12px;height:12px"><use href="#i-up"/></svg>+0.02%</span></span></div>
+              <div class="kv"><b>英镑 GBP · 1</b><span>¥9.0544 <span class="delta bad"><svg class="ic s" style="width:12px;height:12px"><use href="#i-down"/></svg>−0.03%</span></span></div>
+            </div>
+            <div class="note">汇率用于跨币种转账折算与资产汇总展示；汇率缺失时不自动折算，需要手动填写对侧金额（§11.1）。在线更新失败时保留上次数据并显示更新时间。</div>
+          </div>
+        </section>
+
+        <!-- S12 设置（新增入口） -->
+        <section class="screen" id="scr-settings">
+          <div class="scr-body">
+            <div class="heading"><h2>设置</h2><p>账本与偏好。</p></div>
+            <div class="group-title">智能与服务 · 本阶段新增</div>
+            <div class="card" style="padding:6px 16px;gap:0">
+              <button class="set-row" onclick="show('ai-text')"><svg class="ic" style="color:var(--muted)"><use href="#i-spark"/></svg><span class="grow">AI 与识别</span><span class="val">文本识别 开 · 云端 关<svg class="ic s"><use href="#i-chevron"/></svg></span></button>
+              <hr class="hr">
+              <button class="set-row"><svg class="ic" style="color:var(--muted)"><use href="#i-bell"/></svg><span class="grow">通知</span><span class="val">4 个渠道 · 可单独关闭<svg class="ic s"><use href="#i-chevron"/></svg></span></button>
+              <hr class="hr">
+              <button class="set-row" onclick="show('budget')"><svg class="ic" style="color:var(--muted)"><use href="#i-budget"/></svg><span class="grow">预算设置</span><span class="val">¥6,000.00 / 月<svg class="ic s"><use href="#i-chevron"/></svg></span></button>
+            </div>
+            <div class="group-title">通知渠道 · 各自可关</div>
+            <div class="card" style="padding:6px 16px;gap:0">
+              <button class="set-row"><svg class="ic" style="color:var(--muted)"><use href="#i-refresh"/></svg><span class="grow">同步状态</span><span class="val">失败时提醒</span></button>
+              <hr class="hr">
+              <button class="set-row"><svg class="ic" style="color:var(--muted)"><use href="#i-budget"/></svg><span class="grow">预算提醒</span><span class="val">每日最多一次</span></button>
+              <hr class="hr">
+              <button class="set-row"><svg class="ic" style="color:var(--muted)"><use href="#i-clock"/></svg><span class="grow">周期交易提醒</span><span class="val">到期生成待确认时</span></button>
+              <hr class="hr">
+              <button class="set-row"><svg class="ic" style="color:var(--muted)"><use href="#i-spark"/></svg><span class="grow">AI 待复核</span><span class="val">新条目进入队列时</span></button>
+            </div>
+            <div class="group-title">既有功能 · 布局不变</div>
+            <div class="card" style="padding:6px 16px;gap:0">
+              <button class="set-row"><svg class="ic" style="color:var(--muted)"><use href="#i-clock"/></svg><span class="grow">周期与待确认</span><span class="val">1 条待确认<svg class="ic s"><use href="#i-chevron"/></svg></span></button>
+              <hr class="hr">
+              <button class="set-row"><svg class="ic" style="color:var(--muted)"><use href="#i-refresh"/></svg><span class="grow">同步与冲突</span><span class="val">0 个冲突<svg class="ic s"><use href="#i-chevron"/></svg></span></button>
+              <hr class="hr">
+              <button class="set-row"><svg class="ic" style="color:var(--muted)"><use href="#i-tag"/></svg><span class="grow">标签管理</span><span class="val">3 个标签<svg class="ic s"><use href="#i-chevron"/></svg></span></button>
+              <hr class="hr">
+              <button class="set-row"><svg class="ic" style="color:var(--muted)"><use href="#i-lock"/></svg><span class="grow">安全与隐私</span><span class="val">PIN 已开启<svg class="ic s"><use href="#i-chevron"/></svg></span></button>
+            </div>
+            <div class="f12 muted">桌面小组件（快捷记账 + 本月预算进度）属于系统能力，见 §12，不在 App 内呈现。</div>
+          </div>
+        </section>
+
+        <!-- S13 同步详情 -->
+        <section class="screen" id="scr-sync">
+          <div class="scr-body">
+            <div class="subhead">
+              <button class="back" onclick="show('home')"><svg class="ic"><use href="#i-back"/></svg></button>
+              <h2>同步状态</h2>
+            </div>
+            <div class="card">
+              <div style="display:flex;align-items:center;gap:8px"><svg class="ic spin" style="color:var(--muted)"><use href="#i-refresh"/></svg><b style="font-size:16px;font-weight:600">正在同步…</b></div>
+              <div class="f12 muted">上次成功同步：今天 09:12 · 下次自动重试按指数退避</div>
+            </div>
+            <div class="sec-head"><b>待同步 · 2</b></div>
+            <div class="row-card static">
+              <div class="tile" style="color:var(--coral)"><svg class="ic"><use href="#i-out"/></svg></div>
+              <div class="grow"><div class="t-main">午餐</div><div class="t-sub">餐饮 · 招行储蓄卡 · 9月4日</div></div>
+              <span class="badge warn">待同步</span>
+            </div>
+            <div class="row-card static">
+              <div class="tile" style="color:var(--green)"><svg class="ic"><use href="#i-in"/></svg></div>
+              <div class="grow"><div class="t-main">报销到账</div><div class="t-sub">报销 · 招行储蓄卡 · 9月1日</div></div>
+              <span class="badge warn">待同步</span>
+            </div>
+            <div class="sec-head"><b>冲突 · 0</b></div>
+            <div class="card">
+              <div class="f12 muted">同步中、已同步、待同步三态共用总览与流水页标题行的同一指示器；失败时显示原因摘要并提供重试，离线不伪装成功。</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- O1 云端识别二次确认 -->
+        <div class="overlay" id="ov-cloud" onclick="if(event.target===this)closeOv(this)">
+          <div class="dlg-wrap">
+            <div class="dlg">
+              <h3>开启云端结构化识别？</h3>
+              <div class="note">默认只在本机解析。开启后，你主动提交的文本与票据内容会发送到所配置的大模型服务做结构化，用于生成流水草稿；原始图片不会自动上传。可随时在「AI 与识别」中关闭。</div>
+              <div class="kv"><b>本机 OCR</b><span>保持开启 · 内容不出设备</span></div>
+              <div class="kv"><b>云端结构化</b><span>按需开启 · 首次使用再次确认</span></div>
+              <div class="btns">
+                <button class="btn line" onclick="closeOv(document.getElementById('ov-cloud'))">暂不开启</button>
+                <button class="btn primary" onclick="closeOv(document.getElementById('ov-cloud'))">确认开启</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- O2 忽略确认 -->
+        <div class="overlay" id="ov-dismiss" onclick="if(event.target===this)closeOv(this)">
+          <div class="dlg-wrap">
+            <div class="dlg">
+              <h3>忽略这条待复核？</h3>
+              <div>
+                <div class="kv"><b>对象</b><span>午餐 ¥32.00 · 文本来源</span></div>
+                <div class="kv"><b>影响</b><span>不会入账 · 总览角标计数减少</span></div>
+              </div>
+              <div class="note">忽略不是删除：条目进入「已忽略」，随时可以恢复。</div>
+              <div class="btns">
+                <button class="btn line" onclick="closeOv(document.getElementById('ov-dismiss'))">取消</button>
+                <button class="btn primary" onclick="closeOv(document.getElementById('ov-dismiss'))">忽略</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- O3 编辑预算 -->
+        <div class="overlay" id="ov-budget-edit" onclick="if(event.target===this)closeOv(this)">
+          <div class="sheet">
+            <div style="display:flex;align-items:center"><h3 class="grow">编辑月度总预算</h3><button class="btn text" onclick="closeOv(document.getElementById('ov-budget-edit'))">取消</button></div>
+            <div class="field"><label>每月总预算</label><div class="box"><input value="¥6,000.00" inputmode="decimal"></div></div>
+            <div class="field"><label>分类预算</label>
+              <div class="chips"><button class="chip on">餐饮 ¥1,500</button><button class="chip on">居住 ¥2,800</button><button class="chip on">娱乐 ¥600</button><button class="chip on">购物 ¥800</button><button class="chip"><svg class="ic s"><use href="#i-add"/></svg>添加分类</button></div>
+            </div>
+            <div class="note">预算按整数分保存；转账与余额调整不计入。修改后立即影响总览预算卡与超支提醒。</div>
+            <div style="display:flex;gap:10px">
+              <button class="btn line grow">重置</button>
+              <button class="btn primary grow" onclick="closeOv(document.getElementById('ov-budget-edit'))">保存预算</button>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /screens -->
+
+      <nav class="dock" id="dock">
+        <button class="item" data-tab="home" onclick="show('home')"><svg class="ic"><use href="#i-home"/></svg>总览</button>
+        <button class="item" data-tab="tx" onclick="show('report')"><svg class="ic"><use href="#i-list"/></svg>流水</button>
+        <button class="item" data-tab="entry" onclick="show('entry')"><span class="add"><svg class="ic"><use href="#i-add"/></svg></span>记账</button>
+        <button class="item" data-tab="acct" onclick="show('accounts')"><svg class="ic"><use href="#i-wallet"/></svg>账户</button>
+        <button class="item" data-tab="set" onclick="show('settings')"><svg class="ic"><use href="#i-settings"/></svg>设置</button>
+      </nav>
+    </div><!-- /phone -->
+  </div>
+</main>
+
+<script>
+  const NOTES = {
+    home: ["<b>§7 总览行</b>：月度收支卡把现有「累计」口径修正为当月，并标注口径（不含转账与余额调整、含待同步）。",
+         "<b>§11.3 / §11.4</b>：AI 待复核角标卡与预算卡就位；预算 92% 用警示橙 + 百分比 + 剩余金额文字，颜色不是唯一表达。",
+         "<b>§10 全局同步指示器</b>：标题行内联角标（本例「同步中」），与设置页手动同步共用状态，点击进入同步详情。",
+         "<b>§12</b>：下拉刷新提示行呼应总览/流水页刷新；桌面小组件（快捷记账 + 预算进度）在系统能力阶段交付。",
+         "周期待确认卡保留现有位置，与 AI 待复核角标并列但不合并队列。"],
+    entry: ["<b>§11.2</b>：AI 文本记账与拍照识别入口固定在表单上方，不新增底栏项。",
+         "<b>§12 触觉反馈</b>：保存成功/失败使用轻量触觉，普通字段切换不启用。",
+         "四个类型分段与现有实现一致；切换后只显示当前类型必需字段。",
+         "智能入口卡副文案声明隐私边界：本机处理、云端默认关闭。"],
+    "ai-text": ["<b>§11.2 结构化预览</b>：所有猜测字段带「AI 识别」标记与置信度；低置信度（&lt;70%）用警示色边框高亮并要求确认。",
+         "流程：输入 → 解析 → 预览 → 确认入账；「改为手动记账」是始终存在的降级路径。",
+         "<b>隐私（§11.2）</b>：本机解析不上传；云端结构化需开关 + 首次二次确认（见弹层）。",
+         "确认入账前用户可逐项修改；保存失败保留全部内容并可重试（§10）。"],
+    ocr: ["<b>§11.2</b>：拍摄页只保留拍摄与相册选择，无滤镜和装饰动画。",
+         "识别中显示进度并<b>可取消</b>；取消不丢弃已选票据。",
+         "多张票据以待确认列表逐条处理；本机 OCR 文案明确「在本机处理」。"],
+    "ocr-review": ["三种条目状态齐备：识别成功（可确认）、低置信度（警示色 + 编辑后确认）、失败（原因 + 重试 + 改为手动）。",
+         "<b>§11.2</b>：批量入账只处理用户已确认的条目，按钮文案直接体现数量。",
+         "原图缩略图与猜测字段同屏；字段级「AI 识别」标记沿用文本记账组件。",
+         "确认后走正常同步链路，不绕过 TransactionDraft。"],
+    "ai-review": ["<b>§11.3</b>：入口为总览角标 + 设置页；列表项显示来源（文本/票据）、关键字段与置信度。",
+         "操作：确认入账、编辑后确认、忽略；忽略需确认对话框且可恢复（见弹层）。",
+         "队列来源目前限定 AI 文本与票据；周期交易沿用已上线的 ScheduledOccurrence 队列，若产品决定合并需先更新 §7 信息架构。",
+         "队列为空时说明什么是待复核并提供手动记账入口。"],
+    budget: ["<b>§11.4</b>：月度总预算 + 可选分类预算；金额整数分；转账与余额调整不计入。",
+         "颜色语义：正常珊瑚/绿、达 80% 警示橙、超支错误红；每档都有文字与徽标，不只靠颜色。",
+         "超支提醒走本地通知，频率可控（每日最多一次），与 §12 通知渠道联动。",
+         "分类预算不设上限数量，但建议按使用频率展示；增删改即时反映到总览预算卡。"],
+    report: ["<b>§11.5</b>：以月报为核心：收支汇总、分类排行、环比变化；只读，不提供编辑。",
+         "环比用图标 + 文字表达，绿色表示对结余有利；标题含时间范围与单位（§9）。",
+         "每个数字可跳转到对应月份与分类的流水列表，复用统一五维筛选口径。",
+         "「其他」分类固定排在末位，即使金额高于部分具名分类。"],
+    accounts: ["<b>§7 账户行</b>：资产与汇率是账户页进入的子页面，不新增底栏项。",
+         "入口行展示摘要（在册数量/账面价值、基准货币/更新时间），点击进入详情。",
+         "本地钱包待映射提示沿用现有账户映射语义，禁止自动匹配。"],
+    assets: ["资产数据与 Web 工作台「已购产品」同源（productAssetsStore），字段对齐：品牌/型号/购买时间/寿命/残值。",
+         "汇总四格：账面价值、购入总额、累计折旧、日均持有成本。",
+         "已处置条目弱化显示；状态筛选不依赖颜色（文字 + 计数）。",
+         "金额展示用折算后本位币，涉及外币购入时标注使用汇率时点。"],
+    rates: ["与 Web 汇率页同源：只读表格 + 主动更新 + 自动更新状态；App 端不提供逐行编辑。",
+         "今日变化用上下箭头图标 + 带符号百分比，不只靠颜色。",
+         "<b>§11.1</b>：跨币种转账按最新汇率折算；汇率缺失时禁止自动折算并要求手输对侧金额。",
+         "更新失败保留上次数据并显示最后更新时间，不清空表格。"],
+    settings: ["<b>§7 设置行</b>：新增「AI 与识别」「通知」两个二级页入口（信息架构表已同步更新）。",
+         "<b>§12 通知渠道</b>：同步状态、预算提醒、周期交易提醒、AI 待复核四渠道，各自可关。",
+         "「AI 与识别」聚合文本识别开关、云端结构化开关与本机处理说明。",
+         "既有功能分组布局不变；预算设置从「规划中」转为正式入口。"],
+    sync: ["<b>§10 全局同步指示器</b>的详情页：待同步条数、冲突条数、最近失败原因与重试入口。",
+         "三态（同步中/已同步/待同步或失败）在总览、流水与设置页共用同一组件定义。",
+         "失败时给出原因摘要；离线状态不伪装成功。"]
+  };
+  const TAB = { home:"home", sync:"set", entry:"entry", "ai-text":"entry", ocr:"entry", "ocr-review":"entry",
+                "ai-review":"home", budget:"set", report:"home", accounts:"acct", assets:"acct", rates:"acct",
+                settings:"set" };
+
+  function show(id) {
+    document.querySelectorAll(".screen").forEach(s => s.classList.toggle("on", s.id === "scr-" + id));
+    document.querySelectorAll(".overlay").forEach(o => o.classList.remove("open"));
+    document.querySelectorAll(".nav-item").forEach(b => b.classList.toggle("on",
+      b.dataset.scr === id && !b.querySelector(".ph")));
+    document.querySelectorAll("#dock .item[data-tab]").forEach(b =>
+      b.classList.toggle("on", b.dataset.tab === TAB[id]));
+    const notes = NOTES[id] || [];
+    const nav = document.querySelector('.nav-item[data-scr="' + id + '"]:not(.ph), .nav-item[data-scr="' + id + '"]');
+    const label = nav ? nav.textContent.replace("弹层","").trim() : id;
+    document.getElementById("notes").innerHTML =
+      "<h3>设计说明 · " + label + "</h3>" + "<ul>" + notes.map(n => "<li>" + n + "</li>").join("") + "</ul>";
+  }
+  function openOv(id) { document.getElementById(id).classList.add("open"); }
+  function closeOv(el) { el.classList.remove("open"); }
+  function toggleTheme() {
+    const root = document.documentElement;
+    const dark = root.dataset.theme !== "dark";
+    root.dataset.theme = dark ? "dark" : "light";
+    document.getElementById("theme-label").textContent = dark ? "浅色主题" : "深色主题";
+  }
+  show("home");
+</script>
+</body>
+</html>

@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Finexy 阶段 C · Android UI 原型</title>
+<style>
+  :root, [data-theme="light"] {
+    --canvas:#F7F5F2; --panel:#FFFFFF; --panel-raised:#EEEAE5; --wallet-hl:#E4DED7;
+    --hairline:#C8C0B8; --ink:#1A1917; --muted:#625D57;
+    --coral:#F05537; --coral-btn:#CB4027; --green:#16845B; --error:#B3261E; --warning:#B25309;
+    --blue:#2E9BFF; --indigo:#4F46E5; --purple:#7C3AED;
+    --scrim:rgba(18,20,26,.45); --page:#EDEBE7; --page-ink:#1A1917; --page-muted:#625D57;
+  }
+  [data-theme="dark"] {
+    --canvas:#101113; --panel:#202226; --panel-raised:#292C31; --wallet-hl:#36393E;
+    --hairline:#666B75; --ink:#F5F5F6; --muted:#ADB2BC;
+    --coral:#F05537; --coral-btn:#CB4027; --green:#62D3A0; --error:#FF9D91; --warning:#FDB022;
+    --blue:#2E9BFF; --indigo:#818CF8; --purple:#A78BFA;
+    --scrim:rgba(0,0,0,.55); --page:#17181B; --page-ink:#F5F5F6; --page-muted:#ADB2BC;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body {
+    font-family:"Microsoft YaHei UI","Microsoft YaHei","PingFang SC","Noto Sans CJK SC",system-ui,sans-serif;
+    background:var(--page); color:var(--page-ink); font-size:14px; line-height:1.5;
+  }
+  .ic { width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; flex:none; }
+  .ic.s { width:16px; height:16px; } .ic.m { width:19px; height:19px; }
+
+  /* ===== 页面框架 ===== */
+  header.top {
+    display:flex; align-items:center; gap:14px; padding:14px 24px;
+    border-bottom:1px solid var(--hairline); position:sticky; top:0; background:var(--page); z-index:50;
+  }
+  .logo { width:34px; height:34px; border-radius:11px; background:var(--coral); color:#fff;
+    display:flex; align-items:center; justify-content:center; font-weight:900; font-size:22px; flex:none; }
+  header.top h1 { font-size:17px; font-weight:700; letter-spacing:-.4px; }
+  header.top .sub { color:var(--page-muted); font-size:12px; }
+  .proto-badge { font-size:11px; font-weight:600; color:var(--warning);
+    border:1px solid var(--warning); border-radius:999px; padding:3px 10px; }
+  .spacer { flex:1; }
+  .theme-btn { display:flex; align-items:center; gap:8px; border:1px solid var(--hairline); background:transparent;
+    color:var(--page-ink); border-radius:999px; padding:8px 16px; font-size:13px; cursor:pointer; }
+
+  main.wrap { display:flex; gap:28px; padding:28px 24px 60px; max-width:1280px; margin:0 auto; align-items:flex-start; }
+
+  /* ===== 侧栏 ===== */
+  aside.nav { width:340px; flex:none; display:flex; flex-direction:column; gap:18px; position:sticky; top:76px; }
+  .nav-group b { display:block; font-size:11px; letter-spacing:.8px; color:var(--page-muted); margin:10px 0 6px 6px; }
+  .nav-item { display:flex; align-items:center; gap:10px; width:100%; text-align:left; border:0; cursor:pointer;
+    background:transparent; color:var(--page-ink); border-radius:12px; padding:9px 12px; font-size:13.5px; }
+  .nav-item:hover { background:color-mix(in srgb, var(--hairline) 22%, transparent); }
+  .nav-item.on { background:var(--panel); font-weight:700; box-shadow:0 1px 4px rgba(18,20,26,.08); }
+  .nav-item .ph { margin-left:auto; font-size:10.5px; color:var(--page-muted); border:1px solid var(--hairline); border-radius:999px; padding:1px 7px; }
+  .notes { background:var(--panel); border-radius:16px; padding:16px 18px; border:1px solid var(--hairline); }
+  .notes h3 { font-size:13px; margin-bottom:8px; }
+  .notes ul { padding-left:18px; display:flex; flex-direction:column; gap:6px; }
+  .notes li { font-size:12.5px; color:var(--page-muted); }
+  .notes li b { color:var(--page-ink); }
+
+  /* ===== 手机框 ===== */
+  .phone-zone { flex:1; display:flex; justify-content:center; }
+  .phone { width:412px; height:860px; border-radius:40px; background:var(--canvas); color:var(--ink);
+    border:8px solid #1c1d20; overflow:hidden; position:relative; display:flex; flex-direction:column;
+    box-shadow:0 24px 60px rgba(18,20,26,.25); }
+  .statusbar { height:30px; display:flex; align-items:center; justify-content:space-between;
+    padding:0 22px; font-size:12px; font-weight:600; flex:none; }
+  .statusbar .r { display:flex; gap:6px; align-items:center; color:var(--ink); }
+
+  .screens { flex:1; position:relative; overflow:hidden; }
+  .screen { position:absolute; inset:0; display:none; flex-direction:column; }
+  .screen.on { display:flex; }
+  .scr-body { flex:1; overflow-y:auto; padding:12px 20px 130px; display:flex; flex-direction:column; gap:20px; scrollbar-width:thin; }
+  .scr-body::-webkit-scrollbar { width:4px; } .scr-body::-webkit-scrollbar-thumb { background:var(--hairline); border-radius:4px; }
+
+  /* ===== 底栏 ===== */
+  .dock { flex:none; display:flex; padding:6px 12px 14px; gap:2px; background:var(--canvas); }
+  .dock .item { flex:1; display:flex; flex-direction:column; align-items:center; gap:5px; padding:6px 0;
+    border-radius:18px; color:var(--muted); font-size:11px; border:0; background:none; cursor:pointer; }
+  .dock .item.on { color:var(--ink); font-weight:700; }
+  .dock .add { width:48px; height:48px; border-radius:50%; background:var(--coral); color:#fff;
+    display:flex; align-items:center; justify-content:center; }
+
+  /* ===== 通用组件（对齐 FinexyScreens.kt） ===== */
+  .heading h2 { font-size:26px; font-weight:600; letter-spacing:-.5px; }
+  .heading p { color:var(--muted); font-size:13px; }
+  .subhead { display:flex; align-items:center; gap:10px; }
+  .subhead .back { width:44px; height:44px; border-radius:50%; border:0; background:transparent; color:var(--ink);
+    display:flex; align-items:center; justify-content:center; cursor:pointer; flex:none; }
+  .subhead h2 { font-size:21px; font-weight:600; }
+  .card { background:var(--panel); border-radius:24px; padding:20px; display:flex; flex-direction:column; gap:12px; }
+  .row-card { background:var(--panel); border-radius:18px; padding:14px; display:flex; align-items:center; gap:12px;
+    border:0; width:100%; text-align:left; cursor:pointer; color:var(--ink); font-family:inherit; }
+  .row-card.static { cursor:default; }
+  .tile { width:42px; height:42px; border-radius:50%; background:var(--panel-raised); color:var(--ink);
+    display:flex; align-items:center; justify-content:center; flex:none; }
+  .grow { flex:1; min-width:0; }
+  .t-main { font-size:15px; font-weight:500; }
+  .t-sub { font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .amt { font-size:15px; font-weight:600; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .amt.in { color:var(--green); } .amt.out { color:var(--ink); }
+  .muted { color:var(--muted); } .f12 { font-size:12px; } .f11 { font-size:11px; }
+  .badge { font-size:11px; border-radius:999px; padding:3px 10px; background:var(--panel-raised); color:var(--muted); white-space:nowrap; }
+  .badge.warn { color:var(--warning); background:color-mix(in srgb, var(--warning) 14%, transparent); font-weight:600; }
+  .badge.ok { color:var(--green); background:color-mix(in srgb, var(--green) 14%, transparent); font-weight:600; }
+  .badge.err { color:var(--error); background:color-mix(in srgb, var(--error) 12%, transparent); font-weight:600; }
+  .btn { border:0; cursor:pointer; font-family:inherit; font-size:14px; font-weight:600; border-radius:999px;
+    display:flex; align-items:center; justify-content:center; gap:8px; padding:10px 20px; }
+  .btn.primary { background:var(--coral-btn); color:#fff; min-height:54px; }
+  .btn.second { background:var(--panel-raised); color:var(--ink); min-height:48px; }
+  .btn.line { background:transparent; border:1px solid var(--hairline); color:var(--ink); min-height:48px; }
+  .btn.danger-text { background:transparent; color:var(--error); min-height:44px; }
+  .btn.text { background:transparent; color:var(--muted); min-height:40px; font-weight:500; }
+  .btn.coral-text { background:transparent; color:var(--coral); min-height:40px; }
+  .btn[disabled] { opacity:.45; cursor:not-allowed; }
+  .btn.wide { width:100%; }
+  .field { display:flex; flex-direction:column; gap:6px; }
+  .field label { font-size:12.5px; color:var(--muted); }
+  .field .box { border:1px solid var(--hairline); border-radius:16px; padding:12px 14px; font-size:14px;
+    background:transparent; color:var(--ink); display:flex; align-items:center; gap:10px; }
+  .field input { border:0; outline:0; background:transparent; color:var(--ink); font-size:14px; flex:1; font-family:inherit; }
+  .segments { display:flex; background:var(--panel); border-radius:999px; padding:5px; gap:4px; }
+  .segments button { flex:1; border:0; background:transparent; border-radius:999px; min-height:48px;
+    color:var(--muted); font-size:14px; cursor:pointer; font-family:inherit; }
+  .segments button.on { background:var(--panel-raised); color:var(--ink); font-weight:700; }
+  .chips { display:flex; gap:8px; flex-wrap:wrap; }
+  .chip { border-radius:999px; border:1px solid var(--hairline); background:transparent; color:var(--muted);
+    font-size:13px; padding:8px 14px; cursor:pointer; display:flex; align-items:center; gap:6px; font-family:inherit; }
+  .chip.on { background:var(--panel-raised); border-color:transparent; color:var(--ink); font-weight:700; }
+  .chip[disabled] { opacity:.5; cursor:default; }
+  .sec-head { display:flex; align-items:center; }
+  .sec-head b { font-size:16px; font-weight:600; flex:1; }
+  .sec-head .act { border:0; background:none; color:var(--muted); font-size:12px; cursor:pointer; display:flex; align-items:center; gap:2px; font-family:inherit; }
+  .hr { height:1px; background:color-mix(in srgb, var(--hairline) 55%, transparent); border:0; }
+  .err-text { color:var(--error); font-size:12.5px; display:flex; align-items:center; gap:6px; }
+  .sync-badge { border:0; cursor:pointer; font-family:inherit; font-size:12px; font-weight:600; border-radius:999px;
+    padding:6px 12px; display:flex; align-items:center; gap:6px;
+    color:var(--warning); background:color-mix(in srgb, var(--warning) 14%, transparent); }
+  .dot { width:6px; height:6px; border-radius:50%; flex:none; }
+
+  /* 图表 */
+  .bars { display:flex; align-items:flex-end; gap:12px; height:170px; padding-top:22px; }
+  .bar-col { flex:1; display:flex; flex-direction:column; align-items:center; gap:6px; height:100%; justify-content:flex-end; }
+  .bar-col .v { font-size:10px; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .bar-col .bar { width:100%; border-radius:8px 8px 4px 4px; background:color-mix(in srgb, var(--coral) 55%, transparent); }
+  .bar-col.now .bar { background:var(--coral); }
+  .bar-col.now .v { color:var(--ink); font-weight:700; }
+  .bar-col .m { font-size:11px; color:var(--muted); }
+  .cat-row { display:flex; flex-direction:column; gap:6px; }
+  .cat-row .top { display:flex; font-size:13px; }
+  .cat-row .top b { flex:1; font-weight:500; }
+  .cat-row .track { height:8px; border-radius:999px; background:var(--panel-raised); overflow:hidden; }
+  .cat-row .fill { height:100%; border-radius:999px; }
+
+  /* 设置行 */
+  .set-row { display:flex; align-items:center; gap:12px; padding:14px 4px; width:100%; border:0; background:none;
+    color:var(--ink); cursor:pointer; text-align:left; font-family:inherit; border-radius:12px; }
+  .set-row:hover { background:color-mix(in srgb, var(--hairline) 18%, transparent); }
+  .set-row .val { color:var(--muted); font-size:12.5px; display:flex; align-items:center; gap:4px; }
+  .set-row[disabled] { opacity:.5; cursor:default; }
+  .group-title { font-size:11px; letter-spacing:.8px; color:var(--muted); margin-top:4px; }
+
+  /* 弹层 */
+  .overlay { position:absolute; inset:0; background:var(--scrim); display:none; z-index:30; }
+  .overlay.open { display:block; }
+  .sheet { position:absolute; left:0; right:0; bottom:0; background:var(--canvas); border-radius:28px 28px 0 0;
+    padding:20px 20px 28px; max-height:82%; overflow-y:auto; display:flex; flex-direction:column; gap:16px; }
+  .sheet h3, .dlg h3 { font-size:18px; font-weight:600; }
+  .dlg-wrap { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:28px; }
+  .dlg { background:var(--panel); border-radius:24px; padding:22px; width:100%; display:flex; flex-direction:column; gap:14px; }
+  .dlg .kv { display:flex; font-size:13.5px; padding:7px 0; border-bottom:1px solid color-mix(in srgb, var(--hairline) 40%, transparent); }
+  .dlg .kv:last-of-type { border-bottom:0; }
+  .dlg .kv b { flex:1; font-weight:500; }
+  .dlg .kv span { color:var(--muted); }
+  .dlg .note { font-size:12px; color:var(--muted); background:var(--panel-raised); border-radius:12px; padding:10px 12px; }
+  .dlg .btns { display:flex; gap:10px; margin-top:4px; }
+  .dlg .btns .btn { flex:1; }
+
+  @media (max-width:1100px) {
+    main.wrap { flex-direction:column; align-items:center; }
+    aside.nav { width:100%; max-width:640px; position:static; }
+  }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 10 12 3l9 7"/><path d="M5 9v12h5v-6h4v6h5V9"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13"/><circle cx="3.5" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="3.5" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="3.5" cy="18" r="1.2" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-add" viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></symbol>
+    <symbol id="i-wallet" viewBox="0 0 24 24"><path d="M20 7H3v13h18V7H6V4h12"/><path d="M21 11h-6v5h6"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/></symbol>
+    <symbol id="i-in" viewBox="0 0 24 24"><path d="M18 5 6 18"/><path d="M6 8v10h10"/></symbol>
+    <symbol id="i-out" viewBox="0 0 24 24"><path d="M6 18 18 5"/><path d="M8 5h10v10"/></symbol>
+    <symbol id="i-transfer" viewBox="0 0 24 24"><path d="M4 8h13l-3-3M20 16H7l3 3"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10" cy="10" r="6.5"/><path d="m15 15 6 6"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="2.5"/><path d="M4 10h16M8 3v4M16 3v4"/></symbol>
+    <symbol id="i-filter" viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></symbol>
+    <symbol id="i-tag" viewBox="0 0 24 24"><path d="M3 3h8.5L21 12.5 12.5 21 3 11.5V3z"/><circle cx="8" cy="8" r="1.5"/></symbol>
+    <symbol id="i-doc" viewBox="0 0 24 24"><rect x="6" y="3" width="12" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M5 7h14M9 4h6M7 7l1 13h8l1-13M10 10v7M14 10v7"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M14.5 4.5 19.5 9.5 8 21H3v-5L14.5 4.5z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 5 5L20 7"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2.5 20h19L12 3z"/><path d="M12 9.5v4.5"/><circle cx="12" cy="17" r=".6" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 3v4.5h-4.5"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3 2.7 5.6 6.1.8-4.5 4.3 1.1 6-5.4-2.9-5.4 2.9 1.1-6L3.2 9.4l6.1-.8L12 3z"/></symbol>
+    <symbol id="i-export" viewBox="0 0 24 24"><path d="M12 4v10M8 10l4 4 4-4M5 19h14"/></symbol>
+    <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M4 4l16 16"/><path d="M9.9 5.2A9.8 9.8 0 0 1 12 5c5 0 8.5 4 9.5 7-0.4 1.1-1.2 2.4-2.4 3.5M6.3 6.9C4.4 8.2 3.1 10 2.5 12c1 3 4.5 7 9.5 7 1.2 0 2.3-.2 3.3-.6"/></symbol>
+    <symbol id="i-connect" viewBox="0 0 24 24"><path d="M8 8V4h12v12h-4"/><path d="M16 8v12H4V8h12z"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><path d="M7 10V6l2-3h6l2 3v4"/><path d="M5 10h14v11H5V10z"/><path d="M12 14v3"/></symbol>
+    <symbol id="i-database" viewBox="0 0 24 24"><ellipse cx="12" cy="5.5" rx="8" ry="2.8"/><path d="M4 5.5v13c0 1.5 3.6 2.8 8 2.8s8-1.3 8-2.8v-13M4 12c0 1.5 3.6 2.8 8 2.8s8-1.3 8-2.8"/></symbol>
+    <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18c1.5 0 2-.9 2-2 0-1.4-1-1.7-1-2.8 0-1 .8-1.7 2-1.7h1.8A4.2 4.2 0 0 0 21 10.5C21 6.3 17 3 12 3z"/><circle cx="7.5" cy="11" r="1.1"/><circle cx="10.5" cy="7" r="1.1"/><circle cx="15" cy="7.5" r="1.1"/></symbol>
+    <symbol id="i-server" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><circle cx="7" cy="7.5" r=".7" fill="currentColor" stroke="none"/><circle cx="7" cy="16.5" r=".7" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V4M4 20h16"/><path d="M8 16v-5M12 16V8M16 16v-3"/></symbol>
+    <symbol id="i-budget" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 3a9 9 0 0 1 9 9h-9V3z"/></symbol>
+  </defs>
+</svg>
+
+<header class="top">
+  <div class="logo">F</div>
+  <div>
+    <h1>Finexy · 阶段 C Android UI 原型</h1>
+    <div class="sub">现有业务闭环：流水筛选 · 账户详情 · 统计导出 · 标签 · 模板 · 设置拆分</div>
+  </div>
+  <span class="proto-badge">原型 · 示例数据 · 非交付功能</span>
+  <div class="spacer"></div>
+  <button class="theme-btn" onclick="toggleTheme()"><svg class="ic s"><use href="#i-palette"/></svg><span id="theme-label">深色主题</span></button>
+</header>
+
+<main class="wrap">
+  <aside class="nav">
+    <div>
+      <div class="nav-group">
+        <b>列表与筛选</b>
+        <button class="nav-item on" data-scr="tx" onclick="show('tx')"><svg class="ic s"><use href="#i-filter"/></svg>流水 · 筛选</button>
+        <button class="nav-item" data-scr="accounts" onclick="show('accounts')"><svg class="ic s"><use href="#i-wallet"/></svg>账户列表</button>
+        <button class="nav-item" data-scr="account-detail" onclick="show('account-detail')"><svg class="ic s"><use href="#i-doc"/></svg>账户详情</button>
+      </div>
+      <div class="nav-group">
+        <b>统计与导出</b>
+        <button class="nav-item" data-scr="stats" onclick="show('stats')"><svg class="ic s"><use href="#i-chart"/></svg>统计</button>
+        <button class="nav-item" data-scr="stats" onclick="show('stats');openOv('ov-export')"><svg class="ic s"><use href="#i-export"/></svg>导出确认<span class="ph">弹层</span></button>
+      </div>
+      <div class="nav-group">
+        <b>设置二级页</b>
+        <button class="nav-item" data-scr="settings" onclick="show('settings')"><svg class="ic s"><use href="#i-settings"/></svg>设置首页（拆分后）</button>
+        <button class="nav-item" data-scr="tags" onclick="show('tags')"><svg class="ic s"><use href="#i-tag"/></svg>标签管理</button>
+        <button class="nav-item" data-scr="templates" onclick="show('templates')"><svg class="ic s"><use href="#i-doc"/></svg>模板管理</button>
+        <button class="nav-item" data-scr="sync-detail" onclick="show('sync-detail')"><svg class="ic s"><use href="#i-refresh"/></svg>同步详情</button>
+      </div>
+    </div>
+    <div class="notes" id="notes"></div>
+  </aside>
+
+  <div class="phone-zone">
+    <div class="phone">
+      <div class="statusbar"><span>14:32</span><span class="r">5G ▮▮▮ 100%</span></div>
+      <div class="screens" id="screens">
+
+        <!-- S1 流水 · 筛选 -->
+        <section class="screen on" id="scr-tx">
+          <div class="scr-body">
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <div class="heading grow"><h2>流水</h2><p>每一笔，都清楚。</p></div>
+              <button class="sync-badge" onclick="show('sync-detail')"><svg class="ic s"><use href="#i-alert"/></svg>2 条待同步</button>
+            </div>
+            <div class="field"><div class="box"><svg class="ic m muted"><use href="#i-search"/></svg><input value="" placeholder="示例：搜索交易描述"></div></div>
+            <div class="chips">
+              <button class="chip on" onclick="openOv('ov-filter')"><svg class="ic s"><use href="#i-calendar"/></svg>9月1日 – 9月4日</button>
+              <button class="chip" onclick="openOv('ov-filter')">全部类型</button>
+              <button class="chip" onclick="openOv('ov-filter')">全部账户</button>
+              <button class="chip" onclick="openOv('ov-filter')">全部分类</button>
+              <button class="chip" onclick="openOv('ov-filter')"><svg class="ic s"><use href="#i-tag"/></svg>标签</button>
+            </div>
+            <div style="display:flex;align-items:center">
+              <span class="f12 muted grow">8 笔记录 · 收入 +¥8,740.00 · 支出 −¥3,152.40</span>
+              <button class="btn text" style="min-height:32px;font-size:12px">清除筛选</button>
+            </div>
+
+            <div class="sec-head"><b>今天 · 9月4日</b></div>
+            <div class="row-card static">
+              <div class="tile" style="color:var(--coral)"><svg class="ic"><use href="#i-out"/></svg></div>
+              <div class="grow"><div class="t-main">午餐</div><div class="t-sub">餐饮 · 招行储蓄卡 · 工作餐 <span class="badge warn" style="margin-left:4px">待同步</span></div></div>
+              <div class="amt out">−¥32.00</div>
+            </div>
+            <div class="row-card static">
+              <div class="tile" style="color:var(--coral)"><svg class="ic"><use href="#i-out"/></svg></div>
+              <div class="grow"><div class="t-main">地铁通勤</div><div class="t-sub">交通 · 支付宝</div></div>
+              <div class="amt out">−¥6.00</div>
+            </div>
+
+            <div class="sec-head"><b>昨天 · 9月3日</b></div>
+            <div class="row-card static">
+              <div class="tile" style="color:var(--green)"><svg class="ic"><use href="#i-in"/></svg></div>
+              <div class="grow"><div class="t-main">工资到账</div><div class="t-sub">工资 · 招行储蓄卡 <span class="badge warn" style="margin-left:4px">待同步</span></div></div>
+              <div class="amt in">+¥8,500.00</div>
+            </div>
+            <div class="row-card static">
+              <div class="tile" style="color:var(--coral)"><svg class="ic"><use href="#i-out"/></svg></div>
+              <div class="grow"><div class="t-main">超市采购</div><div class="t-sub">购物 · 支付宝</div></div>
+              <div class="amt out">−¥128.40</div>
+            </div>
+
+            <div class="sec-head"><b>9月2日</b></div>
+            <div class="row-card static">
+              <div class="tile" style="color:var(--coral)"><svg class="ic"><use href="#i-out"/></svg></div>
+              <div class="grow"><div class="t-main">朋友聚餐</div><div class="t-sub">餐饮 · 现金钱包 · 社交</div></div>
+              <div class="amt out">−¥186.00</div>
+            </div>
+            <div class="row-card static">
+              <div class="tile"><svg class="ic"><use href="#i-transfer"/></svg></div>
+              <div class="grow"><div class="t-main">转入支付宝</div><div class="t-sub">转账 · 招行储蓄卡 → 支付宝</div></div>
+              <div class="amt out">−¥500.00</div>
+            </div>
+
+            <div class="sec-head"><b>9月1日</b></div>
+            <div class="row-card static">
+              <div class="tile" style="color:var(--coral)"><svg class="ic"><use href="#i-out"/></svg></div>
+              <div class="grow"><div class="t-main">房租</div><div class="t-sub">居住 · 招行储蓄卡</div></div>
+              <div class="amt out">−¥2,800.00</div>
+            </div>
+            <div class="row-card static">
+              <div class="tile" style="color:var(--green)"><svg class="ic"><use href="#i-in"/></svg></div>
+              <div class="grow"><div class="t-main">报销到账</div><div class="t-sub">报销 · 招行储蓄卡</div></div>
+              <div class="amt in">+¥240.00</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- S2 账户列表 -->
+        <section class="screen" id="scr-accounts">
+          <div class="scr-body">
+            <div class="heading"><h2>账户</h2><p>一目了然。</p></div>
+            <div class="card">
+              <div style="display:flex;align-items:center"><span class="muted grow">总净资产</span><span class="badge">CNY</span></div>
+              <div style="font-size:36px;font-weight:600;letter-spacing:-1.2px;font-variant-numeric:tabular-nums">¥16,210.55</div>
+              <div class="f12 muted">3 个活跃账户 · 1 个已停用 · 不含已停用账户余额</div>
+            </div>
+            <button class="row-card" onclick="show('account-detail')">
+              <div class="tile"><svg class="ic"><use href="#i-wallet"/></svg></div>
+              <div class="grow"><div class="t-main">招行储蓄卡 (6621) <span class="badge ok" style="margin-left:4px"><svg class="ic s" style="width:11px;height:11px;vertical-align:-1px"><use href="#i-star"/></svg> 默认</span></div><div class="t-sub">人民币 · 活跃</div></div>
+              <div class="amt">¥12,480.55</div>
+              <svg class="ic s muted"><use href="#i-chevron"/></svg>
+            </button>
+            <button class="row-card" onclick="show('account-detail')">
+              <div class="tile"><svg class="ic"><use href="#i-wallet"/></svg></div>
+              <div class="grow"><div class="t-main">支付宝</div><div class="t-sub">人民币 · 活跃</div></div>
+              <div class="amt">¥3,210.00</div>
+              <svg class="ic s muted"><use href="#i-chevron"/></svg>
+            </button>
+            <button class="row-card" onclick="show('account-detail')">
+              <div class="tile"><svg class="ic"><use href="#i-wallet"/></svg></div>
+              <div class="grow"><div class="t-main">现金钱包</div><div class="t-sub">人民币 · 活跃</div></div>
+              <div class="amt">¥520.00</div>
+              <svg class="ic s muted"><use href="#i-chevron"/></svg>
+            </button>
+            <button class="row-card" style="opacity:.62" onclick="show('account-detail')">
+              <div class="tile"><svg class="ic"><use href="#i-wallet"/></svg></div>
+              <div class="grow"><div class="t-main">交行储蓄卡 (0099) <span class="badge" style="margin-left:4px">已停用</span></div><div class="t-sub">新流水不可选 · 历史流水不受影响</div></div>
+              <div class="amt">¥0.00</div>
+              <svg class="ic s muted"><use href="#i-chevron"/></svg>
+            </button>
+            <div class="card" style="border:1px solid color-mix(in srgb, var(--warning) 45%, transparent)">
+              <div style="display:flex;align-items:center;gap:8px;color:var(--warning);font-weight:600"><svg class="ic m"><use href="#i-alert"/></svg>1 个本地账户待映射</div>
+              <div class="f12 muted">「现金钱包」尚未关联服务端账户，映射前它的流水不会上传。</div>
+              <button class="btn second wide" onclick="show('settings')">去映射</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- S3 账户详情 -->
+        <section class="screen" id="scr-account-detail">
+          <div class="scr-body">
+            <div class="subhead">
+              <button class="back" onclick="show('accounts')"><svg class="ic"><use href="#i-back"/></svg></button>
+              <h2>招行储蓄卡 (6621)</h2>
+              <span class="badge ok" style="margin-left:auto"><svg class="ic s" style="width:11px;height:11px"><use href="#i-star"/></svg> 默认账户</span>
+            </div>
+            <div class="card">
+              <div style="display:flex;align-items:center"><span class="muted grow">余额</span><span class="badge">CNY</span></div>
+              <div style="font-size:36px;font-weight:600;letter-spacing:-1.2px;font-variant-numeric:tabular-nums">¥12,480.55</div>
+              <div style="display:flex;gap:18px" class="f12">
+                <span style="color:var(--green)">本月收入 +¥8,740.00</span>
+                <span style="color:var(--coral)">本月支出 −¥4,986.40</span>
+              </div>
+              <div class="f12 muted">新流水默认使用此账户 · 可在记账表单中更换</div>
+            </div>
+            <div class="segments">
+              <button>全部</button><button class="on">本月</button><button>近 3 月</button>
+            </div>
+            <div class="f12 muted">5 笔记录 · 含 1 笔转账</div>
+            <div class="row-card static">
+              <div class="tile" style="color:var(--coral)"><svg class="ic"><use href="#i-out"/></svg></div>
+              <div class="grow"><div class="t-main">午餐</div><div class="t-sub">餐饮 · 9月4日 <span class="badge warn" style="margin-left:4px">待同步</span></div></div>
+              <div class="amt out">−¥32.00</div>
+            </div>
+            <div class="row-card static">
+              <div class="tile" style="color:var(--green)"><svg class="ic"><use href="#i-in"/></svg></div>
+              <div class="grow"><div class="t-main">工资到账</div><div class="t-sub">工资 · 9月3日</div></div>
+              <div class="amt in">+¥8,500.00</div>
+            </div>
+            <div class="row-card static">
+              <div class="tile"><svg class="ic"><use href="#i-transfer"/></svg></div>
+              <div class="grow"><div class="t-main">转入支付宝</div><div class="t-sub">转账 · 9月2日 · 对方账户：支付宝</div></div>
+              <div class="amt out">−¥500.00</div>
+            </div>
+            <div class="row-card static">
+              <div class="tile" style="color:var(--coral)"><svg class="ic"><use href="#i-out"/></svg></div>
+              <div class="grow"><div class="t-main">房租</div><div class="t-sub">居住 · 9月1日</div></div>
+              <div class="amt out">−¥2,800.00</div>
+            </div>
+            <div class="row-card static">
+              <div class="tile" style="color:var(--green)"><svg class="ic"><use href="#i-in"/></svg></div>
+              <div class="grow"><div class="t-main">报销到账</div><div class="t-sub">报销 · 9月1日</div></div>
+              <div class="amt in">+¥240.00</div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:10px;margin-top:4px">
+              <button class="btn primary wide"><svg class="ic m"><use href="#i-add"/></svg>在此账户记一笔</button>
+              <button class="btn line wide" disabled title="阶段 D 交付">余额调整 · 阶段 D 交付</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- S4 统计 -->
+        <section class="screen" id="scr-stats">
+          <div class="scr-body">
+            <div class="heading"><h2>统计</h2><p>看清收支趋势。</p></div>
+            <div class="chips">
+              <button class="chip on" onclick="openOv('ov-filter')"><svg class="ic s"><use href="#i-calendar"/></svg>本月</button>
+              <button class="chip" onclick="openOv('ov-filter')">全部类型</button>
+              <button class="chip" onclick="openOv('ov-filter')">全部账户</button>
+              <button class="chip" onclick="openOv('ov-filter')">全部分类</button>
+              <button class="chip" onclick="openOv('ov-filter')"><svg class="ic s"><use href="#i-tag"/></svg>标签</button>
+            </div>
+            <div style="display:flex;gap:12px">
+              <div class="card grow" style="padding:16px;gap:6px">
+                <svg class="ic m" style="color:var(--green)"><use href="#i-in"/></svg>
+                <span class="f12 muted">收入</span>
+                <b style="font-size:17px;font-variant-numeric:tabular-nums">+¥8,740.00</b>
+              </div>
+              <div class="card grow" style="padding:16px;gap:6px">
+                <svg class="ic m" style="color:var(--coral)"><use href="#i-out"/></svg>
+                <span class="f12 muted">支出</span>
+                <b style="font-size:17px;font-variant-numeric:tabular-nums">−¥6,620.40</b>
+              </div>
+              <div class="card grow" style="padding:16px;gap:6px">
+                <svg class="ic m"><use href="#i-chart"/></svg>
+                <span class="f12 muted">结余</span>
+                <b style="font-size:17px;font-variant-numeric:tabular-nums">+¥2,119.60</b>
+              </div>
+            </div>
+            <div class="card">
+              <div style="display:flex;align-items:baseline;gap:8px">
+                <b style="font-size:16px;font-weight:600;flex:1">月度支出趋势</b>
+                <span class="f12 muted">4月 – 9月 · 单位 ¥</span>
+              </div>
+              <div class="bars">
+                <div class="bar-col"><span class="v">4,900</span><div class="bar" style="height:112px"></div><span class="m">4月</span></div>
+                <div class="bar-col"><span class="v">5,600</span><div class="bar" style="height:128px"></div><span class="m">5月</span></div>
+                <div class="bar-col"><span class="v">4,200</span><div class="bar" style="height:96px"></div><span class="m">6月</span></div>
+                <div class="bar-col"><span class="v">6,100</span><div class="bar" style="height:140px"></div><span class="m">7月</span></div>
+                <div class="bar-col"><span class="v">5,400</span><div class="bar" style="height:124px"></div><span class="m">8月</span></div>
+                <div class="bar-col now"><span class="v">6,620</span><div class="bar" style="height:152px"></div><span class="m">9月</span></div>
+              </div>
+            </div>
+            <div class="card">
+              <div style="display:flex;align-items:baseline;gap:8px">
+                <b style="font-size:16px;font-weight:600;flex:1">本月支出分类</b>
+                <span class="f12 muted">不含转账与余额调整</span>
+              </div>
+              <div class="cat-row"><div class="top"><b>居住</b><span class="muted">¥2,800.00 · 42%</span></div><div class="track"><div class="fill" style="width:42%;background:var(--coral)"></div></div></div>
+              <div class="cat-row"><div class="top"><b>餐饮</b><span class="muted">¥1,480.00 · 22%</span></div><div class="track"><div class="fill" style="width:22%;background:var(--blue)"></div></div></div>
+              <div class="cat-row"><div class="top"><b>购物</b><span class="muted">¥1,050.40 · 16%</span></div><div class="track"><div class="fill" style="width:16%;background:var(--indigo)"></div></div></div>
+              <div class="cat-row"><div class="top"><b>交通</b><span class="muted">¥680.00 · 10%</span></div><div class="track"><div class="fill" style="width:10%;background:var(--purple)"></div></div></div>
+              <div class="cat-row"><div class="top"><b>其他</b><span class="muted">¥610.00 · 9%</span></div><div class="track"><div class="fill" style="width:9%;background:var(--hairline)"></div></div></div>
+            </div>
+            <button class="btn second wide" onclick="openOv('ov-export')"><svg class="ic m"><use href="#i-export"/></svg>导出当前筛选结果</button>
+          </div>
+        </section>
+
+        <!-- S5 设置首页（拆分后） -->
+        <section class="screen" id="scr-settings">
+          <div class="scr-body">
+            <div class="heading"><h2>设置</h2><p>账本与偏好。</p></div>
+            <button class="row-card" onclick="show('sync-detail')" style="border:1px solid color-mix(in srgb, var(--warning) 45%, transparent)">
+              <div class="tile" style="color:var(--warning)"><svg class="ic"><use href="#i-refresh"/></svg></div>
+              <div class="grow"><div class="t-main" style="color:var(--warning)">2 条待同步</div><div class="t-sub">上次成功同步：昨天 22:10 · 点击查看</div></div>
+              <svg class="ic s muted"><use href="#i-chevron"/></svg>
+            </button>
+            <div class="group-title">账本与同步</div>
+            <div class="card" style="padding:6px 16px;gap:0">
+              <button class="set-row" onclick="show('sync-detail')"><svg class="ic" style="color:var(--muted)"><use href="#i-refresh"/></svg><span class="grow">同步与冲突</span><span class="val">0 个冲突<svg class="ic s"><use href="#i-chevron"/></svg></span></button>
+              <hr class="hr">
+              <button class="set-row"><svg class="ic" style="color:var(--muted)"><use href="#i-list"/></svg><span class="grow">分类映射</span><span class="val">已配置<svg class="ic s"><use href="#i-chevron"/></svg></span></button>
+              <hr class="hr">
+              <button class="set-row"><svg class="ic" style="color:var(--muted)"><use href="#i-connect"/></svg><span class="grow">账户映射</span><span class="val"><span class="badge warn">1 待处理</span><svg class="ic s"><use href="#i-chevron"/></svg></span></button>
+              <hr class="hr">
+              <button class="set-row" onclick="show('tags')"><svg class="ic" style="color:var(--muted)"><use href="#i-tag"/></svg><span class="grow">标签管理</span><span class="val">3 个标签<svg class="ic s"><use href="#i-chevron"/></svg></span></button>
+              <hr class="hr">
+              <button class="set-row" onclick="show('templates')"><svg class="ic" style="color:var(--muted)"><use href="#i-doc"/></svg><span class="grow">模板管理</span><span class="val">3 个模板<svg class="ic s"><use href="#i-chevron"/></svg></span></button>
+            </div>
+            <div class="group-title">偏好</div>
+            <div class="card" style="padding:6px 16px;gap:0">
+              <button class="set-row"><svg class="ic" style="color:var(--muted)"><use href="#i-palette"/></svg><span class="grow">主题与外观</span><span class="val">浅色<svg class="ic s"><use href="#i-chevron"/></svg></span></button>
+              <hr class="hr">
+              <button class="set-row" disabled><svg class="ic" style="color:var(--muted)"><use href="#i-budget"/></svg><span class="grow">预算设置</span><span class="val"><span class="badge">规划中</span></span></button>
+            </div>
+            <div class="group-title">安全与数据</div>
+            <div class="card" style="padding:6px 16px;gap:0">
+              <button class="set-row"><svg class="ic" style="color:var(--muted)"><use href="#i-lock"/></svg><span class="grow">安全与隐私</span><span class="val">PIN 已开启<svg class="ic s"><use href="#i-chevron"/></svg></span></button>
+              <hr class="hr">
+              <button class="set-row"><svg class="ic" style="color:var(--muted)"><use href="#i-database"/></svg><span class="grow">数据与备份</span><span class="val"><svg class="ic s"><use href="#i-chevron"/></svg></span></button>
+              <hr class="hr">
+              <button class="set-row"><svg class="ic" style="color:var(--muted)"><use href="#i-server"/></svg><span class="grow">服务器与账号</span><span class="val">finexy.example.com<svg class="ic s"><use href="#i-chevron"/></svg></span></button>
+            </div>
+          </div>
+        </section>
+
+        <!-- S6 标签管理 -->
+        <section class="screen" id="scr-tags">
+          <div class="scr-body">
+            <div class="subhead">
+              <button class="back" onclick="show('settings')"><svg class="ic"><use href="#i-back"/></svg></button>
+              <h2>标签管理</h2>
+            </div>
+            <div class="card">
+              <div class="field">
+                <label>新标签名称</label>
+                <div class="box"><input placeholder="示例：健身"><button class="btn second" style="min-height:40px;padding:6px 16px">添加</button></div>
+              </div>
+              <div class="err-text" role="alert"><svg class="ic s"><use href="#i-alert"/></svg>创建失败：网络连接超时。<button class="btn danger-text" style="min-height:32px;padding:2px 10px;font-size:12.5px">重试</button></div>
+            </div>
+            <div class="sec-head"><b>使用中 · 3</b></div>
+            <div class="row-card static">
+              <div class="tile"><svg class="ic"><use href="#i-tag"/></svg></div>
+              <div class="grow"><div class="t-main">工作餐</div><div class="t-sub">12 笔流水使用</div></div>
+              <button class="btn text" style="min-width:44px"><svg class="ic m muted"><use href="#i-edit"/></svg></button>
+              <button class="btn text" style="min-width:44px"><svg class="ic m muted"><use href="#i-eye-off"/></svg></button>
+              <button class="btn text" style="min-width:44px"><svg class="ic m muted"><use href="#i-trash"/></svg></button>
+            </div>
+            <div class="row-card static">
+              <div class="tile"><svg class="ic"><use href="#i-tag"/></svg></div>
+              <div class="grow"><div class="t-main">社交</div><div class="t-sub">8 笔流水使用</div></div>
+              <button class="btn text" style="min-width:44px"><svg class="ic m muted"><use href="#i-edit"/></svg></button>
+              <button class="btn text" style="min-width:44px"><svg class="ic m muted"><use href="#i-eye-off"/></svg></button>
+              <button class="btn text" style="min-width:44px"><svg class="ic m muted"><use href="#i-trash"/></svg></button>
+            </div>
+            <div class="row-card static">
+              <div class="tile"><svg class="ic"><use href="#i-tag"/></svg></div>
+              <div class="grow"><div class="t-main">家庭</div><div class="t-sub">5 笔流水使用</div></div>
+              <button class="btn text" style="min-width:44px"><svg class="ic m muted"><use href="#i-edit"/></svg></button>
+              <button class="btn text" style="min-width:44px"><svg class="ic m muted"><use href="#i-eye-off"/></svg></button>
+              <button class="btn text" style="min-width:44px"><svg class="ic m muted"><use href="#i-trash"/></svg></button>
+            </div>
+            <div class="sec-head"><b>已隐藏</b><span class="act">隐藏后新流水不可选，历史流水不受影响</span></div>
+            <div class="row-card static" style="opacity:.62">
+              <div class="tile"><svg class="ic"><use href="#i-tag"/></svg></div>
+              <div class="grow"><div class="t-main">临时</div><div class="t-sub">2 笔流水使用 · 已隐藏</div></div>
+              <button class="btn coral-text" style="min-height:44px">恢复</button>
+            </div>
+            <div class="f12 muted">删除标签需确认；若被流水使用，确认对话框会说明影响范围。</div>
+          </div>
+        </section>
+
+        <!-- S7 模板管理 -->
+        <section class="screen" id="scr-templates">
+          <div class="scr-body">
+            <div class="subhead">
+              <button class="back" onclick="show('settings')"><svg class="ic"><use href="#i-back"/></svg></button>
+              <h2>模板管理</h2>
+              <button class="btn second" style="margin-left:auto;min-height:44px;padding:6px 16px"><svg class="ic m"><use href="#i-add"/></svg>新建</button>
+            </div>
+            <div class="row-card static">
+              <div class="tile"><svg class="ic"><use href="#i-doc"/></svg></div>
+              <div class="grow"><div class="t-main">工作日午餐</div><div class="t-sub">支出 · 餐饮 · ¥35.00 · 招行储蓄卡 · 工作餐</div></div>
+              <button class="btn coral-text" style="min-height:44px" onclick="openOv('ov-template-preview')">应用</button>
+              <button class="btn text" style="min-width:44px" onclick="openOv('ov-template-edit')"><svg class="ic m muted"><use href="#i-edit"/></svg></button>
+            </div>
+            <div class="row-card static">
+              <div class="tile"><svg class="ic"><use href="#i-doc"/></svg></div>
+              <div class="grow"><div class="t-main">房租月付</div><div class="t-sub">支出 · 居住 · ¥2,800.00 · 招行储蓄卡</div></div>
+              <button class="btn coral-text" style="min-height:44px" onclick="openOv('ov-template-preview')">应用</button>
+              <button class="btn text" style="min-width:44px" onclick="openOv('ov-template-edit')"><svg class="ic m muted"><use href="#i-edit"/></svg></button>
+            </div>
+            <div class="row-card static">
+              <div class="tile"><svg class="ic"><use href="#i-doc"/></svg></div>
+              <div class="grow"><div class="t-main">工资入账</div><div class="t-sub">收入 · 工资 · ¥8,500.00 · 招行储蓄卡</div></div>
+              <button class="btn coral-text" style="min-height:44px" onclick="openOv('ov-template-preview')">应用</button>
+              <button class="btn text" style="min-width:44px" onclick="openOv('ov-template-edit')"><svg class="ic m muted"><use href="#i-edit"/></svg></button>
+            </div>
+            <div class="f12 muted">应用模板会先弹出预览，确认后才保存为新流水；保存失败可重试，不会丢失预览内容。</div>
+          </div>
+        </section>
+
+        <!-- S8 同步详情 -->
+        <section class="screen" id="scr-sync-detail">
+          <div class="scr-body">
+            <div class="subhead">
+              <button class="back" onclick="show('tx')"><svg class="ic"><use href="#i-back"/></svg></button>
+              <h2>同步状态</h2>
+            </div>
+            <div class="card" style="border:1px solid color-mix(in srgb, var(--warning) 45%, transparent)">
+              <div style="display:flex;align-items:center;gap:8px;color:var(--warning);font-weight:600;font-size:16px"><svg class="ic"><use href="#i-alert"/></svg>2 条待同步</div>
+              <div class="f12 muted">上次同步失败：今天 09:12 · 网络连接超时</div>
+              <button class="btn primary wide"><svg class="ic m"><use href="#i-refresh"/></svg>立即重试</button>
+            </div>
+            <div class="sec-head"><b>待同步 · 2</b></div>
+            <div class="row-card static">
+              <div class="tile" style="color:var(--coral)"><svg class="ic"><use href="#i-out"/></svg></div>
+              <div class="grow"><div class="t-main">午餐</div><div class="t-sub">餐饮 · 招行储蓄卡 · 9月4日</div></div>
+              <span class="badge warn">待同步</span>
+            </div>
+            <div class="row-card static">
+              <div class="tile" style="color:var(--green)"><svg class="ic"><use href="#i-in"/></svg></div>
+              <div class="grow"><div class="t-main">工资到账</div><div class="t-sub">工资 · 招行储蓄卡 · 9月3日</div></div>
+              <span class="badge warn">待同步</span>
+            </div>
+            <div class="sec-head"><b>冲突 · 0</b></div>
+            <div class="card">
+              <div class="f12 muted">网络恢复后，WorkManager 会按指数退避自动重试；手动重试不会打断自动队列。若出现本机与服务器双边修改，会进入冲突对话框逐条解决。</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- O1 筛选面板（流水与统计共用） -->
+        <div class="overlay" id="ov-filter" onclick="if(event.target===this)closeOv(this)">
+          <div class="sheet">
+            <div style="display:flex;align-items:center"><h3 class="grow">筛选</h3><button class="btn text" onclick="closeOv(document.getElementById('ov-filter'))">收起</button></div>
+            <div class="field"><label>日期范围</label>
+              <div class="segments"><button>全部</button><button class="on">自定义</button><button>近 3 月</button></div>
+              <div class="chips" style="margin-top:8px"><button class="chip on"><svg class="ic s"><use href="#i-calendar"/></svg>9月1日 – 9月4日</button></div>
+            </div>
+            <div class="field"><label>类型</label>
+              <div class="segments"><button class="on">全部</button><button>支出</button><button>收入</button><button>转账</button></div>
+            </div>
+            <div class="field"><label>账户</label>
+              <div class="chips"><button class="chip on">全部账户</button><button class="chip">招行储蓄卡 (6621)</button><button class="chip">支付宝</button><button class="chip">现金钱包</button><button class="chip" disabled>交行储蓄卡 · 已停用</button></div>
+            </div>
+            <div class="field"><label>分类</label>
+              <div class="chips"><button class="chip on">全部</button><button class="chip">餐饮</button><button class="chip">交通</button><button class="chip">购物</button><button class="chip">居住</button><button class="chip">娱乐</button><button class="chip">工资</button><button class="chip">报销</button></div>
+            </div>
+            <div class="field"><label>标签（可多选）</label>
+              <div class="chips"><button class="chip">工作餐</button><button class="chip">社交</button><button class="chip">家庭</button></div>
+            </div>
+            <div style="display:flex;gap:10px">
+              <button class="btn line grow">重置</button>
+              <button class="btn primary grow" onclick="closeOv(document.getElementById('ov-filter'))">显示 8 笔结果</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- O2 模板编辑 -->
+        <div class="overlay" id="ov-template-edit" onclick="if(event.target===this)closeOv(this)">
+          <div class="sheet">
+            <div style="display:flex;align-items:center"><h3 class="grow">编辑模板</h3><button class="btn text" onclick="closeOv(document.getElementById('ov-template-edit'))">取消</button></div>
+            <div class="field"><label>模板名称</label><div class="box"><input value="工作日午餐"></div></div>
+            <div class="field"><label>类型</label><div class="segments"><button class="on">支出</button><button>收入</button></div></div>
+            <div class="field"><label>金额</label><div class="box"><input value="¥35.00" inputmode="decimal"></div></div>
+            <div class="field"><label>分类</label><div class="box"><span class="grow">餐饮</span><svg class="ic s muted"><use href="#i-chevron"/></svg></div></div>
+            <div class="field"><label>账户</label><div class="box"><span class="grow">招行储蓄卡 (6621) · 默认</span><svg class="ic s muted"><use href="#i-chevron"/></svg></div></div>
+            <div class="field"><label>标签</label><div class="chips"><button class="chip on"><svg class="ic s"><use href="#i-check"/></svg>工作餐</button><button class="chip">社交</button><button class="chip">家庭</button></div></div>
+            <div class="field"><label>描述</label><div class="box"><input value="午餐"></div></div>
+            <button class="btn primary wide" onclick="closeOv(document.getElementById('ov-template-edit'))">保存模板</button>
+          </div>
+        </div>
+
+        <!-- O3 应用模板预览 -->
+        <div class="overlay" id="ov-template-preview" onclick="if(event.target===this)closeOv(this)">
+          <div class="dlg-wrap">
+            <div class="dlg">
+              <h3>确认应用模板</h3>
+              <div class="f12 muted">将按模板「工作日午餐」创建以下流水，确认后保存。</div>
+              <div>
+                <div class="kv"><b>类型</b><span>支出</span></div>
+                <div class="kv"><b>金额</b><span>¥35.00</span></div>
+                <div class="kv"><b>分类</b><span>餐饮</span></div>
+                <div class="kv"><b>账户</b><span>招行储蓄卡 (6621)</span></div>
+                <div class="kv"><b>标签</b><span>工作餐</span></div>
+                <div class="kv"><b>描述</b><span>午餐</span></div>
+                <div class="kv"><b>日期</b><span>今天 · 9月4日</span></div>
+              </div>
+              <div class="note">保存后进入同步队列；失败可重试，不会重复创建。</div>
+              <div class="btns">
+                <button class="btn line" onclick="closeOv(document.getElementById('ov-template-preview'))">取消</button>
+                <button class="btn primary" onclick="closeOv(document.getElementById('ov-template-preview'))">确认保存</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- O4 导出确认 -->
+        <div class="overlay" id="ov-export" onclick="if(event.target===this)closeOv(this)">
+          <div class="dlg-wrap">
+            <div class="dlg">
+              <h3>导出流水</h3>
+              <div class="note">当前筛选：9月1日 – 9月30日 · 全部类型 · 全部账户 · 全部分类 · 全部标签</div>
+              <div>
+                <div class="kv"><b>记录数</b><span>42 笔</span></div>
+                <div class="kv"><b>收入合计</b><span style="color:var(--green)">+¥8,740.00</span></div>
+                <div class="kv"><b>支出合计</b><span>−¥6,620.40</span></div>
+                <div class="kv"><b>格式</b><span>CSV（UTF-8）</span></div>
+                <div class="kv"><b>时区</b><span>GMT+8 · 北京时间</span></div>
+              </div>
+              <div class="note">导出结果与屏幕筛选、隐藏记录规则一致；转账以独立类型行导出。</div>
+              <div class="btns">
+                <button class="btn line" onclick="closeOv(document.getElementById('ov-export'))">取消</button>
+                <button class="btn primary" onclick="closeOv(document.getElementById('ov-export'))"><svg class="ic m"><use href="#i-export"/></svg>确认导出</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /screens -->
+
+      <nav class="dock" id="dock">
+        <button class="item" data-tab="home" onclick="show('tx')"><svg class="ic"><use href="#i-home"/></svg>总览</button>
+        <button class="item on" data-tab="tx" onclick="show('tx')"><svg class="ic"><use href="#i-list"/></svg>流水</button>
+        <button class="item"><span class="add"><svg class="ic"><use href="#i-add"/></svg></span>记账</button>
+        <button class="item" data-tab="acct" onclick="show('accounts')"><svg class="ic"><use href="#i-wallet"/></svg>账户</button>
+        <button class="item" data-tab="set" onclick="show('settings')"><svg class="ic"><use href="#i-settings"/></svg>设置</button>
+      </nav>
+    </div><!-- /phone -->
+  </div>
+</main>
+
+<script>
+  const NOTES = {
+    tx: ["<b>§11.6 筛选栏</b>：日期/类型/账户/分类/标签固定顺序，流水、统计、导出共用同一组件与口径。",
+         "<b>§10 全局同步指示器</b>：标题行警示橙角标，点击进入同步详情；待同步行内联标记。",
+         "<b>已知 Web 问题规避</b>：描述只渲染一次（标题），副标题是「分类 · 账户 · 标签」上下文，不重复。",
+         "转账行使用独立图标与文案，不与收入/支出混用符号。",
+         "空筛选结果沿用现有空态文案「没有符合条件的流水，试试其他筛选条件」。"],
+    accounts: ["阶段 C 第 1 项：账户列表承担默认账户与失效账户的展示。",
+         "<b>§7 信息架构</b>：账户详情、资产、汇率均为账户页子页面。",
+         "停用账户弱化显示但可进入详情；新流水选择器中不可选（见筛选面板）。",
+         "待映射提醒卡复用现有账户映射能力（Room v10 account_mappings），禁止自动匹配。"],
+    "account-detail": ["阶段 C 第 1 项：余额、流水列表、日期筛选；默认账户语义在卡片内说明。",
+         "「余额调整」按钮为阶段 D 预留，禁用态同时有视觉弱化和文字说明（§8 按钮规范）。",
+         "期初余额/余额调整将使用独立类型，不伪装收支（§11.1，对应已知 Web 问题）。",
+         "「在此账户记一笔」把 accountId 预填进记账表单，走现有 TransactionDraft 链路。"],
+    stats: ["阶段 C 第 4 项：筛选同时作用于图表、汇总、列表、导出，禁止口径分裂（§9/§11.6）。",
+         "<b>§9 数据可视化</b>：第一序列珊瑚色；柱顶直接标注数值，不依赖 hover；标题含时间范围与单位。",
+         "分类扩展色按 §4 顺序：蓝 → 靛蓝 → 紫 → 中性。",
+         "汇总卡明确「不含转账与余额调整」口径，避免统计污染。"],
+    settings: ["阶段 C 前置：现有 30 参数的单页 SettingsScreen 按 <b>§7 信息架构表</b>拆为二级页。",
+         "同步摘要卡是全局指示器的设置页形态（§10），警示态优先于列表顶部。",
+         "「预算设置」标记为规划中：AGENTS.md 路线图尚未包含预算，需先补规划再启用。",
+         "每行 ≥48dp，值列展示当前状态，减少进入后的认知成本。"],
+    tags: ["阶段 C 第 2 项：服务端增删改 + 本地 Room 回写；本屏覆盖列表、新增、隐藏、失败重试四类状态。",
+         "<b>§10 失败状态</b>：错误靠近操作位置，说明原因并给出重试（示例中的网络超时为演示态）。",
+         "隐藏语义与停用账户一致：新流水不可选，历史不受影响。",
+         "删除确认对话框需说明被引用流水数量（实现时补齐）。"],
+    templates: ["阶段 C 第 3 项：完整字段编辑（名称/类型/金额/分类/账户/标签/描述）。",
+         "<b>应用模板必须预览再保存</b>（O3 对话框），确认后才写入，防误触与重复提交。",
+         "编辑弹层（O2）使用底部 Bottom Sheet，键盘弹出时保存按钮仍可到达（§8 表单规范）。",
+         "保存失败保留表单内容并可重试（§10）。"],
+    "sync-detail": ["§10 全局同步指示器的详情页：待同步清单、冲突计数、最近失败原因、手动重试。",
+         "文案说明 WorkManager 自动重试与手动重试的关系，避免用户重复操作焦虑。",
+         "冲突为 0 时仍保留入口；出现冲突时沿用现有 13 组字段冲突对话框。"]
+  };
+  const TAB = { tx:"tx", accounts:"acct", "account-detail":"acct", stats:"home",
+                settings:"set", tags:"set", templates:"set", "sync-detail":"set" };
+
+  function show(id) {
+    document.querySelectorAll(".screen").forEach(s => s.classList.toggle("on", s.id === "scr-" + id));
+    document.querySelectorAll(".overlay").forEach(o => o.classList.remove("open"));
+    document.querySelectorAll(".nav-item").forEach(b => b.classList.toggle("on",
+      b.dataset.scr === id && !b.querySelector(".ph")));
+    document.querySelectorAll("#dock .item[data-tab]").forEach(b =>
+      b.classList.toggle("on", b.dataset.tab === TAB[id]));
+    const notes = NOTES[id] || [];
+    document.getElementById("notes").innerHTML =
+      "<h3>设计说明 · " + (document.querySelector('.nav-item[data-scr=\"' + id + '\"]')?.textContent.replace("弹层","").trim() || id) + "</h3>" +
+      "<ul>" + notes.map(n => "<li>" + n + "</li>").join("") + "</ul>";
+  }
+  function openOv(id) { document.getElementById(id).classList.add("open"); }
+  function closeOv(el) { el.classList.remove("open"); }
+  function toggleTheme() {
+    const root = document.documentElement;
+    const dark = root.dataset.theme !== "dark";
+    root.dataset.theme = dark ? "dark" : "light";
+    document.getElementById("theme-label").textContent = dark ? "浅色主题" : "深色主题";
+  }
+  show("tx");
+</script>
+</body>
+</html>

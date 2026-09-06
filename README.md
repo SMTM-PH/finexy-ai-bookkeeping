@@ -109,7 +109,8 @@ go test ./...
 - [分支策略](CONTRIBUTING.md#分支策略)
 - [安全政策](SECURITY.md)
 - [行为准则](CODE_OF_CONDUCT.md)
-- [项目文档](docs/AI_BOOKKEEPING_MVP.md)
+- [AI / 开发者必读项目手册](AGENTS.md)
+- [Web / Android UI/UX 设计基线](docs/UI_UX_DESIGN.md)
 
 ## 开源许可
 
