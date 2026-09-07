@@ -39,9 +39,10 @@ Finexy 是独立维护的自托管 AI 个人财务管理项目，提供 Web、PW
 | `Finexy-Windows-1.8.0-x64-Portable.exe` | Windows x64 便携版 |
 | `Finexy-NAS-1.8.0-amd64-deploy.zip` | NAS 在线部署配置包 |
 | `Finexy-NAS-1.8.0-linux-amd64.tar` | Finexy 与 OCR 的 AMD64 Docker 离线镜像 |
+| `Finexy-Android-1.0.0-debug.apk` | Android 测试版（调试签名，客户端自身版本号） |
 | `SHA256SUMS.txt` | 发布文件完整性校验值 |
 
-Windows 包当前未进行代码签名，首次运行时 SmartScreen 可能显示提示。请只从本仓库 Releases 下载并核对 SHA-256。
+Windows 包当前未进行代码签名，首次运行时 SmartScreen 可能显示提示。Android APK 为调试签名的测试版，安装时可能提示未知来源，正式发布签名将在后续版本提供。请只从本仓库 Releases 下载并核对 SHA-256。
 
 ## 部署要求
 
