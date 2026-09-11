@@ -3,7 +3,9 @@ name: Publish main image temporary
 on:
   push:
     branches: [codex/family-web-prototype]
-    paths: [.github/workflows/publish-main-image-temporary.yml]
+    paths:
+      - .github/workflows/publish-main-image-temporary.yml
+      - .dockerignore
 
 permissions:
   contents: read
