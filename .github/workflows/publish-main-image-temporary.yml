@@ -1,0 +1,47 @@
+name: Publish main image temporary
+
+on:
+  push:
+    branches: [codex/family-web-prototype]
+    paths: [.github/workflows/publish-main-image-temporary.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.FINEXY_PUBLISH_DOCKERHUB_USERNAME }}
+          password: ${{ secrets.FINEXY_PUBLISH_DOCKERHUB_TOKEN }}
+      - name: Build the main image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          platforms: linux/amd64
+          tags: ph97/finexy-bookkeeping:family-preview-test
+          build-args: |
+            RELEASE_BUILD=true
+            SKIP_TESTS=true
+      - name: Verify application and embedded prototype
+        shell: bash
+        run: |
+          docker run -d --rm --name finexy-main-image-test -p 18089:8080 ph97/finexy-bookkeeping:family-preview-test
+          trap 'docker stop finexy-main-image-test >/dev/null 2>&1 || true' EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:18089/healthz.json >/dev/null; then break; fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:18089/healthz.json >/dev/null
+          curl --fail --silent http://127.0.0.1:18089/prototypes/family-web/ | grep -F "家庭账本设计原型"
+      - name: Publish existing main repository tag
+        shell: bash
+        run: |
+          docker tag ph97/finexy-bookkeeping:family-preview-test ph97/finexy-bookkeeping:latest-amd64
+          docker push ph97/finexy-bookkeeping:latest-amd64
