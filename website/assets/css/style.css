@@ -316,18 +316,6 @@ a { color: inherit; }
 
 .tilt { transform: rotate(0.6deg); }
 
-.float-shot {
-  position: absolute;
-  right: -26px;
-  bottom: -46px;
-  width: 44%;
-  border-radius: 12px;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  box-shadow: var(--shadow-lg);
-  display: none;
-}
-
 /* Hero 统计条 */
 
 .hero-stats {
@@ -724,7 +712,6 @@ a { color: inherit; }
   .hero { padding-top: 56px; }
   .hero-grid { grid-template-columns: 1fr; gap: 44px; }
   .hero-sub { max-width: none; }
-  .float-shot { display: none; }
   .tilt { transform: none; }
   .hero-stats { grid-template-columns: repeat(2, 1fr); margin-top: 52px; }
   .feature-grid { grid-template-columns: repeat(2, 1fr); }
