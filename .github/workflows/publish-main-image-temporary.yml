@@ -6,6 +6,7 @@ on:
     paths:
       - .github/workflows/publish-main-image-temporary.yml
       - .dockerignore
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -42,7 +43,7 @@ jobs:
           done
           curl --fail --silent http://127.0.0.1:18089/healthz.json >/dev/null
           docker exec finexy-main-image-test test -f /ezbookkeeping/public/prototypes/family-web/index.html
-          curl --fail --silent http://127.0.0.1:18089/prototypes/family-web/index.html | grep -F "家庭账本设计原型"
+          curl --fail --silent --location http://127.0.0.1:18089/prototypes/family-web/index.html | grep -F "家庭账本设计原型"
       - name: Publish existing main repository tag
         shell: bash
         run: |
