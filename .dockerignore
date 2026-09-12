@@ -7,6 +7,15 @@ data
 log
 storage
 docs
+!docs/
+docs/*
+!docs/prototypes/
+docs/prototypes/*
+!docs/prototypes/family-web/
+docs/prototypes/family-web/*
+!docs/prototypes/family-web/index.html
+!docs/prototypes/family-web/style.css
+!docs/prototypes/family-web/app.js
 design-system
 ocr-service
 .playwright-cli

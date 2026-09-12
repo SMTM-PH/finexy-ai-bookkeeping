@@ -186,6 +186,12 @@ func startWebServer(c *core.CliContext) error {
 		router.StaticFile("/desktop/"+workboxFileNames[i], filepath.Join(config.StaticRootPath, workboxFileNames[i]))
 	}
 
+	router.StaticFile("/prototypes/family-web", filepath.Join(config.StaticRootPath, "prototypes/family-web/index.html"))
+	router.StaticFile("/prototypes/family-web/", filepath.Join(config.StaticRootPath, "prototypes/family-web/index.html"))
+	router.StaticFile("/prototypes/family-web/index.html", filepath.Join(config.StaticRootPath, "prototypes/family-web/index.html"))
+	router.StaticFile("/prototypes/family-web/style.css", filepath.Join(config.StaticRootPath, "prototypes/family-web/style.css"))
+	router.StaticFile("/prototypes/family-web/app.js", filepath.Join(config.StaticRootPath, "prototypes/family-web/app.js"))
+
 	if config.AvatarProvider == core.USER_AVATAR_PROVIDER_INTERNAL {
 		avatarRoute := router.Group("/avatar")
 		avatarRoute.Use(bindMiddleware(middlewares.JWTAuthorizationByQueryString(config), config))

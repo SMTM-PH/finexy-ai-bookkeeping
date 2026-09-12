@@ -52,6 +52,9 @@ RUN mkdir -p /ezbookkeeping && chown 1000:1000 /ezbookkeeping \
 WORKDIR /ezbookkeeping
 COPY --from=be-builder --chown=1000:1000 /go/src/github.com/SMTM-PH/finexy-ai-bookkeeping/ezbookkeeping /ezbookkeeping/ezbookkeeping
 COPY --from=fe-builder --chown=1000:1000 /go/src/github.com/SMTM-PH/finexy-ai-bookkeeping/dist /ezbookkeeping/public
+COPY --chown=1000:1000 docs/prototypes/family-web/index.html /ezbookkeeping/public/prototypes/family-web/index.html
+COPY --chown=1000:1000 docs/prototypes/family-web/style.css /ezbookkeeping/public/prototypes/family-web/style.css
+COPY --chown=1000:1000 docs/prototypes/family-web/app.js /ezbookkeeping/public/prototypes/family-web/app.js
 COPY --chown=1000:1000 conf /ezbookkeeping/conf
 COPY --chown=1000:1000 templates /ezbookkeeping/templates
 COPY --chown=1000:1000 LICENSE /ezbookkeeping/LICENSE
