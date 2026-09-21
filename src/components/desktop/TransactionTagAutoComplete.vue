@@ -1,5 +1,6 @@
 <template>
     <v-autocomplete
+        class="transaction-tag-autocomplete"
         item-title="name"
         item-value="id"
         auto-select-first
@@ -156,3 +157,24 @@ function updateModelValue(newValue: string[]) {
     emit('update:modelValue', newValue);
 }
 </script>
+
+<style scoped>
+.transaction-tag-autocomplete :deep(.v-chip) {
+    color: #101828 !important;
+    background: #f2f4f7 !important;
+    border: 1px solid #cfd4dc !important;
+    font-weight: 600;
+    opacity: 1 !important;
+}
+
+.transaction-tag-autocomplete :deep(.v-chip .v-icon) {
+    color: currentColor !important;
+    opacity: 0.82;
+}
+
+.transaction-tag-autocomplete :deep(.v-chip__content),
+.transaction-tag-autocomplete :deep(.v-chip__close) {
+    color: #101828 !important;
+    opacity: 1 !important;
+}
+</style>

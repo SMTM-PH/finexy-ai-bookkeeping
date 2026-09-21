@@ -24,10 +24,12 @@ data class SyncResult(
  */
 class SyncEngine(
     private val api: FinexyApi,
-    private val repository: TransactionRepository
+    private val repository: TransactionRepository,
+    private val autoUpdateExchangeRates: Boolean = true
 ) {
     suspend fun sync(): SyncResult = syncMutex.withLock {
         repository.migrateLegacyDataIfNeeded()
+        resolvePostedAIReviews()
         // A create request may have reached the server even when its response was
         // lost. Retry brand-new rows with the stable localId before pulling so the
         // idempotent server response can be attached to the original Room row.
@@ -56,6 +58,44 @@ class SyncEngine(
         repository.mergeCategories(categories)
         repository.mergeTags(api.parseTagResponse(api.listTags()))
         repository.mergeTemplates(api.parseTemplateResponse(api.listTemplates()))
+        repository.replaceProductAssets(api.listProductAssets())
+        // Exchange-rate providers may depend on a third-party central bank.
+        // Keep the last verified snapshot if that optional dependency is down.
+        if (autoUpdateExchangeRates) {
+            runCatching { api.latestExchangeRates() }.onSuccess { repository.replaceExchangeRates(it) }
+        }
+        repository.replaceAIReviewItems(api.listAIReviewItems())
+        // Family ledgers and savings goals ride on optional server features. A
+        // legacy server answers 404/400 for these endpoints; keeping the local
+        // cache untouched beats presenting an empty ledger or an empty plan.
+        val ledgers = api.listLedgersIfEnabled()
+        if (ledgers != null) {
+            // Fetch every explicit ledger completely before mutating Room. If a
+            // single request or validation fails, the last coherent snapshots
+            // remain available instead of showing a partly refreshed ledger.
+            val ledgerSnapshots = ledgers.associate { ledger ->
+                val ledgerAccounts = api.parseAccountResponse(api.listAccounts(ledger.id))
+                val ledgerTransactions = api.parseTransactionResponse(api.listTransactions(ledger.id), ledger.id)
+                ledger.id to Pair(ledgerAccounts, ledgerTransactions)
+            }
+            repository.replaceLedgers(ledgers)
+            ledgerSnapshots.forEach { (ledgerId, snapshot) ->
+                repository.replaceLedgerSnapshot(ledgerId, snapshot.first, snapshot.second)
+            }
+            val familyGroups = api.listFamilyGroupsIfEnabled()
+            if (familyGroups != null) {
+                repository.replaceFamilyGroups(familyGroups)
+                familyGroups.forEach { group ->
+                    repository.replaceFamilyMembers(group.id, api.listFamilyMembers(group.id))
+                }
+            }
+            // One complete snapshot across every visible ledger, including the
+            // implicit default personal ledger, so a single ledger failure can
+            // never look like an emptied plan.
+            val mergedGoals = ledgers.map { ledger -> api.listSavingsGoals(ledger.id) }
+                .flatten() + api.listSavingsGoals(RemoteLedger.DEFAULT_LEDGER_ID)
+            repository.replaceSavingsGoals(mergedGoals)
+        }
         // The review queue rides on the same feature flag; a disabled schedule
         // feature (HTTP 400 / 210003) leaves templates and the local queue
         // untouched instead of looking like an empty server state.
@@ -86,7 +126,15 @@ class SyncEngine(
             repository.markSynced(local, response)
             pushed++
         }
+        resolvePostedAIReviews()
         SyncResult(merge.merged, accounts.size, categories.size, pushed, waiting, merge.conflicts + absence.conflicts, absence.removed)
+    }
+
+    private suspend fun resolvePostedAIReviews() {
+        repository.pendingAIReviewResolutions().forEach { transaction ->
+            api.resolveAIReviewItem(requireNotNull(transaction.reviewItemId))
+            repository.markAIReviewResolved(transaction)
+        }
     }
 
     companion object {

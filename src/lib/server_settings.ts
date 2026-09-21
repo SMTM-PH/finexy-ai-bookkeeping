@@ -63,8 +63,18 @@ export function isTransactionFromAITextRecognitionEnabled(): boolean {
     return getServerSetting('llmtr') === 1;
 }
 
+export function setTransactionFromAITextRecognitionEnabled(enabled: boolean): void {
+    window.EZBOOKKEEPING_SERVER_SETTINGS = window.EZBOOKKEEPING_SERVER_SETTINGS || {};
+    window.EZBOOKKEEPING_SERVER_SETTINGS['llmtr'] = enabled ? 1 : 0;
+}
+
 export function isTransactionFromAIImageRecognitionEnabled(): boolean {
     return getServerSetting('llmir') === 1;
+}
+
+export function setTransactionFromAIImageRecognitionEnabled(enabled: boolean): void {
+    window.EZBOOKKEEPING_SERVER_SETTINGS = window.EZBOOKKEEPING_SERVER_SETTINGS || {};
+    window.EZBOOKKEEPING_SERVER_SETTINGS['llmir'] = enabled ? 1 : 0;
 }
 
 export function isLocalOCREnabled(): boolean {

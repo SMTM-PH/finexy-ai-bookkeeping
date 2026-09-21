@@ -58,6 +58,15 @@ func initializeSystem(c *core.CliContext) (*settings.Config, error) {
 		return nil, err
 	}
 
+	webAIConfiguration, err := settings.LoadWebAIConfiguration(config)
+	if err != nil {
+		if !isDisableBootLog {
+			log.BootErrorf(c, "[initializer.initializeSystem] cannot load web AI configuration, because %s", err.Error())
+		}
+		return nil, err
+	}
+	settings.ApplyWebAIConfiguration(config, webAIConfiguration)
+
 	if config.SecretKeyNoSet {
 		log.BootWarnf(c, "[initializer.initializeSystem] \"secret_key\" in config file is not set, please change it to keep your user data safe")
 	}

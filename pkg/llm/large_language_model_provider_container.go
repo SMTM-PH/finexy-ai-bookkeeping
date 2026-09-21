@@ -11,10 +11,12 @@ import (
 	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/llm/provider/ollama"
 	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/llm/provider/openai"
 	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/settings"
+	"sync"
 )
 
 // LargeLanguageModelProviderContainer contains the current large language model provider
 type LargeLanguageModelProviderContainer struct {
+	mutex                                  sync.RWMutex
 	textRecognitionCurrentProvider         provider.LargeLanguageModelProvider
 	receiptImageRecognitionCurrentProvider provider.LargeLanguageModelProvider
 }
@@ -26,10 +28,12 @@ var (
 
 // InitializeLargeLanguageModelProvider initializes the current large language model provider according to the config
 func InitializeLargeLanguageModelProvider(config *settings.Config) error {
-	var err error = nil
+	var err error
+	var textProvider provider.LargeLanguageModelProvider
+	var imageProvider provider.LargeLanguageModelProvider
 
 	if config.TextRecognitionLLMConfig != nil {
-		Container.textRecognitionCurrentProvider, err = initializeLargeLanguageModelProvider(config.TextRecognitionLLMConfig, config.EnableDebugLog)
+		textProvider, err = initializeLargeLanguageModelProvider(config.TextRecognitionLLMConfig, config.EnableDebugLog)
 
 		if err != nil {
 			return err
@@ -37,12 +41,16 @@ func InitializeLargeLanguageModelProvider(config *settings.Config) error {
 	}
 
 	if config.ReceiptImageRecognitionLLMConfig != nil {
-		Container.receiptImageRecognitionCurrentProvider, err = initializeLargeLanguageModelProvider(config.ReceiptImageRecognitionLLMConfig, config.EnableDebugLog)
+		imageProvider, err = initializeLargeLanguageModelProvider(config.ReceiptImageRecognitionLLMConfig, config.EnableDebugLog)
 
 		if err != nil {
 			return err
 		}
 	}
+	Container.mutex.Lock()
+	Container.textRecognitionCurrentProvider = textProvider
+	Container.receiptImageRecognitionCurrentProvider = imageProvider
+	Container.mutex.Unlock()
 
 	return nil
 }
@@ -73,18 +81,24 @@ func initializeLargeLanguageModelProvider(llmConfig *settings.LLMConfig, enableR
 
 // GetJsonResponseByTextRecognitionModel returns the json response from the current large language model provider by transaction text recognition model
 func (l *LargeLanguageModelProviderContainer) GetJsonResponseByTextRecognitionModel(c core.Context, uid int64, currentConfig *settings.Config, request *data.LargeLanguageModelRequest) (*data.LargeLanguageModelTextualResponse, error) {
-	if currentConfig.TextRecognitionLLMConfig == nil || Container.textRecognitionCurrentProvider == nil {
+	l.mutex.RLock()
+	currentProvider := l.textRecognitionCurrentProvider
+	l.mutex.RUnlock()
+	if currentConfig.TextRecognitionLLMConfig == nil || currentProvider == nil {
 		return nil, errs.ErrInvalidLLMProvider
 	}
 
-	return l.textRecognitionCurrentProvider.GetJsonResponse(c, uid, currentConfig.TextRecognitionLLMConfig, request)
+	return currentProvider.GetJsonResponse(c, uid, currentConfig.TextRecognitionLLMConfig, request)
 }
 
 // GetJsonResponseByReceiptImageRecognitionModel returns the json response from the current large language model provider by receipt image recognition model
 func (l *LargeLanguageModelProviderContainer) GetJsonResponseByReceiptImageRecognitionModel(c core.Context, uid int64, currentConfig *settings.Config, request *data.LargeLanguageModelRequest) (*data.LargeLanguageModelTextualResponse, error) {
-	if currentConfig.ReceiptImageRecognitionLLMConfig == nil || Container.receiptImageRecognitionCurrentProvider == nil {
+	l.mutex.RLock()
+	currentProvider := l.receiptImageRecognitionCurrentProvider
+	l.mutex.RUnlock()
+	if currentConfig.ReceiptImageRecognitionLLMConfig == nil || currentProvider == nil {
 		return nil, errs.ErrInvalidLLMProvider
 	}
 
-	return l.receiptImageRecognitionCurrentProvider.GetJsonResponse(c, uid, currentConfig.ReceiptImageRecognitionLLMConfig, request)
+	return currentProvider.GetJsonResponse(c, uid, currentConfig.ReceiptImageRecognitionLLMConfig, request)
 }

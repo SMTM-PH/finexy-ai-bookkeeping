@@ -186,6 +186,12 @@ func startWebServer(c *core.CliContext) error {
 		router.StaticFile("/desktop/"+workboxFileNames[i], filepath.Join(config.StaticRootPath, workboxFileNames[i]))
 	}
 
+	router.StaticFile("/prototypes/family-web", filepath.Join(config.StaticRootPath, "prototypes/family-web/index.html"))
+	router.StaticFile("/prototypes/family-web/", filepath.Join(config.StaticRootPath, "prototypes/family-web/index.html"))
+	router.StaticFile("/prototypes/family-web/index.html", filepath.Join(config.StaticRootPath, "prototypes/family-web/index.html"))
+	router.StaticFile("/prototypes/family-web/style.css", filepath.Join(config.StaticRootPath, "prototypes/family-web/style.css"))
+	router.StaticFile("/prototypes/family-web/app.js", filepath.Join(config.StaticRootPath, "prototypes/family-web/app.js"))
+
 	if config.AvatarProvider == core.USER_AVATAR_PROVIDER_INTERNAL {
 		avatarRoute := router.Group("/avatar")
 		avatarRoute.Use(bindMiddleware(middlewares.JWTAuthorizationByQueryString(config), config))
@@ -394,6 +400,7 @@ func startWebServer(c *core.CliContext) error {
 			apiV1Route.POST("/accounts/update/last_reconciled_time.json", bindApi(api.Accounts.AccountUpdateLastReconciledTimeHandler, config))
 			apiV1Route.POST("/accounts/hide.json", bindApi(api.Accounts.AccountHideHandler, config))
 			apiV1Route.POST("/accounts/move.json", bindApi(api.Accounts.AccountMoveHandler, config))
+			apiV1Route.POST("/accounts/move_ledger.json", bindApi(api.Accounts.AccountMoveLedgerHandler, config))
 			apiV1Route.POST("/accounts/delete.json", bindApi(api.Accounts.AccountDeleteHandler, config))
 			apiV1Route.POST("/accounts/sub_account/delete.json", bindApi(api.Accounts.SubAccountDeleteHandler, config))
 
@@ -491,6 +498,45 @@ func startWebServer(c *core.CliContext) error {
 			apiV1Route.POST("/budget/monthly/set.json", bindApi(api.MonthlyBudgets.MonthlyBudgetSetHandler, config))
 			apiV1Route.POST("/budget/monthly/delete.json", bindApi(api.MonthlyBudgets.MonthlyBudgetDeleteHandler, config))
 
+			// Families, ledgers and savings goals
+			apiV1Route.POST("/family/group/create.json", bindApi(api.Families.FamilyCreateHandler, config))
+			apiV1Route.GET("/family/group/list.json", bindApi(api.Families.FamilyListHandler, config))
+			apiV1Route.POST("/family/group/modify.json", bindApi(api.Families.FamilyModifyHandler, config))
+			apiV1Route.POST("/family/group/delete.json", bindApi(api.Families.FamilyDeleteHandler, config))
+			apiV1Route.GET("/family/member/list.json", bindApi(api.Families.FamilyMemberListHandler, config))
+			apiV1Route.GET("/family/member/me.json", bindApi(api.Families.FamilyMemberMeHandler, config))
+			apiV1Route.POST("/family/member/change_role.json", bindApi(api.Families.FamilyMemberRoleChangeHandler, config))
+			apiV1Route.POST("/family/member/remove.json", bindApi(api.Families.FamilyMemberRemoveHandler, config))
+			apiV1Route.POST("/family/member/leave.json", bindApi(api.Families.FamilyMemberLeaveHandler, config))
+			apiV1Route.POST("/family/invitation/create.json", bindApi(api.Families.FamilyInvitationCreateHandler, config))
+			apiV1Route.GET("/family/invitation/list.json", bindApi(api.Families.FamilyInvitationListHandler, config))
+			apiV1Route.POST("/family/invitation/revoke.json", bindApi(api.Families.FamilyInvitationRevokeHandler, config))
+			apiV1Route.POST("/family/invitation/accept.json", bindApi(api.Families.FamilyInvitationAcceptHandler, config))
+			apiV1Route.GET("/ledger/list.json", bindApi(api.Ledgers.LedgerListHandler, config))
+			apiV1Route.GET("/ledger/overview.json", bindApi(api.Ledgers.LedgerOverviewHandler, config))
+			apiV1Route.GET("/ledger/member/list.json", bindApi(api.Ledgers.LedgerMemberListHandler, config))
+			apiV1Route.POST("/ledger/member/change_role.json", bindApi(api.Ledgers.LedgerMemberRoleChangeHandler, config))
+			apiV1Route.POST("/ledger/member/remove.json", bindApi(api.Ledgers.LedgerMemberRemoveHandler, config))
+			apiV1Route.POST("/ledger/member/leave.json", bindApi(api.Ledgers.LedgerMemberLeaveHandler, config))
+			apiV1Route.POST("/ledger/invitation/create.json", bindApi(api.Ledgers.LedgerInvitationCreateHandler, config))
+			apiV1Route.GET("/ledger/invitation/list.json", bindApi(api.Ledgers.LedgerInvitationListHandler, config))
+			apiV1Route.POST("/ledger/invitation/revoke.json", bindApi(api.Ledgers.LedgerInvitationRevokeHandler, config))
+			apiV1Route.POST("/ledger/invitation/preview.json", bindApi(api.Ledgers.LedgerInvitationPreviewHandler, config))
+			apiV1Route.POST("/ledger/invitation/accept.json", bindApi(api.Ledgers.LedgerInvitationAcceptHandler, config))
+			apiV1Route.POST("/ledger/create.json", bindApi(api.Ledgers.LedgerCreateHandler, config))
+			apiV1Route.POST("/ledger/modify.json", bindApi(api.Ledgers.LedgerModifyHandler, config))
+			apiV1Route.GET("/ledger/delete/preview.json", bindApi(api.Ledgers.LedgerDeletePreviewHandler, config))
+			apiV1Route.POST("/ledger/delete.json", bindApi(api.Ledgers.LedgerDeleteHandler, config))
+			apiV1Route.GET("/savings_goal/list.json", bindApi(api.SavingsGoals.SavingsGoalListHandler, config))
+			apiV1Route.GET("/savings_goal/get.json", bindApi(api.SavingsGoals.SavingsGoalGetHandler, config))
+			apiV1Route.POST("/savings_goal/create.json", bindApi(api.SavingsGoals.SavingsGoalCreateHandler, config))
+			apiV1Route.POST("/savings_goal/modify.json", bindApi(api.SavingsGoals.SavingsGoalModifyHandler, config))
+			apiV1Route.POST("/savings_goal/delete.json", bindApi(api.SavingsGoals.SavingsGoalDeleteHandler, config))
+			apiV1Route.POST("/savings_goal/deposit.json", bindApi(api.SavingsGoals.SavingsGoalDepositHandler, config))
+			apiV1Route.POST("/savings_goal/withdraw.json", bindApi(api.SavingsGoals.SavingsGoalWithdrawHandler, config))
+			apiV1Route.GET("/savings_goal/funds/list.json", bindApi(api.SavingsGoals.SavingsGoalFundListHandler, config))
+			apiV1Route.GET("/savings_goal/accounts.json", bindApi(api.SavingsGoals.SavingsGoalAccountsHandler, config))
+
 			// Scheduled occurrence review queue
 			apiV1Route.GET("/schedule/review/list.json", bindApi(api.ScheduledOccurrences.ListHandler, config))
 			apiV1Route.POST("/schedule/review/confirm.json", bindApi(api.ScheduledOccurrences.ConfirmHandler, config))
@@ -499,18 +545,16 @@ func startWebServer(c *core.CliContext) error {
 			// AI review queue
 			apiV1Route.GET("/ai/review/list.json", bindApi(api.AIReviewItems.ListHandler, config))
 			apiV1Route.POST("/ai/review/create.json", bindApi(api.AIReviewItems.CreateHandler, config))
-	apiV1Route.POST("/ai/review/resolve.json", bindApi(api.AIReviewItems.ResolveHandler, config))
-	apiV1Route.POST("/ai/review/dismiss.json", bindApi(api.AIReviewItems.DismissHandler, config))
-	apiV1Route.POST("/ai/review/delete.json", bindApi(api.AIReviewItems.DeleteHandler, config))
+			apiV1Route.POST("/ai/review/resolve.json", bindApi(api.AIReviewItems.ResolveHandler, config))
+			apiV1Route.POST("/ai/review/dismiss.json", bindApi(api.AIReviewItems.DismissHandler, config))
+			apiV1Route.POST("/ai/review/delete.json", bindApi(api.AIReviewItems.DeleteHandler, config))
 			apiV1Route.GET("/ai/reports/list.json", bindApi(api.AIReports.ListHandler, config))
 			apiV1Route.POST("/ai/reports/generate.json", bindApi(api.AIReports.GenerateHandler, config))
 
 			// Large Language Models
-			if config.TextRecognitionLLMConfig != nil && config.TextRecognitionLLMConfig.LLMProvider != "" {
-				if config.TransactionFromAITextRecognition {
-					apiV1Route.POST("/llm/transactions/recognize_text.json", bindApi(api.LargeLanguageModels.RecognizeTransactionTextHandler, config))
-				}
-			}
+			apiV1Route.GET("/llm/configuration/get.json", bindApi(api.AIConfigurations.GetHandler, config))
+			apiV1Route.POST("/llm/configuration/update.json", bindApi(api.AIConfigurations.UpdateHandler, config))
+			apiV1Route.POST("/llm/transactions/recognize_text.json", bindApi(api.LargeLanguageModels.RecognizeTransactionTextHandler, config))
 
 			if config.ReceiptImageRecognitionLLMConfig != nil && config.ReceiptImageRecognitionLLMConfig.LLMProvider != "" {
 				if config.TransactionFromAIImageRecognition {
@@ -518,10 +562,7 @@ func startWebServer(c *core.CliContext) error {
 				}
 			}
 
-			if config.LocalOCRServerURL != "" && config.TransactionFromAITextRecognition &&
-				config.TextRecognitionLLMConfig != nil && config.TextRecognitionLLMConfig.LLMProvider != "" {
-				apiV1Route.POST("/ocr/recognize.json", bindApi(api.LocalOCR.RecognizeHandler, config))
-			}
+			apiV1Route.POST("/ocr/recognize.json", bindApi(api.LocalOCR.RecognizeHandler, config))
 
 			// Exchange Rates
 			apiV1Route.GET("/exchange_rates/latest.json", bindApi(api.ExchangeRates.LatestExchangeRateHandler, config))

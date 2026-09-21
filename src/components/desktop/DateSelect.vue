@@ -5,6 +5,8 @@
         :disabled="disabled"
         :clearable="modelValue ? clearable : false"
         :label="label"
+        :error="error"
+        :error-messages="errorMessages"
         :menu-props="{ contentClass: 'date-select-menu' }"
         v-model="displayTime"
     >
@@ -16,6 +18,8 @@
             <date-time-picker :is-dark-mode="isDarkMode"
                               :enable-time-picker="false"
                               :clearable="true"
+                              :min-date="minDate"
+                              :max-date="maxDate"
                               :show-alternate-dates="true"
                               v-model="dateTime">
             </date-time-picker>
@@ -44,6 +48,10 @@ const props = defineProps<{
     clearable?: boolean;
     label?: string;
     noDataText?: string;
+    minDate?: Date;
+    maxDate?: Date;
+    error?: boolean;
+    errorMessages?: string;
 }>();
 
 const emit = defineEmits<{

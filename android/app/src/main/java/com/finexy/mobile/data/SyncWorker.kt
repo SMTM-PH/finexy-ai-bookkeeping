@@ -49,7 +49,8 @@ class SyncWorker(appContext: Context, params: WorkerParameters) : CoroutineWorke
         ))
 
         return try {
-            val result = SyncEngine(FinexyApi(store), repository).sync()
+            val preferences = UserPreferenceStore(store, databaseName).load()
+            val result = SyncEngine(FinexyApi(store), repository, preferences.autoUpdateExchangeRatesData).sync()
             repository.updateSyncStatus(SyncStatusEntity(
                 state = SyncRunState.SUCCEEDED,
                 message = result.summary(),
@@ -135,6 +136,14 @@ object SyncScheduler {
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
             periodicName(identity, store.namespace), ExistingPeriodicWorkPolicy.UPDATE, request
         )
+    }
+
+    fun cancelPeriodicCurrent(context: Context, store: SecureStore) {
+        val serverUrl = store.get(FinexyApi.KEY_SERVER_URL).orEmpty()
+        val token = store.get(FinexyApi.KEY_TOKEN) ?: return
+        if (serverUrl.isBlank()) return
+        val identity = LedgerScope.identity(serverUrl, token, false)
+        WorkManager.getInstance(context).cancelUniqueWork(periodicName(identity, store.namespace))
     }
 
     private fun workerData(identity: String, namespace: String) = Data.Builder()

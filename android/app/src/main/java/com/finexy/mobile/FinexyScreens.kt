@@ -54,6 +54,10 @@ import com.finexy.mobile.data.TemplateEntity
 import com.finexy.mobile.data.TransactionEntity
 import com.finexy.mobile.data.TransactionRepository
 import com.finexy.mobile.data.RemoteTransaction
+import com.finexy.mobile.data.ExchangeRateEntity
+import com.finexy.mobile.data.LedgerEntity
+import com.finexy.mobile.data.SavingsGoalEntity
+import com.finexy.mobile.data.convertMinorAmount
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -69,15 +73,34 @@ private val expenseCategories = listOf("餐饮", "交通", "购物", "居住", "
 private val incomeCategories = listOf("工资", "奖金", "报销", "投资", "其他")
 
 @Composable
-internal fun BottomDock(selected: Int, onSelect: (Int) -> Unit) {
+internal fun BottomDock(selected: Int, entryEnabled: Boolean = true, onSelect: (Int) -> Unit) {
     val labels = listOf("总览", "流水", "记账", "账户", "设置")
     val icons = listOf("home", "list", "add", "wallet", "settings")
     Surface(color = CanvasBlack) {
         Row(Modifier.fillMaxWidth().selectableGroup().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             labels.forEachIndexed { index, label ->
-                Column(Modifier.weight(1f).clip(RoundedCornerShape(18.dp)).selectable(selected = selected == index, role = Role.Tab, onClick = { onSelect(index) }).padding(vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                val enabled = index != 2 || entryEnabled
+                Column(Modifier.weight(1f).clip(RoundedCornerShape(18.dp)).selectable(selected = selected == index, enabled = enabled, role = Role.Tab, onClick = { onSelect(index) }).padding(vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Box(Modifier.size(if (index == 2) 48.dp else 28.dp).then(if (index == 2) Modifier.background(Coral, CircleShape) else Modifier), contentAlignment = Alignment.Center) { Mark(icons[index], if (index == 2 || selected == index) Ink else Muted) }
-                    Text(label, color = if (selected == index) Ink else Muted, fontSize = 11.sp, fontWeight = if (selected == index) FontWeight.Bold else FontWeight.Normal)
+                    Text(label, color = if (!enabled) Muted.copy(alpha = .45f) else if (selected == index) Ink else Muted, fontSize = 11.sp, fontWeight = if (selected == index) FontWeight.Bold else FontWeight.Normal)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun LedgerSwitcher(ledgers: List<LedgerEntity>, selectedLedgerId: Long, onSelect: (Long) -> Unit) {
+    Surface(color = CanvasBlack) {
+        Column(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("当前账本", color = Muted, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                if (selectedLedgerId > 0) Text("已切换账本", color = Coral, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = selectedLedgerId == LedgerEntity.DEFAULT_LEDGER_ID, onClick = { onSelect(LedgerEntity.DEFAULT_LEDGER_ID) }, label = { Text("个人账本") }, modifier = Modifier.heightIn(min = 44.dp), shape = CircleShape)
+                ledgers.forEach { ledger ->
+                    FilterChip(selected = selectedLedgerId == ledger.id, onClick = { onSelect(ledger.id) }, label = { Text(ledger.name) }, modifier = Modifier.heightIn(min = 44.dp).semantics { contentDescription = "切换到账本：${ledger.name}" }, shape = CircleShape)
                 }
             }
         }
@@ -169,8 +192,9 @@ private fun ResponsivePair(first: @Composable (Modifier) -> Unit, second: @Compo
 }
 
 @Composable
-internal fun Dashboard(padding: PaddingValues, balance: Double, income: Double, expense: Double, activities: List<Activity>, pendingReviews: Int = 0, onOpenReviews: () -> Unit = {}, onAll: () -> Unit, onWallet: () -> Unit, onSettings: () -> Unit, onEntry: (Boolean) -> Unit) {
-    var hidden by rememberSaveable { mutableStateOf(false) }
+internal fun Dashboard(padding: PaddingValues, balance: Double, income: Double, expense: Double, activities: List<Activity>, pendingReviews: Int = 0, savingsGoals: List<SavingsGoalEntity> = emptyList(), showAmountsByDefault: Boolean = true, defaultCurrency: String = "CNY", onOpenReviews: () -> Unit = {}, onOpenSavingsGoals: () -> Unit = {}, onAll: () -> Unit, onWallet: () -> Unit, onSettings: () -> Unit, onEntry: (Boolean) -> Unit) {
+    var hidden by rememberSaveable { mutableStateOf(!showAmountsByDefault) }
+    LaunchedEffect(showAmountsByDefault) { hidden = !showAmountsByDefault }
     Screen(padding) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(42.dp).background(Coral, CircleShape), contentAlignment = Alignment.Center) { Text("F", fontWeight = FontWeight.Bold, fontSize = 23.sp) }
@@ -180,7 +204,7 @@ internal fun Dashboard(padding: PaddingValues, balance: Double, income: Double, 
         PanelCard {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("总余额", color = Muted, modifier = Modifier.weight(1f))
-                Badge("CNY")
+                Badge(defaultCurrency)
                 TextButton(onClick = { hidden = !hidden }) { Text(if (hidden) "显示" else "隐藏", color = Muted, fontSize = 12.sp) }
             }
             Text(if (hidden) "••••••" else money(balance), style = MaterialTheme.typography.displaySmall)
@@ -211,6 +235,34 @@ internal fun Dashboard(padding: PaddingValues, balance: Double, income: Double, 
                 }
             }
         }
+        val featuredGoal = savingsGoals.firstOrNull { !it.achieved } ?: savingsGoals.firstOrNull()
+        if (featuredGoal != null) {
+            val progress = (featuredGoal.savedAmountMinor.toDouble() / featuredGoal.targetAmountMinor.coerceAtLeast(1) * 100).coerceIn(0.0, 100.0)
+            Surface(onClick = onOpenSavingsGoals, color = Panel, shape = RoundedCornerShape(20.dp),
+                modifier = Modifier.fillMaxWidth().semantics { contentDescription = "存钱目标 ${featuredGoal.name}，已完成 ${progress.toInt()}%，点按查看" }) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("存钱目标", color = Coral, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            Text(featuredGoal.name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        Badge(if (savingsGoals.size > 1) "${savingsGoals.size} 个目标" else if (featuredGoal.achieved) "已达成" else "进行中")
+                    }
+                    Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(if (hidden) "••••" else money(featuredGoal.savedAmountMinor / 100.0), fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                        Text(if (hidden) "/ ••••" else "/ ${money(featuredGoal.targetAmountMinor / 100.0)}", color = Muted, fontSize = 12.sp)
+                    }
+                    Box(Modifier.fillMaxWidth().height(8.dp).clip(CircleShape).background(PanelRaised)) {
+                        Box(Modifier.fillMaxWidth((progress / 100).toFloat()).fillMaxHeight().background(Coral, CircleShape))
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("已完成 ${progress.toInt()}%", color = Muted, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                        Text("查看计划", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Mark("chevron", Muted, 16)
+                    }
+                }
+            }
+        }
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             SectionHeader("我的钱包", "查看", onWallet)
             Surface(onClick = onWallet, color = Panel, shape = RoundedCornerShape(20.dp)) {
@@ -218,7 +270,7 @@ internal fun Dashboard(padding: PaddingValues, balance: Double, income: Double, 
                     IconTile("wallet", Ink)
                     Column(Modifier.weight(1f)) {
                         Text("本地钱包", fontWeight = FontWeight.Medium)
-                        Text("人民币 · 设备内保存", color = Muted, fontSize = 12.sp)
+                        Text("$defaultCurrency · 设备内保存", color = Muted, fontSize = 12.sp)
                         if (LocalDensity.current.fontScale > 1.3f) Text(if (hidden) "••••" else money(balance), fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                     }
                     if (LocalDensity.current.fontScale <= 1.3f) Text(if (hidden) "••••" else money(balance), modifier = Modifier.widthIn(max = 150.dp), fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
@@ -243,7 +295,7 @@ private fun MetricCard(label: String, amount: String, icon: String, accent: Colo
 }
 
 @Composable
-internal fun ActivityScreen(padding: PaddingValues, activities: List<Activity>, accounts: List<AccountEntity> = emptyList(), tags: List<TagEntity> = emptyList(), onEdit: (Activity) -> Unit, onDelete: (Activity) -> Unit) {
+internal fun ActivityScreen(padding: PaddingValues, activities: List<Activity>, accounts: List<AccountEntity> = emptyList(), tags: List<TagEntity> = emptyList(), onEdit: (Activity) -> Unit, onDelete: (Activity) -> Unit, readOnly: Boolean = false) {
     var filter by rememberSaveable { mutableStateOf("全部") }
     var range by rememberSaveable { mutableStateOf("累计") }
     var accountId by rememberSaveable { mutableLongStateOf(0L) }
@@ -257,7 +309,7 @@ internal fun ActivityScreen(padding: PaddingValues, activities: List<Activity>, 
     val accountOptions = (listOf(AccountEntity(TransactionEntity.LOCAL_ACCOUNT_ID, "本地钱包", "CNY")) + accounts.filter { account -> !account.hidden && account.type == 1 && (account.parentId == 0L || accounts.any { it.id == account.parentId && !it.hidden }) }).distinctBy { it.id }
     val categoryOptions = activities.map { it.category }.filter(String::isNotBlank).distinct().sorted()
     LazyColumn(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        item { PageHeading("流水", "每一笔，都清楚。") }
+        item { PageHeading("流水", if (readOnly) "可新增流水；既有流水编辑正在接入。" else "每一笔，都清楚。") }
         item { OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), label = { Text("搜索交易描述") }, leadingIcon = { Mark("search", Muted, 20) }, singleLine = true, shape = RoundedCornerShape(18.dp)) }
         item { Text("日期范围", color = Muted, fontSize = 12.sp); FilterRow(listOf("近 7 天", "近 30 天", "近 90 天", "累计"), range) { range = it } }
         item { Text("类型", color = Muted, fontSize = 12.sp); FilterRow(listOf("全部", "支出", "收入", "转账", "余额调整"), filter) { filter = it } }
@@ -266,7 +318,7 @@ internal fun ActivityScreen(padding: PaddingValues, activities: List<Activity>, 
         if (tags.isNotEmpty()) item { Text("标签", color = Muted, fontSize = 12.sp); FilterIdRow(listOf(0L to "全部") + tags.map { it.id to "#${it.name}" }, tagId) { tagId = it } }
         item { Text("${filtered.size} 笔记录", color = Muted, fontSize = 12.sp) }
         if (filtered.isEmpty()) item { Text(if (activities.isEmpty()) "还没有流水，点击下方橙色按钮记下第一笔。" else "没有符合条件的流水，试试其他筛选条件。", color = Muted) }
-        else items(filtered, key = { it.id }) { TransactionRow(it, onEdit = { onEdit(it) }, onDelete = { pendingDelete = it }) }
+        else items(filtered, key = { it.id }) { TransactionRow(it, onEdit = if (readOnly) null else ({ onEdit(it) }), onDelete = if (readOnly) null else ({ pendingDelete = it })) }
     }
     pendingDelete?.let { target ->
         AlertDialog(
@@ -312,7 +364,7 @@ private fun TransactionRow(row: Activity, onEdit: (() -> Unit)? = null, onDelete
 }
 
 @Composable
-internal fun EntryScreen(padding: PaddingValues, initialIncome: Boolean, existing: Activity? = null, customCategories: List<String> = emptyList(), accounts: List<AccountEntity> = emptyList(), serverCategories: List<CategoryEntity> = emptyList(), tags: List<TagEntity> = emptyList(), defaultAccountId: Long = TransactionEntity.LOCAL_ACCOUNT_ID, saving: Boolean = false, saveError: String? = null, onSave: (Long, String, Int, String, Long?, String?, Long, String, Long?, Long) -> Unit) {
+internal fun EntryScreen(padding: PaddingValues, initialIncome: Boolean, existing: Activity? = null, customCategories: List<String> = emptyList(), accounts: List<AccountEntity> = emptyList(), serverCategories: List<CategoryEntity> = emptyList(), tags: List<TagEntity> = emptyList(), exchangeRates: List<ExchangeRateEntity> = emptyList(), defaultAccountId: Long = TransactionEntity.LOCAL_ACCOUNT_ID, saving: Boolean = false, saveError: String? = null, onAIRecognition: () -> Unit = {}, onSave: (Long, String, Int, String, Long?, String?, Long, String, Long?, Long) -> Unit) {
     var transactionType by rememberSaveable(existing?.id, initialIncome) { mutableStateOf(existing?.kind ?: if (initialIncome) "收入" else "支出") }
     var amount by rememberSaveable(existing?.id) { mutableStateOf(existing?.sourceAmountMinor?.takeIf { it != 0L }?.let { kotlin.math.abs(it) / 100.0 }?.let { "%.2f".format(Locale.US, it) } ?: existing?.let { parseAmountForUi(it.amount) } ?: "") }
     var note by rememberSaveable(existing?.id) { mutableStateOf(existing?.title ?: "") }
@@ -339,11 +391,15 @@ internal fun EntryScreen(padding: PaddingValues, initialIncome: Boolean, existin
     val value = runCatching { amount.toBigDecimalOrNull()?.movePointRight(2)?.longValueExact() }.getOrNull()
     val valid = value != null && value in 1..99_999_999_999L && Regex("\\d+(\\.\\d{1,2})?").matches(amount)
     val destinationValue = if (!crossCurrency) value else runCatching { destinationAmount.toBigDecimalOrNull()?.movePointRight(2)?.longValueExact() }.getOrNull()
+    val suggestedDestinationValue = if (crossCurrency && value != null) convertMinorAmount(value, selectedAccount!!.currency, destinationAccount!!.currency, exchangeRates) else null
     val destinationValid = !isTransfer || (destinationAccount != null && destinationValue != null && destinationValue in 1..99_999_999_999L)
     val categoryValid = isBalance || if (isTransfer) transferCategories.any { it.id == transferCategoryId } else true
     val keyboard = LocalSoftwareKeyboardController.current
     Screen(padding) {
         PageHeading("记一笔", "把日常，记得清楚。")
+        OutlinedButton(onClick = onAIRecognition, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = CircleShape) {
+            Mark("spark", Coral, 18); Spacer(Modifier.width(8.dp)); Text("AI 文本 / 票据识别")
+        }
         Segments(listOf("支出", "收入", "转账", "余额调整"), transactionType) {
             transactionType = it
             if (it == "收入" || it == "支出") category = (if (it == "收入") incomeCategories else expenseCategories).first()
@@ -364,7 +420,7 @@ internal fun EntryScreen(padding: PaddingValues, initialIncome: Boolean, existin
         }
         PanelCard {
             Text(when { isTransfer -> "转出金额"; isBalance -> "调整金额"; isIncome -> "收入金额"; else -> "支出金额" }, color = Muted, fontSize = 12.sp)
-            OutlinedTextField(amount, { amount = it }, Modifier.fillMaxWidth().padding(top = 12.dp).semantics { contentDescription = "记账金额" }, prefix = { Text("¥", fontSize = 24.sp, color = Muted) }, placeholder = { Text("0.00", fontSize = 34.sp, color = Muted) }, textStyle = MaterialTheme.typography.displaySmall.copy(fontFamily = FontFamily.Monospace), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), shape = RoundedCornerShape(16.dp), isError = amount.isNotBlank() && !valid)
+            OutlinedTextField(amount, { amount = it }, Modifier.fillMaxWidth().padding(top = 12.dp).semantics { contentDescription = "记账金额" }, prefix = { Text(selectedAccount?.currency.orEmpty(), fontSize = 15.sp, color = Muted) }, placeholder = { Text("0.00", fontSize = 34.sp, color = Muted) }, textStyle = MaterialTheme.typography.displaySmall.copy(fontFamily = FontFamily.Monospace), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), shape = RoundedCornerShape(16.dp), isError = amount.isNotBlank() && !valid)
             if (amount.isNotBlank() && !valid) Text("输入大于 0 的金额，最多两位小数", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
             Spacer(Modifier.height(16.dp))
             Box {
@@ -385,7 +441,13 @@ internal fun EntryScreen(padding: PaddingValues, initialIncome: Boolean, existin
                     }
                     DropdownMenu(destinationMenu, { destinationMenu = false }) { destinationOptions.forEach { account -> DropdownMenuItem(text = { Text("${account.name} · ${account.currency}") }, onClick = { destinationAccountId = account.id; destinationMenu = false }) } }
                 }
-                if (crossCurrency) OutlinedTextField(destinationAmount, { destinationAmount = it }, Modifier.fillMaxWidth(), label = { Text("转入金额（${destinationAccount?.currency}）") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, isError = destinationAmount.isNotBlank() && !destinationValid)
+                if (crossCurrency) {
+                    OutlinedTextField(destinationAmount, { destinationAmount = it }, Modifier.fillMaxWidth(), label = { Text("转入金额（${destinationAccount?.currency}）") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, isError = destinationAmount.isNotBlank() && !destinationValid)
+                    if (suggestedDestinationValue != null) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("缓存汇率建议：${"%.2f".format(Locale.US, suggestedDestinationValue / 100.0)} ${destinationAccount?.currency}", color = Muted, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { destinationAmount = "%.2f".format(Locale.US, suggestedDestinationValue / 100.0) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("使用建议") }
+                    } else Text("暂无有效汇率，请手填转入金额。", color = Muted, fontSize = 12.sp)
+                }
                 else if (destinationAccount != null) Text("同币种转账将按转出金额记入。", color = Muted, fontSize = 12.sp)
             }
         }
@@ -433,17 +495,20 @@ private fun TagChips(tags: List<TagEntity>, selected: Set<Long>, onToggle: (Long
 }
 
 @Composable
-internal fun AccountsScreen(padding: PaddingValues, activities: List<Activity>, tags: List<TagEntity> = emptyList(), accounts: List<AccountEntity> = emptyList(), selectedAccountId: Long = TransactionEntity.LOCAL_ACCOUNT_ID, onSelectAccount: (Long) -> Unit = {}, onEntry: (Long) -> Unit = {}, accountActionsEnabled: Boolean = false, actionRunning: Boolean = false, actionMessage: String? = null, onCreate: (AccountDraft) -> Unit = {}, onModify: (AccountEntity, AccountDraft) -> Unit = { _, _ -> }, onHide: (AccountEntity, Boolean) -> Unit = { _, _ -> }, onDelete: (AccountEntity) -> Unit = {}, onMove: (List<AccountEntity>) -> Unit = {}) {
+internal fun AccountsScreen(padding: PaddingValues, activities: List<Activity>, tags: List<TagEntity> = emptyList(), accounts: List<AccountEntity> = emptyList(), selectedAccountId: Long = TransactionEntity.LOCAL_ACCOUNT_ID, showBalances: Boolean = true, chartColors: String = "", defaultCurrency: String = "CNY", serverCategories: List<CategoryEntity> = emptyList(), defaultStatisticsAccountFilter: Map<String, Boolean> = emptyMap(), defaultStatisticsCategoryFilter: Map<String, Boolean> = emptyMap(), ledgerReadOnly: Boolean = false, ledgers: List<LedgerEntity> = emptyList(), currentLedgerId: Long = LedgerEntity.DEFAULT_LEDGER_ID, ledgerMigrationEnabled: Boolean = false, onSelectAccount: (Long) -> Unit = {}, onEntry: (Long) -> Unit = {}, onOpenAssets: () -> Unit = {}, onOpenExchangeRates: () -> Unit = {}, accountActionsEnabled: Boolean = false, actionRunning: Boolean = false, actionMessage: String? = null, onCreate: (AccountDraft) -> Unit = {}, onModify: (AccountEntity, AccountDraft) -> Unit = { _, _ -> }, onHide: (AccountEntity, Boolean) -> Unit = { _, _ -> }, onDelete: (AccountEntity) -> Unit = {}, onMove: (List<AccountEntity>) -> Unit = {}, onMoveLedger: (AccountEntity, Long) -> Unit = { _, _ -> }) {
     val visibleRemoteAccounts = accounts.filterNot { it.hidden }.filter { it.parentId == 0L }.flatMap { root ->
         listOf(root) + accounts.filter { !it.hidden && it.parentId == root.id }
     }
-    val visibleAccounts = (listOf(AccountEntity(TransactionEntity.LOCAL_ACCOUNT_ID, "本地钱包", "CNY")) + visibleRemoteAccounts).distinctBy { it.id }
+    val visibleAccounts = ((if (ledgerReadOnly) emptyList() else listOf(AccountEntity(TransactionEntity.LOCAL_ACCOUNT_ID, "本地钱包", defaultCurrency))) + visibleRemoteAccounts).distinctBy { it.id }
     val remoteVisible = accounts.filter { !it.hidden && it.parentId == 0L }
     val hiddenAccounts = accounts.filter { it.hidden && it.parentId == 0L }
     var detailAccountId by rememberSaveable { mutableStateOf<Long?>(null) }
     var editingAccount by remember { mutableStateOf<AccountEntity?>(null) }
     var creating by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<AccountEntity?>(null) }
+    var pendingLedgerMove by remember { mutableStateOf<AccountEntity?>(null) }
+    var ledgerMoveTarget by remember { mutableLongStateOf(if (currentLedgerId == LedgerEntity.DEFAULT_LEDGER_ID) ledgers.firstOrNull()?.id ?: Long.MIN_VALUE else LedgerEntity.DEFAULT_LEDGER_ID) }
+    val ledgerTargets = (listOf(LedgerEntity(LedgerEntity.DEFAULT_LEDGER_ID, 0, 1, 0, "默认个人账本", "", 0)) + ledgers).filter { it.id != currentLedgerId }
     val detailAccount = detailAccountId?.let { id -> visibleAccounts.firstOrNull { it.id == id } }
     LaunchedEffect(detailAccountId, visibleAccounts) {
         if (detailAccountId != null && detailAccount == null) detailAccountId = null
@@ -451,26 +516,33 @@ internal fun AccountsScreen(padding: PaddingValues, activities: List<Activity>, 
     BackHandler(enabled = detailAccount != null) { detailAccountId = null }
     Screen(padding) {
         if (detailAccount == null) {
-            PageHeading("账户", "一目了然。")
+            PageHeading("账户", if (ledgerReadOnly) "当前账本账户来自最近一次同步。" else "一目了然。")
+            ResponsivePair(
+                first = { OutlinedButton(onClick = onOpenAssets, modifier = it.heightIn(min = 48.dp), shape = CircleShape) { Mark("asset", Coral, 18); Spacer(Modifier.width(8.dp)); Text("资产与折旧") } },
+                second = { OutlinedButton(onClick = onOpenExchangeRates, modifier = it.heightIn(min = 48.dp), shape = CircleShape) { Mark("exchange", Coral, 18); Spacer(Modifier.width(8.dp)); Text("汇率换算") } }
+            )
             if (accountActionsEnabled) Button(onClick = { creating = true }, enabled = !actionRunning, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp), shape = CircleShape) { Text("新增服务端账户") }
             actionMessage?.let { Text(it, color = if (it.contains("失败")) MaterialTheme.colorScheme.error else IncomeGreen, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
             val totalBalance = visibleAccounts.sumOf { accountBalanceMinor(it, activities) }
             PanelCard {
                 Text("可用账户", color = Muted, fontSize = 12.sp)
-                Text(money(totalBalance / 100.0), style = MaterialTheme.typography.displaySmall)
+                Text(if (showBalances) money(totalBalance / 100.0) else "••••••", style = MaterialTheme.typography.displaySmall)
                 Text("${visibleAccounts.size} 个账户 · 不含已停用账户", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
             }
             visibleAccounts.forEach { account ->
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    AccountChoice(account.copy(name = if (account.parentId != 0L) "　↳ ${account.name}" else account.name), accountBalanceMinor(account, activities), activities.count { it.accountId == account.id || it.destinationAccountId == account.id }, selectedAccountId == account.id) { detailAccountId = account.id }
-                    if (account.id != TransactionEntity.LOCAL_ACCOUNT_ID && accountActionsEnabled) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        TextButton(onClick = { editingAccount = if (account.parentId == 0L) account else accounts.firstOrNull { it.id == account.parentId } ?: account }, modifier = Modifier.semantics { contentDescription = "编辑${account.name}" }) { Text("编辑") }
-                        val index = remoteVisible.indexOfFirst { it.id == account.id }
-                        if (account.parentId == 0L) {
-                            TextButton(onClick = { if (index > 0) onMove(remoteVisible.toMutableList().apply { add(index - 1, removeAt(index)) }) }, enabled = index > 0 && !actionRunning) { Text("上移") }
-                            TextButton(onClick = { if (index in 0 until remoteVisible.lastIndex) onMove(remoteVisible.toMutableList().apply { add(index + 1, removeAt(index)) }) }, enabled = index in 0 until remoteVisible.lastIndex && !actionRunning) { Text("下移") }
+                    AccountChoice(account.copy(name = if (account.parentId != 0L) "　↳ ${account.name}" else account.name), accountBalanceMinor(account, activities), activities.count { it.accountId == account.id || it.destinationAccountId == account.id }, selectedAccountId == account.id, showBalances) { detailAccountId = account.id }
+                    if (account.id != TransactionEntity.LOCAL_ACCOUNT_ID && (accountActionsEnabled || ledgerMigrationEnabled)) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        if (accountActionsEnabled) {
+                            TextButton(onClick = { editingAccount = if (account.parentId == 0L) account else accounts.firstOrNull { it.id == account.parentId } ?: account }, modifier = Modifier.semantics { contentDescription = "编辑${account.name}" }) { Text("编辑") }
+                            val index = remoteVisible.indexOfFirst { it.id == account.id }
+                            if (account.parentId == 0L) {
+                                TextButton(onClick = { if (index > 0) onMove(remoteVisible.toMutableList().apply { add(index - 1, removeAt(index)) }) }, enabled = index > 0 && !actionRunning) { Text("上移") }
+                                TextButton(onClick = { if (index in 0 until remoteVisible.lastIndex) onMove(remoteVisible.toMutableList().apply { add(index + 1, removeAt(index)) }) }, enabled = index in 0 until remoteVisible.lastIndex && !actionRunning) { Text("下移") }
+                            }
+                            TextButton(onClick = { onHide(account, true) }, enabled = !actionRunning) { Text("停用") }
                         }
-                        TextButton(onClick = { onHide(account, true) }, enabled = !actionRunning) { Text("停用") }
+                        if (ledgerMigrationEnabled && account.parentId == 0L && ledgerTargets.isNotEmpty()) TextButton(onClick = { pendingLedgerMove = account; ledgerMoveTarget = ledgerTargets.first().id }, enabled = !actionRunning) { Text("迁移") }
                     }
                 }
             }
@@ -484,7 +556,7 @@ internal fun AccountsScreen(padding: PaddingValues, activities: List<Activity>, 
                     Text(account.name, Modifier.weight(1f)); TextButton(onClick = { onHide(account, false) }, enabled = !actionRunning) { Text("恢复") }; TextButton(onClick = { pendingDelete = account }, enabled = !actionRunning) { Text("删除", color = MaterialTheme.colorScheme.error) }
                 } }
             }
-            StatisticsCard(activities, tags, visibleAccounts)
+            StatisticsCard(activities, tags, visibleAccounts, preferenceChartColor(chartColors), serverCategories, defaultStatisticsAccountFilter, defaultStatisticsCategoryFilter)
         } else {
             TextButton(onClick = { detailAccountId = null }, modifier = Modifier.heightIn(min = 48.dp)) {
                 Mark("back", Muted, 16)
@@ -497,9 +569,14 @@ internal fun AccountsScreen(padding: PaddingValues, activities: List<Activity>, 
                 balanceMinor = accountBalanceMinor(detailAccount, activities),
                 activities = activities.filter { it.accountId == detailAccount.id || it.destinationAccountId == detailAccount.id },
                 isDefault = selectedAccountId == detailAccount.id,
+                showBalance = showBalances,
                 onSetDefault = { onSelectAccount(detailAccount.id) },
-                onEntry = { onEntry(detailAccount.id) }
+                onEntry = { onEntry(detailAccount.id) },
+                canEdit = !ledgerReadOnly
             )
+            if (detailAccount.id != TransactionEntity.LOCAL_ACCOUNT_ID && detailAccount.parentId == 0L && ledgerMigrationEnabled && ledgerTargets.isNotEmpty()) {
+                OutlinedButton(onClick = { pendingLedgerMove = detailAccount; ledgerMoveTarget = ledgerTargets.first().id }, enabled = !actionRunning, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = CircleShape) { Text("迁移到账本") }
+            }
             if (detailAccount.id == TransactionEntity.LOCAL_ACCOUNT_ID) {
                 Text("本地钱包仅保存在当前设备；绑定服务端账户前，其待同步流水不会上传。", color = Muted, fontSize = 12.sp)
             } else {
@@ -510,6 +587,16 @@ internal fun AccountsScreen(padding: PaddingValues, activities: List<Activity>, 
     if (creating) AccountEditorDialog(null, emptyList(), actionRunning, onDismiss = { creating = false }) { draft -> onCreate(draft); creating = false }
     editingAccount?.let { account -> AccountEditorDialog(account, accounts.filter { it.parentId == account.id }, actionRunning, onDismiss = { editingAccount = null }) { draft -> onModify(account, draft); editingAccount = null } }
     pendingDelete?.let { account -> AlertDialog(onDismissRequest = { pendingDelete = null }, title = { Text("永久删除账户？") }, text = { Text("仅无关联流水的已停用账户可以删除。删除 ${account.name} 后无法恢复。") }, confirmButton = { TextButton(onClick = { onDelete(account); pendingDelete = null }) { Text("永久删除", color = MaterialTheme.colorScheme.error) } }, dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("取消") } }) }
+    pendingLedgerMove?.let { account -> AlertDialog(
+        onDismissRequest = { if (!actionRunning) pendingLedgerMove = null },
+        title = { Text("迁移 ${account.name}") },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("子账户和兼容历史流水会一并迁移，余额不变。关联存钱计划、模板、待确认周期或其他账户转账时会安全拒绝。")
+            ledgerTargets.forEach { ledger -> FilterChip(selected = ledgerMoveTarget == ledger.id, onClick = { ledgerMoveTarget = ledger.id }, label = { Text(ledger.name) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) }
+        } },
+        confirmButton = { TextButton(onClick = { onMoveLedger(account, ledgerMoveTarget); pendingLedgerMove = null }, enabled = !actionRunning && ledgerMoveTarget != Long.MIN_VALUE) { Text("确认迁移") } },
+        dismissButton = { TextButton(onClick = { pendingLedgerMove = null }, enabled = !actionRunning) { Text("取消") } }
+    ) }
 }
 
 @Composable
@@ -573,7 +660,7 @@ private fun accountBalanceMinor(account: AccountEntity, activities: List<Activit
 }
 
 @Composable
-private fun AccountDetailCard(account: AccountEntity, balanceMinor: Long, activities: List<Activity>, isDefault: Boolean, onSetDefault: () -> Unit, onEntry: () -> Unit) {
+private fun AccountDetailCard(account: AccountEntity, balanceMinor: Long, activities: List<Activity>, isDefault: Boolean, showBalance: Boolean, onSetDefault: () -> Unit, onEntry: () -> Unit, canEdit: Boolean = true) {
     var range by rememberSaveable(account.id) { mutableStateOf("近 30 天") }
     val days = when (range) { "近 7 天" -> 7; "近 30 天" -> 30; else -> 0 }
     val cutoff = if (days == 0) Long.MIN_VALUE else System.currentTimeMillis() - days * 86_400_000L
@@ -584,17 +671,21 @@ private fun AccountDetailCard(account: AccountEntity, balanceMinor: Long, activi
                 Text("余额", color = Muted, modifier = Modifier.weight(1f))
                 Badge(account.currency)
             }
-            Text(money(balanceMinor / 100.0), style = MaterialTheme.typography.displaySmall)
+            Text(if (showBalance) money(balanceMinor / 100.0) else "••••••", style = MaterialTheme.typography.displaySmall)
             Text("${activities.size} 笔历史流水${if (isDefault) " · 默认账户" else ""}", color = Muted, fontSize = 12.sp)
         }
-        if (isDefault) {
+        if (!canEdit) {
+            Surface(color = Coral.copy(alpha = 0.12f), shape = RoundedCornerShape(16.dp)) {
+                Text("当前账本账户只读", Modifier.fillMaxWidth().padding(14.dp), color = Coral, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            }
+        } else if (isDefault) {
             Surface(color = IncomeGreen.copy(alpha = 0.14f), shape = RoundedCornerShape(16.dp)) {
                 Text("默认账户 · 新流水会优先使用此账户", Modifier.fillMaxWidth().padding(14.dp), color = IncomeGreen, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             }
         } else {
             OutlinedButton(onClick = onSetDefault, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = CircleShape) { Text("设为默认账户") }
         }
-        Button(onClick = onEntry, modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp), shape = CircleShape) {
+        if (canEdit) Button(onClick = onEntry, modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp), shape = CircleShape) {
             Mark("add", MaterialTheme.colorScheme.onPrimary, 18)
             Spacer(Modifier.width(8.dp))
             Text("在此账户记一笔")
@@ -617,7 +708,7 @@ private fun AccountDetailCard(account: AccountEntity, balanceMinor: Long, activi
 }
 
 @Composable
-private fun AccountChoice(account: AccountEntity, balanceMinor: Long, transactionCount: Int, selected: Boolean, onClick: () -> Unit) {
+private fun AccountChoice(account: AccountEntity, balanceMinor: Long, transactionCount: Int, selected: Boolean, showBalance: Boolean, onClick: () -> Unit) {
     Surface(onClick = onClick, shape = RoundedCornerShape(18.dp), color = Panel, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "查看${account.name}账户详情" }) {
         Row(Modifier.fillMaxWidth().heightIn(min = 72.dp).padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             IconTile("wallet", if (selected) Coral else Muted)
@@ -629,7 +720,7 @@ private fun AccountChoice(account: AccountEntity, balanceMinor: Long, transactio
                 Text("${account.currency} · $transactionCount 笔流水", color = Muted, fontSize = 12.sp)
             }
             Column(horizontalAlignment = Alignment.End) {
-                Text(money(balanceMinor / 100.0), fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text(if (showBalance) money(balanceMinor / 100.0) else "••••", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 Text("查看", color = Muted, fontSize = 12.sp)
             }
         }
@@ -637,7 +728,7 @@ private fun AccountChoice(account: AccountEntity, balanceMinor: Long, transactio
 }
 
 @Composable
-private fun StatisticsCard(activities: List<Activity>, tags: List<TagEntity>, accounts: List<AccountEntity>) {
+private fun StatisticsCard(activities: List<Activity>, tags: List<TagEntity>, accounts: List<AccountEntity>, chartAccent: Color = Coral, categories: List<CategoryEntity> = emptyList(), defaultAccountFilter: Map<String, Boolean> = emptyMap(), defaultCategoryFilter: Map<String, Boolean> = emptyMap()) {
     val context = LocalContext.current
     var range by rememberSaveable { mutableStateOf("累计") }
     var kind by rememberSaveable { mutableStateOf("全部") }
@@ -647,7 +738,14 @@ private fun StatisticsCard(activities: List<Activity>, tags: List<TagEntity>, ac
     var confirmExport by remember { mutableStateOf(false) }
     val rangeDays = when (range) { "近 7 天" -> 7; "近 30 天" -> 30; "近 90 天" -> 90; else -> 0 }
     val cutoff = statisticsCutoff(rangeDays)
-    val scopedActivities = filterStatisticsActivities(activities, cutoff, kind, accountId, category, tagId)
+    val allowedAccountIds = defaultAccountFilter.filterValues { it }.keys.mapNotNull(String::toLongOrNull).toSet()
+    val allowedCategoryNames = defaultCategoryFilter.filterValues { it }.keys.mapNotNull(String::toLongOrNull)
+        .mapNotNull { id -> categories.firstOrNull { it.id == id }?.name }.toSet()
+    val preferenceScoped = activities.filter { item ->
+        (defaultAccountFilter.isEmpty() || item.accountId in allowedAccountIds || item.destinationAccountId in allowedAccountIds) &&
+            (defaultCategoryFilter.isEmpty() || item.category in allowedCategoryNames)
+    }
+    val scopedActivities = filterStatisticsActivities(preferenceScoped, cutoff, kind, accountId, category, tagId)
     val expenseByCategory = scopedActivities.filter { it.kind == "支出" }
         .groupingBy { it.category }
         .fold(0.0) { total, item -> total + parseAmountForUi(item.amount).toDoubleOrNull().orZero() }
@@ -698,7 +796,7 @@ private fun StatisticsCard(activities: List<Activity>, tags: List<TagEntity>, ac
         else expenseByCategory.toList().sortedByDescending { it.second }.take(6).forEach { (category, value) ->
             Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(category, modifier = Modifier.width(48.dp), fontSize = 12.sp)
-                Box(Modifier.weight(1f).height(10.dp).clip(CircleShape).background(PanelRaised)) { Box(Modifier.fillMaxWidth(if (max == 0.0) 0f else (value / max).toFloat()).fillMaxHeight().background(Coral, CircleShape)) }
+                Box(Modifier.weight(1f).height(10.dp).clip(CircleShape).background(PanelRaised)) { Box(Modifier.fillMaxWidth(if (max == 0.0) 0f else (value / max).toFloat()).fillMaxHeight().background(chartAccent, CircleShape)) }
                 Text(money(value), fontSize = 12.sp, modifier = Modifier.widthIn(min = 72.dp))
             }
         }
@@ -734,6 +832,12 @@ internal fun filterStatisticsActivities(activities: List<Activity>, cutoff: Long
     item.time >= cutoff && (kind == "全部" || item.kind == kind) && (accountId == 0L || item.accountId == accountId || item.destinationAccountId == accountId) &&
         (category == "全部" || item.category == category) && (tagId == 0L || tagId in parseTagIds(item.tagIdsJson))
 }
+
+private fun preferenceChartColor(colors: String): Color = runCatching {
+    val first = colors.split(',').first().trim().removePrefix("#")
+    require(Regex("[0-9a-fA-F]{6}").matches(first))
+    Color(0xFF000000L or first.toLong(16))
+}.getOrDefault(Coral)
 
 internal fun statisticsCutoff(rangeDays: Int, now: Long = System.currentTimeMillis(), timeZone: TimeZone = TimeZone.getDefault()): Long {
     if (rangeDays <= 0) return 0L
@@ -809,7 +913,7 @@ private fun MonthlyTrend(activities: List<Activity>) {
 }
 
 @Composable
-internal fun SettingsScreen(padding: PaddingValues, serverUrl: String, localMode: Boolean, isLightTheme: Boolean, categories: List<String>, syncMessage: String, onThemeChange: (Boolean) -> Unit, onAddCategory: (String) -> Unit, onRemoveCategory: (String) -> Unit, onSync: () -> Unit, onConnect: () -> Unit, conflicts: List<SyncConflictEntity> = emptyList(), conflictTransactions: List<TransactionEntity> = emptyList(), onResolveConflict: (String, Boolean) -> Unit = { _, _ -> }, serverCategories: List<CategoryEntity> = emptyList(), categoryMappings: List<CategoryMappingEntity> = emptyList(), serverAccounts: List<AccountEntity> = emptyList(), accountMappings: List<AccountMappingEntity> = emptyList(), pendingLocalAccountCount: Int = 0, onMapAccount: (Long) -> Unit = {}, onClearAccountMapping: () -> Unit = {}, onMapCategory: (String, Int, Long) -> Unit = { _, _, _ -> }, onClearCategoryMapping: (String, Int) -> Unit = { _, _ -> }, categoryActionsEnabled: Boolean = false, categoryActionRunning: Boolean = false, categoryActionMessage: String? = null, onCreateServerCategory: (CategoryDraft) -> Unit = {}, onModifyServerCategory: (CategoryEntity, CategoryDraft) -> Unit = { _, _ -> }, onHideServerCategory: (CategoryEntity, Boolean) -> Unit = { _, _ -> }, onDeleteServerCategory: (CategoryEntity) -> Unit = {}, onMoveServerCategories: (List<CategoryEntity>) -> Unit = {}, tags: List<TagEntity> = emptyList(), tagActionsEnabled: Boolean = true, tagActionRunning: Boolean = false, tagActionMessage: String? = null, onAddTag: (String) -> Unit = {}, onEditTag: (TagEntity, String) -> Unit = { _, _ -> }, onHideTag: (Long) -> Unit = {}, onRemoveTag: (Long) -> Unit = {}, templates: List<TemplateEntity> = emptyList(), templateActionRunning: Boolean = false, templateActionMessage: String? = null, templateRetryAvailable: Boolean = false, onRetryTemplate: () -> Unit = {}, onAddTemplate: (TemplateEntity) -> Unit = {}, onRemoveTemplate: (Long) -> Unit = {}, onEditTemplate: (TemplateEntity) -> Unit = {}, onUseTemplate: (TemplateEntity) -> Unit = {}, pendingReviewCount: Int = 0, onOpenSchedulePlans: () -> Unit = {}, onOpenOccurrenceReview: () -> Unit = {}, onPrivacy: () -> Unit = {}, onSecurity: () -> Unit = {}) {
+internal fun SettingsScreen(padding: PaddingValues, serverUrl: String, localMode: Boolean, isLightTheme: Boolean, categories: List<String>, syncMessage: String, onThemeChange: (Boolean) -> Unit, onAddCategory: (String) -> Unit, onRemoveCategory: (String) -> Unit, onSync: () -> Unit, onConnect: () -> Unit, onOpenPreferences: () -> Unit = {}, conflicts: List<SyncConflictEntity> = emptyList(), conflictTransactions: List<TransactionEntity> = emptyList(), onResolveConflict: (String, Boolean) -> Unit = { _, _ -> }, serverCategories: List<CategoryEntity> = emptyList(), categoryMappings: List<CategoryMappingEntity> = emptyList(), serverAccounts: List<AccountEntity> = emptyList(), accountMappings: List<AccountMappingEntity> = emptyList(), pendingLocalAccountCount: Int = 0, onMapAccount: (Long) -> Unit = {}, onClearAccountMapping: () -> Unit = {}, onMapCategory: (String, Int, Long) -> Unit = { _, _, _ -> }, onClearCategoryMapping: (String, Int) -> Unit = { _, _ -> }, categoryActionsEnabled: Boolean = false, categoryActionRunning: Boolean = false, categoryActionMessage: String? = null, onCreateServerCategory: (CategoryDraft) -> Unit = {}, onModifyServerCategory: (CategoryEntity, CategoryDraft) -> Unit = { _, _ -> }, onHideServerCategory: (CategoryEntity, Boolean) -> Unit = { _, _ -> }, onDeleteServerCategory: (CategoryEntity) -> Unit = {}, onMoveServerCategories: (List<CategoryEntity>) -> Unit = {}, tags: List<TagEntity> = emptyList(), tagActionsEnabled: Boolean = true, tagActionRunning: Boolean = false, tagActionMessage: String? = null, onAddTag: (String) -> Unit = {}, onEditTag: (TagEntity, String) -> Unit = { _, _ -> }, onHideTag: (Long) -> Unit = {}, onRemoveTag: (Long) -> Unit = {}, templates: List<TemplateEntity> = emptyList(), templateActionRunning: Boolean = false, templateActionMessage: String? = null, templateRetryAvailable: Boolean = false, onRetryTemplate: () -> Unit = {}, onAddTemplate: (TemplateEntity) -> Unit = {}, onRemoveTemplate: (Long) -> Unit = {}, onEditTemplate: (TemplateEntity) -> Unit = {}, onUseTemplate: (TemplateEntity) -> Unit = {}, pendingReviewCount: Int = 0, aiReviewCount: Int = 0, onOpenAIRecognition: () -> Unit = {}, onOpenAIReviews: () -> Unit = {}, onOpenSchedulePlans: () -> Unit = {}, onOpenOccurrenceReview: () -> Unit = {}, onOpenSavingsGoals: () -> Unit = {}, onOpenFamily: () -> Unit = {}, onPrivacy: () -> Unit = {}, onSecurity: () -> Unit = {}) {
     var categoryDialog by remember { mutableStateOf(false) }
     var newCategory by remember { mutableStateOf("") }
     var selectedConflict by remember { mutableStateOf<SyncConflictEntity?>(null) }
@@ -830,8 +934,11 @@ internal fun SettingsScreen(padding: PaddingValues, serverUrl: String, localMode
     Screen(padding) {
         PageHeading("设置", "让记账更适合你。")
         PanelCard {
+            TextButton(onClick = onOpenPreferences, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("用户偏好") }
             TextButton(onClick = onPrivacy, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("隐私与数据管理") }
             TextButton(onClick = onSecurity, enabled = !localMode, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("用户与安全") }
+            TextButton(onClick = onOpenAIRecognition, enabled = !localMode, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("AI 与票据识别") }
+            TextButton(onClick = onOpenAIReviews, enabled = !localMode, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("AI 待复核${if (aiReviewCount > 0) " · $aiReviewCount" else ""}") }
             if (localMode) Text("登录服务器后可管理用户、会话与二步验证。", color = Muted)
         }
         PanelCard {
@@ -914,6 +1021,23 @@ internal fun SettingsScreen(padding: PaddingValues, serverUrl: String, localMode
                     Text("新增、编辑、暂停/恢复与排序周期计划", color = Muted, fontSize = 12.sp)
                 }
                 TextButton(enabled = !localMode, onClick = onOpenSchedulePlans, modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "打开周期计划管理页" }) { Text("管理") }
+            }
+        }
+        SectionHeader("家庭与存钱")
+        PanelCard {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("存钱计划", fontSize = 14.sp)
+                    Text("按账本管理目标；存入取出不计收支", color = Muted, fontSize = 12.sp)
+                }
+                TextButton(enabled = !localMode, onClick = onOpenSavingsGoals, modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "打开存钱计划页" }) { Text("查看") }
+            }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("账本管理", fontSize = 14.sp)
+                    Text("创建账本、切换账本并邀请成员共同记账", color = Muted, fontSize = 12.sp)
+                }
+                TextButton(enabled = !localMode, onClick = onOpenFamily, modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "打开账本管理页" }) { Text("管理") }
             }
         }
         SectionHeader("流水模板", if (!localMode) "新增" else null, onAction = { editingTemplate = null; templateDialog = true })
@@ -1296,7 +1420,7 @@ private fun formatConflictTime(value: Long, utcOffset: Int): String {
     return "${formatter.format(Date(value))} · UTC$sign%02d:%02d".format(absolute / 60, absolute % 60)
 }
 
-@Composable private fun PanelCard(content: @Composable ColumnScope.() -> Unit) { Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Panel).padding(20.dp), content = content) }
+@Composable internal fun PanelCard(content: @Composable ColumnScope.() -> Unit) { Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Panel).padding(20.dp), content = content) }
 @Composable private fun PageHeading(title: String, subtitle: String) { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) { Text(title, style = MaterialTheme.typography.headlineMedium); Text(subtitle, color = Muted, fontSize = 13.sp) } }
 @Composable private fun SectionHeader(title: String, action: String? = null, onAction: () -> Unit = {}) { Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text(title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f)); if (action != null) TextButton(onClick = onAction, modifier = Modifier.semantics { contentDescription = "$title：$action" }) { Text(action, color = Muted, fontSize = 12.sp); Mark("chevron", Muted, 12) } } }
 @Composable private fun DetailLine(label: String, value: String) { Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) { Text(label, color = Muted, fontSize = 13.sp); Text(value, fontSize = 13.sp) } }
@@ -1315,7 +1439,7 @@ private fun formatConflictTime(value: Long, utcOffset: Int): String {
 }
 
 /** Consistent line icons. Interactive parents supply accessible names. */
-@Composable private fun Mark(name: String, tint: Color = Ink, dimension: Int = 22) {
+@Composable internal fun Mark(name: String, tint: Color = Ink, dimension: Int = 22) {
     Canvas(Modifier.size(dimension.dp)) {
         val u = size.width / 24f
         fun pt(x: Float, y: Float) = Offset(x * u, y * u)
@@ -1336,6 +1460,8 @@ private fun formatConflictTime(value: Long, utcOffset: Int): String {
             "lock" -> { poly(7f,10f,7f,6f,9f,3f,15f,3f,17f,6f,17f,10f); poly(5f,10f,19f,10f,19f,21f,5f,21f,5f,10f); line(12f,14f,12f,17f) }
             "connect" -> { poly(8f,8f,8f,4f,20f,4f,20f,16f,16f,16f); poly(16f,8f,16f,20f,4f,20f,4f,8f,16f,8f) }
             "trash" -> { line(5f,7f,19f,7f); line(9f,4f,15f,4f); poly(7f,7f,8f,20f,16f,20f,17f,7f); line(10f,10f,10f,17f); line(14f,10f,14f,17f) }
+            "asset" -> { poly(4f,8f,12f,4f,20f,8f,20f,18f,12f,22f,4f,18f,4f,8f); line(4f,8f,12f,12f); line(20f,8f,12f,12f); line(12f,12f,12f,22f) }
+            "exchange" -> { line(4f,8f,19f,8f); poly(15f,4f,19f,8f,15f,12f); line(20f,16f,5f,16f); poly(9f,12f,5f,16f,9f,20f) }
         }
     }
 }

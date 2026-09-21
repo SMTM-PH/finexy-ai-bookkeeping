@@ -161,7 +161,7 @@ class ScheduleOccurrenceTest {
         try {
             context.deleteDatabase(name)
             // Build at the current version, then downgrade the file to v13 so
-            // reopening with only MIGRATION_13_14 must recreate what v14 needs.
+            // Reopening through the current migration chain must recreate what v14 introduced.
             val seed = Room.databaseBuilder(context, FinexyDatabase::class.java, name).build()
             kotlinx.coroutines.runBlocking {
                 seed.dao().upsertTemplates(listOf(TemplateEntity(7, "保留计划", 3, 201, 10, 420000, "月租", scheduledFrequencyType = 2, scheduledFrequency = "1")))
@@ -175,7 +175,8 @@ class ScheduleOccurrenceTest {
             downgrade.version = 13
             downgrade.close()
             migrated = Room.databaseBuilder(context, FinexyDatabase::class.java, name)
-                .addMigrations(FinexyDatabase.MIGRATION_13_14).build()
+                .addMigrations(FinexyDatabase.MIGRATION_13_14, FinexyDatabase.MIGRATION_14_15, FinexyDatabase.MIGRATION_15_16, FinexyDatabase.MIGRATION_16_17,
+                FinexyDatabase.MIGRATION_17_18, FinexyDatabase.MIGRATION_18_19).build()
             lateinit var template: TemplateEntity
             lateinit var occurrence: ScheduledOccurrenceEntity
             kotlinx.coroutines.runBlocking {

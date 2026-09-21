@@ -1,5 +1,7 @@
 package models
 
+import "encoding/json"
+
 // MonthlyBudgetWarningLevel represents the current state of total monthly budget usage.
 type MonthlyBudgetWarningLevel byte
 
@@ -12,14 +14,15 @@ const (
 // MonthlyBudget represents one total budget for one calendar month.
 // Unused value is intentionally not carried into another month.
 type MonthlyBudget struct {
-	MonthlyBudgetId int64 `xorm:"PK"`
-	Uid             int64 `xorm:"INDEX(IDX_monthly_budget_uid_deleted_year_month) NOT NULL"`
-	Deleted         bool  `xorm:"INDEX(IDX_monthly_budget_uid_deleted_year_month) NOT NULL"`
-	YearMonth       int32 `xorm:"INDEX(IDX_monthly_budget_uid_deleted_year_month) NOT NULL"`
-	Amount          int64 `xorm:"NOT NULL"`
-	CreatedUnixTime int64
-	UpdatedUnixTime int64
-	DeletedUnixTime int64
+	MonthlyBudgetId     int64  `xorm:"PK"`
+	Uid                 int64  `xorm:"INDEX(IDX_monthly_budget_uid_deleted_year_month) NOT NULL"`
+	Deleted             bool   `xorm:"INDEX(IDX_monthly_budget_uid_deleted_year_month) NOT NULL"`
+	YearMonth           int32  `xorm:"INDEX(IDX_monthly_budget_uid_deleted_year_month) NOT NULL"`
+	Amount              int64  `xorm:"NOT NULL"`
+	CategoryAmountsJson string `xorm:"TEXT NOT NULL DEFAULT '{}'"`
+	CreatedUnixTime     int64
+	UpdatedUnixTime     int64
+	DeletedUnixTime     int64
 }
 
 // MonthlyBudgetGetRequest represents a calendar month in YYYYMM format.
@@ -29,8 +32,9 @@ type MonthlyBudgetGetRequest struct {
 
 // MonthlyBudgetSetRequest creates or replaces the total budget for a calendar month.
 type MonthlyBudgetSetRequest struct {
-	YearMonth int32 `json:"yearMonth" binding:"required,min=200001,max=999912"`
-	Amount    int64 `json:"amount" binding:"required,min=1"`
+	YearMonth       int32            `json:"yearMonth" binding:"required,min=200001,max=999912"`
+	Amount          int64            `json:"amount" binding:"required,min=1"`
+	CategoryAmounts map[string]int64 `json:"categoryAmounts"`
 }
 
 // MonthlyBudgetDeleteRequest removes the budget for one calendar month.
@@ -40,14 +44,19 @@ type MonthlyBudgetDeleteRequest struct {
 
 // MonthlyBudgetInfoResponse is the API representation of a monthly budget.
 type MonthlyBudgetInfoResponse struct {
-	Id        int64 `json:"id,string"`
-	YearMonth int32 `json:"yearMonth"`
-	Amount    int64 `json:"amount"`
+	Id              int64            `json:"id,string"`
+	YearMonth       int32            `json:"yearMonth"`
+	Amount          int64            `json:"amount"`
+	CategoryAmounts map[string]int64 `json:"categoryAmounts"`
 }
 
 // ToMonthlyBudgetInfoResponse converts a stored budget to its API representation.
 func (b *MonthlyBudget) ToMonthlyBudgetInfoResponse() *MonthlyBudgetInfoResponse {
-	return &MonthlyBudgetInfoResponse{Id: b.MonthlyBudgetId, YearMonth: b.YearMonth, Amount: b.Amount}
+	categoryAmounts := make(map[string]int64)
+	if b.CategoryAmountsJson != "" {
+		_ = json.Unmarshal([]byte(b.CategoryAmountsJson), &categoryAmounts)
+	}
+	return &MonthlyBudgetInfoResponse{Id: b.MonthlyBudgetId, YearMonth: b.YearMonth, Amount: b.Amount, CategoryAmounts: categoryAmounts}
 }
 
 // UsagePercentage returns budget usage as a percentage.

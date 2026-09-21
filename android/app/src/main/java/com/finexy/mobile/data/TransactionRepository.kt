@@ -3,6 +3,7 @@ package com.finexy.mobile.data
 import android.content.Context
 import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -32,6 +33,163 @@ class TransactionRepository(context: Context, private val database: FinexyDataba
     fun observeScheduledTemplates(): Flow<List<TemplateEntity>> = dao.observeScheduledTemplates()
 
     fun observeOccurrences(): Flow<List<ScheduledOccurrenceEntity>> = dao.observeOccurrences()
+
+    fun observeAIReviewItems(): Flow<List<AIReviewItemEntity>> = dao.observeAIReviewItems()
+    fun observeProductAssets(): Flow<List<ProductAssetEntity>> = dao.observeProductAssets()
+    fun observeExchangeRates(): Flow<List<ExchangeRateEntity>> = dao.observeExchangeRates()
+
+    // --- 家庭、账本与存钱目标 ------------------------------------------
+
+    fun observeFamilyGroups(): Flow<List<FamilyGroupEntity>> = dao.observeFamilyGroups()
+    fun observeFamilyMembers(): Flow<List<FamilyMemberEntity>> = dao.observeFamilyMembers()
+    fun observeLedgers(): Flow<List<LedgerEntity>> = dao.observeLedgers()
+    fun observeSavingsGoals(ledgerId: Long): Flow<List<SavingsGoalEntity>> = dao.observeSavingsGoals(ledgerId)
+    fun observeLedgerAccounts(ledgerId: Long): Flow<List<AccountEntity>> = dao.observeLedgerAccounts(ledgerId).map { rows -> rows.map { it.toAccountEntity() } }
+    fun observeLedgerTransactions(ledgerId: Long): Flow<List<TransactionEntity>> = dao.observeLedgerTransactions(ledgerId).map { rows -> rows.map { it.toTransactionEntity() } }
+
+    suspend fun allSavingsGoals(): List<SavingsGoalEntity> = dao.allSavingsGoals()
+
+    /** Caches one goal after a deposit, withdrawal, create or modify succeeded. */
+    suspend fun cacheSavingsGoal(remote: RemoteSavingsGoal) {
+        require(remote.id > 0 && remote.targetAmountMinor > 0 && remote.savedAmountMinor >= 0) { "存钱目标无效" }
+        dao.upsertSavingsGoals(listOf(remote.toEntity()))
+    }
+
+    suspend fun removeSavingsGoal(id: Long) {
+        require(id > 0) { "目标 ID 无效" }
+        dao.deleteSavingsGoal(id)
+    }
+
+    suspend fun replaceFamilyGroups(remote: List<RemoteFamilyGroup>) = database.withTransaction {
+        require(remote.map { it.id }.distinct().size == remote.size && remote.all { it.id > 0 }) { "家庭列表包含无效或重复记录" }
+        if (remote.isEmpty()) dao.deleteAllFamilyGroups() else {
+            dao.upsertFamilyGroups(remote.map { group ->
+                FamilyGroupEntity(group.id, group.ownerUid, group.name, group.comment, group.memberCount, group.createdTime)
+            })
+            dao.deleteFamilyGroupsNotIn(remote.map { it.id })
+        }
+    }
+
+    /** Full per-family member reconcile; rows of other families stay untouched. */
+    suspend fun replaceFamilyMembers(familyId: Long, remote: List<RemoteFamilyMember>) = database.withTransaction {
+        require(familyId > 0) { "家庭 ID 无效" }
+        require(remote.map { it.id }.distinct().size == remote.size && remote.all { it.id > 0 && it.familyId == familyId }) { "家庭成员包含无效或重复记录" }
+        if (remote.isEmpty()) {
+            dao.deleteAllFamilyMembers()
+        } else {
+            dao.upsertFamilyMembers(remote.map { member ->
+                FamilyMemberEntity(member.id, member.familyId, member.uid, member.role, member.status, member.nickname, member.joinedTime)
+            })
+            dao.deleteFamilyMembersNotIn(familyId, remote.map { it.id })
+        }
+    }
+
+    suspend fun replaceLedgers(remote: List<RemoteLedger>) = database.withTransaction {
+        require(remote.map { it.id }.distinct().size == remote.size && remote.all { it.id > 0 }) { "账本列表包含无效或重复记录" }
+        require(remote.none { it.id == LedgerEntity.DEFAULT_LEDGER_ID }) { "账本列表不应包含默认账本" }
+        if (remote.isEmpty()) {
+            dao.deleteAllLedgers()
+            dao.deleteLedgerAccountsOutside(listOf(Long.MIN_VALUE))
+            dao.deleteLedgerTransactionsOutside(listOf(Long.MIN_VALUE))
+        } else {
+            dao.upsertLedgers(remote.map { ledger ->
+                LedgerEntity(ledger.id, ledger.ownerUid, ledger.type, ledger.familyId, ledger.name, ledger.comment, ledger.createdTime)
+            })
+            val ids = remote.map { it.id }
+            dao.deleteLedgersNotIn(ids)
+            dao.deleteLedgerAccountsOutside(ids)
+            dao.deleteLedgerTransactionsOutside(ids)
+        }
+    }
+
+    suspend fun replaceLedgerSnapshot(ledgerId: Long, accounts: List<RemoteAccount>, transactions: List<RemoteTransaction>) = database.withTransaction {
+        require(ledgerId > 0) { "账本 ID 无效" }
+        require(accounts.all { it.id > 0 } && accounts.map { it.id }.distinct().size == accounts.size) { "账本账户包含无效或重复记录" }
+        require(transactions.all { it.id > 0 && it.ledgerId == ledgerId } && transactions.map { it.id }.distinct().size == transactions.size) { "账本流水包含无效、重复或跨账本记录" }
+        dao.deleteLedgerAccounts(ledgerId)
+        dao.deleteLedgerTransactions(ledgerId)
+        if (accounts.isNotEmpty()) dao.upsertLedgerAccounts(accounts.map { item ->
+            LedgerAccountCacheEntity(item.id, ledgerId, item.name, item.currency, item.balanceMinor, item.hidden,
+                item.parentId, item.category, item.type, item.icon, item.color, item.comment, item.displayOrder, item.creditCardStatementDate)
+        })
+        if (transactions.isNotEmpty()) dao.upsertLedgerTransactions(transactions.map { item ->
+            LedgerTransactionCacheEntity(item.id, ledgerId, item.type, item.sourceAccountId, item.destinationAccountId,
+                item.categoryId, item.categoryName, item.sourceAmountMinor, item.destinationAmountMinor, item.currency,
+                item.comment, Math.multiplyExact(item.time, 1000L), item.utcOffset, item.tagIdsJson, item.hideAmount)
+        })
+    }
+
+    /**
+     * Replaces every cached goal with the merged per-ledger lists. The caller
+     * must supply a complete snapshot across all visible ledgers so a partial
+     * network failure can never look like an empty plan.
+     */
+    suspend fun replaceSavingsGoals(remote: List<RemoteSavingsGoal>) = database.withTransaction {
+        require(remote.map { it.id }.distinct().size == remote.size && remote.all { it.id > 0 }) { "存钱计划包含无效或重复记录" }
+        require(remote.all { it.targetAmountMinor > 0 && it.savedAmountMinor >= 0 }) { "存钱计划包含无效金额" }
+        if (remote.isEmpty()) dao.deleteAllSavingsGoals() else {
+            dao.upsertSavingsGoals(remote.map { goal ->
+                SavingsGoalEntity(goal.id, goal.uid, goal.ledgerId, goal.name, goal.targetAmountMinor, goal.savedAmountMinor, goal.achieved, goal.deadlineTime, goal.comment)
+            })
+            dao.deleteSavingsGoalsNotIn(remote.map { it.id })
+        }
+    }
+
+    suspend fun replaceExchangeRates(remote: RemoteExchangeRateSnapshot) = database.withTransaction {
+        val items = remote.toEntities()
+        require(items.isNotEmpty() && items.map { it.currency }.distinct().size == items.size) { "汇率快照为空或包含重复币种" }
+        dao.upsertExchangeRates(items)
+        dao.deleteExchangeRatesNotIn(items.map { it.currency })
+    }
+
+    suspend fun cacheCustomExchangeRate(remote: RemoteCustomExchangeRate) = database.withTransaction {
+        val current = dao.allExchangeRates()
+        require(current.isNotEmpty() && current.all { it.dataSource == ExchangeRateEntityData.USER_CUSTOM_SOURCE }) { "当前服务器未启用自定义汇率" }
+        val metadata = current.first()
+        dao.upsertExchangeRate(remote.toEntity(metadata))
+        val updated = dao.allExchangeRates().map { it.copy(serverUpdateTime = remote.updateTime, fetchedAt = System.currentTimeMillis()) }
+        dao.upsertExchangeRates(updated)
+    }
+
+    suspend fun removeCustomExchangeRate(currency: String) = dao.deleteExchangeRate(currency)
+
+    suspend fun replaceProductAssets(remote: List<RemoteProductAsset>) = database.withTransaction {
+        require(remote.map { it.id }.distinct().size == remote.size && remote.all { it.id > 0 }) { "资产列表包含无效或重复记录" }
+        if (remote.isEmpty()) dao.deleteAllProductAssets() else {
+            dao.upsertProductAssets(remote.map { it.toEntity() })
+            dao.deleteProductAssetsNotIn(remote.map { it.id })
+        }
+    }
+
+    suspend fun cacheProductAsset(remote: RemoteProductAsset) = dao.upsertProductAsset(remote.toEntity())
+
+    suspend fun removeProductAsset(id: Long) = dao.deleteProductAsset(id)
+
+    suspend fun replaceAIReviewItems(remote: List<RemoteAIReviewItem>) = database.withTransaction {
+        require(remote.all { it.id > 0 && it.status == AIReviewItemEntity.STATUS_PENDING }) { "AI 待复核响应包含无效条目" }
+        require(remote.map { it.id }.distinct().size == remote.size) { "AI 待复核响应包含重复条目" }
+        dao.upsertAIReviewItems(remote.map { it.toEntity() })
+        dao.deleteAIReviewItemsNotIn(remote.map { it.id })
+        val remoteIds = remote.map { it.id }.toSet()
+        dao.allTransactions().filter { it.reviewItemId != null && it.reviewItemId !in remoteIds }
+            .forEach { dao.clearTransactionReviewItem(it.localId) }
+    }
+
+    suspend fun cacheAIReviewItem(remote: RemoteAIReviewItem) {
+        require(remote.id > 0 && remote.status == AIReviewItemEntity.STATUS_PENDING) { "AI 待复核条目无效" }
+        dao.upsertAIReviewItems(listOf(remote.toEntity()))
+    }
+
+    suspend fun removeAIReviewItem(id: Long) = dao.deleteAIReviewItem(id)
+
+    suspend fun pendingAIReviewResolutions(): List<TransactionEntity> = dao.allTransactions().filter {
+        it.reviewItemId != null && it.serverId != null && it.syncState == SyncState.SYNCED && !it.deleted
+    }
+
+    suspend fun markAIReviewResolved(transaction: TransactionEntity) = database.withTransaction {
+        transaction.reviewItemId?.let { dao.deleteAIReviewItem(it) }
+        dao.clearTransactionReviewItem(transaction.localId)
+    }
 
     suspend fun replaceScheduledTemplates(remote: List<RemoteTemplate>) = database.withTransaction {
         require(remote.all { it.templateType == 2 }) { "周期模板响应类型错误" }
@@ -146,6 +304,7 @@ class TransactionRepository(context: Context, private val database: FinexyDataba
             sourceAmountMinor = draft.sourceAmountMinor, destinationAmountMinor = if (draft.type == TYPE_TRANSFER) draft.destinationAmountMinor else 0,
             comment = draft.comment,
             currency = account?.currency ?: base.currency, tagIdsJson = tags.toString(),
+            reviewItemId = draft.reviewItemId ?: base.reviewItemId,
             syncState = SyncState.PENDING, deleted = false, updatedAt = System.currentTimeMillis(),
             syncedSnapshotJson = base.syncedSnapshotJson.ifBlank {
                 if (base.serverId != null && base.syncState == SyncState.SYNCED) base.syncSnapshot() else ""
@@ -177,7 +336,10 @@ class TransactionRepository(context: Context, private val database: FinexyDataba
         var conflicts = 0
         remote.forEach { item ->
             val local = byServerId[item.id]
-            val remoteEntity = item.toEntity(local?.localId)
+            // reviewItemId is client-only linkage used to resolve the server
+            // review after a successful transaction upload. A normal pull has
+            // no such field, so preserve it until resolvePostedAIReviews clears it.
+            val remoteEntity = item.toEntity(local?.localId).copy(reviewItemId = local?.reviewItemId)
             val remoteSnapshot = remoteEntity.syncSnapshot()
             val existingConflict = local?.let { dao.findConflict(it.localId) }
             if (existingConflict?.resolution == ConflictResolution.KEEP_LOCAL) return@forEach

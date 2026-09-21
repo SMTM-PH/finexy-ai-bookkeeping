@@ -20,4 +20,10 @@ const (
 	UUID_TYPE_MONTHLY_BUDGET UuidType = 12
 	UUID_TYPE_AI_REPORT      UuidType = 13
 	UUID_TYPE_AI_REVIEW_ITEM UuidType = 14
+	// UUID_TYPE_FAMILY is shared by every family-domain table (family groups,
+	// members, invitations, ledgers, savings goals and fund movements): the
+	// internal generator embeds only 4 type bits, so the last slot is assigned
+	// to one domain. Uniqueness is unaffected; the type is never decoded back
+	// for validation.
+	UUID_TYPE_FAMILY UuidType = 15
 )

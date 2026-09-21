@@ -1,7 +1,9 @@
 package services
 
 import (
+	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,6 +17,59 @@ import (
 	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/utils"
 	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/uuid"
 )
+
+// locateAccountGroupForManage resolves a root account and all of its children
+// through the ledger permission boundary. Family accounts live in the family
+// owner's data store and therefore cannot be found through UserDataDB(uid).
+func (s *AccountService) locateAccountGroupForManage(c core.Context, uid, accountId int64) (*datastore.Database, *models.Ledger, []*models.Account, error) {
+	if uid <= 0 {
+		return nil, nil, nil, errs.ErrUserIdInvalid
+	}
+	if accountId <= 0 {
+		return nil, nil, nil, errs.ErrAccountIdInvalid
+	}
+
+	for i := 0; i < s.UserDataDBCount(); i++ {
+		db := s.UserDataDBByIndex(i)
+		account := &models.Account{}
+		has, err := db.NewSession(c).Where("deleted=? AND account_id=?", false, accountId).Get(account)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if !has {
+			continue
+		}
+
+		accessDB, ledger, err := Ledgers.GetLedgerWithAccess(c, uid, account.LedgerId, models.FamilyMemberRole.CanManage)
+		if err != nil {
+			return nil, nil, nil, errs.ErrLedgerAccessDenied
+		}
+		if accessDB == nil {
+			accessDB = s.UserDataDB(uid)
+		}
+		if accessDB != db || (account.LedgerId == models.DefaultLedgerId && account.Uid != uid) {
+			return nil, nil, nil, errs.ErrLedgerAccessDenied
+		}
+
+		rootId := account.AccountId
+		if account.ParentAccountId > models.LevelOneAccountParentId {
+			rootId = account.ParentAccountId
+		}
+		accounts := make([]*models.Account, 0)
+		query := db.NewSession(c).Where("deleted=? AND ledger_id=? AND (account_id=? OR parent_account_id=?)", false, account.LedgerId, rootId, rootId)
+		if account.LedgerId == models.DefaultLedgerId {
+			query = query.And("uid=?", uid)
+		}
+		if err := query.OrderBy("parent_account_id asc, display_order asc").Find(&accounts); err != nil {
+			return nil, nil, nil, err
+		}
+		if len(accounts) == 0 || accounts[0].AccountId != rootId || accounts[0].ParentAccountId != models.LevelOneAccountParentId {
+			return nil, nil, nil, errs.ErrAccountNotFound
+		}
+		return db, ledger, accounts, nil
+	}
+	return nil, nil, nil, errs.ErrAccountNotFound
+}
 
 // AccountService represents account service
 type AccountService struct {
@@ -54,6 +109,26 @@ func (s *AccountService) GetAllAccountsByUid(c core.Context, uid int64) ([]*mode
 	var accounts []*models.Account
 	err := s.UserDataDB(uid).NewSession(c).Where("uid=? AND deleted=?", uid, false).OrderBy("parent_account_id asc, display_order asc").Find(&accounts)
 
+	return accounts, err
+}
+
+// GetAccountsInLedger returns only accounts visible in the selected ledger.
+// A family member reads the shared ledger from the owner's shard, including
+// accounts that another member created there.
+func (s *AccountService) GetAccountsInLedger(c core.Context, uid, ledgerId int64) ([]*models.Account, error) {
+	db, _, err := Ledgers.GetLedgerWithAccess(c, uid, ledgerId, anyFamilyRole)
+	if err != nil {
+		return nil, err
+	}
+	if db == nil {
+		db = s.UserDataDB(uid)
+	}
+	accounts := make([]*models.Account, 0)
+	query := db.NewSession(c).Where("deleted=? AND ledger_id=?", false, ledgerId)
+	if ledgerId == models.DefaultLedgerId {
+		query = query.And("uid=?", uid)
+	}
+	err = query.OrderBy("parent_account_id asc, display_order asc").Find(&accounts)
 	return accounts, err
 }
 
@@ -232,6 +307,20 @@ func (s *AccountService) CreateAccounts(c core.Context, mainAccount *models.Acco
 	}
 
 	now := time.Now().Unix()
+	actorUid := mainAccount.Uid
+	postingUid := actorUid
+	userDataDb := s.UserDataDB(actorUid)
+	if mainAccount.LedgerId > models.DefaultLedgerId {
+		db, ledger, err := Ledgers.GetLedgerWithAccess(c, actorUid, mainAccount.LedgerId, models.FamilyMemberRole.CanManage)
+		if err != nil {
+			return err
+		}
+		postingUid, err = Ledgers.LedgerDataOwnerUid(c, actorUid, ledger)
+		if err != nil {
+			return err
+		}
+		userDataDb = db
+	}
 
 	allAccounts := make([]*models.Account, len(childrenAccounts)+1)
 	var allInitTransactions []*models.Transaction
@@ -280,7 +369,10 @@ func (s *AccountService) CreateAccounts(c core.Context, mainAccount *models.Acco
 
 			newTransaction := &models.Transaction{
 				TransactionId:        transactionId,
-				Uid:                  allAccounts[i].Uid,
+				Uid:                  postingUid,
+				LedgerId:             allAccounts[i].LedgerId,
+				RecorderUid:          actorUid,
+				PayerUid:             actorUid,
 				Deleted:              false,
 				Type:                 models.TRANSACTION_DB_TYPE_MODIFY_BALANCE,
 				TransactionTime:      transactionTime,
@@ -296,8 +388,6 @@ func (s *AccountService) CreateAccounts(c core.Context, mainAccount *models.Acco
 			allInitTransactions = append(allInitTransactions, newTransaction)
 		}
 	}
-
-	userDataDb := s.UserDataDB(mainAccount.Uid)
 
 	return userDataDb.DoTransaction(c, func(sess *xorm.Session) error {
 		for i := 0; i < len(allAccounts); i++ {
@@ -665,12 +755,193 @@ func (s *AccountService) ModifyAccountDisplayOrders(c core.Context, uid int64, a
 	})
 }
 
-// DeleteAccount deletes an existed account from database
-func (s *AccountService) DeleteAccount(c core.Context, uid int64, accountId int64) error {
-	if uid <= 0 {
-		return errs.ErrUserIdInvalid
+// MoveAccountToLedger atomically moves a complete root-account group and all
+// compatible history. References that belong to another account group or to a
+// savings goal/template are rejected rather than creating cross-ledger links.
+func (s *AccountService) MoveAccountToLedger(c core.Context, uid, accountId, targetLedgerId int64) ([]*models.Account, error) {
+	sourceDB, _, accounts, err := s.locateAccountGroupForManage(c, uid, accountId)
+	if err != nil {
+		return nil, err
+	}
+	root := accounts[0]
+	if root.AccountId != accountId {
+		return nil, errs.ErrAccountIdInvalid
+	}
+	if root.LedgerId == targetLedgerId {
+		return nil, errs.ErrAccountAlreadyInLedger
 	}
 
+	targetDB, targetLedger, err := Ledgers.GetLedgerWithAccess(c, uid, targetLedgerId, models.FamilyMemberRole.CanManage)
+	if err != nil {
+		return nil, err
+	}
+	if targetDB == nil {
+		targetDB = s.UserDataDB(uid)
+	}
+	if sourceDB != targetDB {
+		return nil, errs.ErrAccountLedgerMigrationAcrossDataStore
+	}
+	// A shared account may only return to the original creator's private
+	// default ledger. This prevents an administrator from taking ownership of
+	// a family account created by somebody else.
+	if targetLedgerId == models.DefaultLedgerId && root.Uid != uid {
+		return nil, errs.ErrLedgerAccessDenied
+	}
+	targetOwnerUid, err := Ledgers.LedgerDataOwnerUid(c, uid, targetLedger)
+	if err != nil {
+		return nil, err
+	}
+
+	accountIds := make([]int64, len(accounts))
+	accountSet := make(map[int64]bool, len(accounts))
+	for i, account := range accounts {
+		if account.LedgerId != root.LedgerId {
+			return nil, errs.ErrAccountLedgerMigrationBlocked
+		}
+		accountIds[i] = account.AccountId
+		accountSet[account.AccountId] = true
+	}
+	now := time.Now().Unix()
+
+	err = sourceDB.DoTransaction(c, func(sess *xorm.Session) error {
+		// Templates and savings-goal funds have their own ledger lifecycle. They
+		// must be removed or completed before the account can move.
+		var templateRefs []*models.TransactionTemplate
+		if err := sess.Where("deleted=?", false).In("account_id", accountIds).Find(&templateRefs); err != nil {
+			return err
+		}
+		var relatedTemplateRefs []*models.TransactionTemplate
+		if err := sess.Where("deleted=?", false).In("related_account_id", accountIds).Find(&relatedTemplateRefs); err != nil {
+			return err
+		}
+		if len(templateRefs) > 0 || len(relatedTemplateRefs) > 0 {
+			return errs.ErrAccountLedgerMigrationBlocked
+		}
+		var fundRefs []*models.SavingsGoalFund
+		if err := sess.In("account_id", accountIds).Limit(1).Find(&fundRefs); err != nil {
+			return err
+		}
+		if len(fundRefs) > 0 {
+			return errs.ErrAccountLedgerMigrationBlocked
+		}
+
+		// A queued schedule keeps an immutable account snapshot even if its
+		// template has since been removed. Keep that queue valid by blocking the
+		// move until the occurrence is confirmed or otherwise gone.
+		var occurrences []*models.ScheduledOccurrence
+		if err := sess.In("status", []models.ScheduledOccurrenceStatus{models.ScheduledOccurrencePending, models.ScheduledOccurrenceDismissed}).Find(&occurrences); err != nil {
+			return err
+		}
+		for _, occurrence := range occurrences {
+			var snapshot models.ScheduledOccurrenceSnapshot
+			if json.Unmarshal([]byte(occurrence.SnapshotJSON), &snapshot) == nil &&
+				(accountSet[snapshot.SourceAccountId] || accountSet[snapshot.DestinationAccountId]) {
+				return errs.ErrAccountLedgerMigrationBlocked
+			}
+		}
+
+		transactionMap := make(map[int64]*models.Transaction)
+		var sourceTransactions []*models.Transaction
+		if err := sess.Where("deleted=? AND ledger_id=?", false, root.LedgerId).In("account_id", accountIds).Find(&sourceTransactions); err != nil {
+			return err
+		}
+		var relatedTransactions []*models.Transaction
+		if err := sess.Where("deleted=? AND ledger_id=?", false, root.LedgerId).In("related_account_id", accountIds).Find(&relatedTransactions); err != nil {
+			return err
+		}
+		for _, transaction := range append(sourceTransactions, relatedTransactions...) {
+			transactionMap[transaction.TransactionId] = transaction
+		}
+		transactions := make([]*models.Transaction, 0, len(transactionMap))
+		for _, transaction := range transactionMap {
+			if transaction.SavingsGoalFundId > 0 ||
+				(transaction.AccountId > 0 && !accountSet[transaction.AccountId]) ||
+				(transaction.RelatedAccountId > 0 && !accountSet[transaction.RelatedAccountId]) {
+				return errs.ErrAccountLedgerMigrationBlocked
+			}
+			transactions = append(transactions, transaction)
+		}
+		sort.Slice(transactions, func(i, j int) bool { return transactions[i].TransactionTime < transactions[j].TransactionTime })
+
+		// uid+transaction_time is unique. Preserve the displayed Unix second and
+		// select the next free sequence slot when the target owner already has a
+		// row at the same internal timestamp.
+		reserved := make(map[int64]bool, len(transactions))
+		for _, transaction := range transactions {
+			candidate := transaction.TransactionTime
+			maxTime := utils.GetMaxTransactionTimeFromUnixTime(utils.GetUnixTimeFromTransactionTime(candidate))
+			for {
+				collision := reserved[candidate]
+				if !collision {
+					exists, queryErr := sess.Where("uid=? AND transaction_time=? AND transaction_id<>?", targetOwnerUid, candidate, transaction.TransactionId).Exist(&models.Transaction{})
+					if queryErr != nil {
+						return queryErr
+					}
+					collision = exists
+				}
+				if !collision {
+					break
+				}
+				candidate++
+				if candidate >= maxTime {
+					return errs.ErrTooMuchTransactionInOneSecond
+				}
+			}
+			reserved[candidate] = true
+			transaction.TransactionTime = candidate
+			transaction.Uid = targetOwnerUid
+			transaction.LedgerId = targetLedgerId
+			if targetLedger.Type == models.LEDGER_TYPE_FAMILY {
+				if transaction.RecorderUid == 0 {
+					transaction.RecorderUid = root.Uid
+				}
+				if transaction.PayerUid == 0 {
+					transaction.PayerUid = transaction.RecorderUid
+				}
+			}
+			transaction.UpdatedUnixTime = now
+			updated, updateErr := sess.ID(transaction.TransactionId).
+				Cols("uid", "ledger_id", "recorder_uid", "payer_uid", "transaction_time", "updated_unix_time").
+				Where("deleted=? AND ledger_id=?", false, root.LedgerId).Update(transaction)
+			if updateErr != nil {
+				return updateErr
+			}
+			if updated != 1 {
+				return errs.ErrDatabaseOperationFailed
+			}
+		}
+
+		updated, updateErr := sess.Cols("ledger_id", "updated_unix_time").
+			Where("deleted=? AND ledger_id=?", false, root.LedgerId).In("account_id", accountIds).
+			Update(&models.Account{LedgerId: targetLedgerId, UpdatedUnixTime: now})
+		if updateErr != nil {
+			return updateErr
+		}
+		if updated != int64(len(accounts)) {
+			return errs.ErrDatabaseOperationFailed
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, account := range accounts {
+		account.LedgerId = targetLedgerId
+		account.UpdatedUnixTime = now
+	}
+	return accounts, nil
+}
+
+// DeleteAccount deletes an existed account from database
+func (s *AccountService) DeleteAccount(c core.Context, uid int64, accountId int64) error {
+	db, _, locatedAccounts, err := s.locateAccountGroupForManage(c, uid, accountId)
+	if err != nil {
+		return err
+	}
+	if locatedAccounts[0].AccountId != accountId {
+		return errs.ErrAccountIdInvalid
+	}
+	ledgerId := locatedAccounts[0].LedgerId
 	now := time.Now().Unix()
 
 	updateModel := &models.Account{
@@ -679,9 +950,9 @@ func (s *AccountService) DeleteAccount(c core.Context, uid int64, accountId int6
 		DeletedUnixTime: now,
 	}
 
-	return s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
+	return db.DoTransaction(c, func(sess *xorm.Session) error {
 		var accountAndSubAccounts []*models.Account
-		err := sess.Where("uid=? AND deleted=? AND ((account_id=? AND parent_account_id=?) OR parent_account_id=?)", uid, false, accountId, models.LevelOneAccountParentId, accountId).Find(&accountAndSubAccounts)
+		err := sess.Where("deleted=? AND ledger_id=? AND ((account_id=? AND parent_account_id=?) OR parent_account_id=?)", false, ledgerId, accountId, models.LevelOneAccountParentId, accountId).Find(&accountAndSubAccounts)
 
 		if err != nil {
 			return err
@@ -701,8 +972,21 @@ func (s *AccountService) DeleteAccount(c core.Context, uid int64, accountId int6
 			accountAndSubAccountIds[i] = accountAndSubAccounts[i].AccountId
 		}
 
-		var relatedTransactionsByAccount []*models.Transaction
-		err = sess.Cols("transaction_id", "uid", "deleted", "account_id", "type").Where("uid=? AND deleted=?", uid, false).In("account_id", accountAndSubAccountIds).Limit(len(accountAndSubAccounts) + 1).Find(&relatedTransactionsByAccount)
+		var bySource []*models.Transaction
+		err = sess.Cols("transaction_id", "uid", "deleted", "ledger_id", "account_id", "related_account_id", "type").Where("deleted=? AND ledger_id=?", false, ledgerId).In("account_id", accountAndSubAccountIds).Find(&bySource)
+		if err != nil {
+			return err
+		}
+		var byDestination []*models.Transaction
+		err = sess.Cols("transaction_id", "uid", "deleted", "ledger_id", "account_id", "related_account_id", "type").Where("deleted=? AND ledger_id=?", false, ledgerId).In("related_account_id", accountAndSubAccountIds).Find(&byDestination)
+		relatedMap := make(map[int64]*models.Transaction)
+		for _, transaction := range append(bySource, byDestination...) {
+			relatedMap[transaction.TransactionId] = transaction
+		}
+		relatedTransactionsByAccount := make([]*models.Transaction, 0, len(relatedMap))
+		for _, transaction := range relatedMap {
+			relatedTransactionsByAccount = append(relatedTransactionsByAccount, transaction)
+		}
 
 		if err != nil {
 			return err
@@ -726,7 +1010,7 @@ func (s *AccountService) DeleteAccount(c core.Context, uid int64, accountId int6
 
 		transactionTemplateQueryCondition := fmt.Sprintf("uid=? AND deleted=? AND (template_type=? OR (template_type=? AND scheduled_frequency_type<>? AND (scheduled_end_time IS NULL OR scheduled_end_time>=?))) AND (account_id IN (%s) OR related_account_id IN (%s))", accountAndSubAccountIdsConditions.String(), accountAndSubAccountIdsConditions.String())
 		transactionTemplateQueryConditionParams := make([]any, 0, len(accountAndSubAccountIds)*2+6)
-		transactionTemplateQueryConditionParams = append(transactionTemplateQueryConditionParams, uid)
+		transactionTemplateQueryConditionParams = append(transactionTemplateQueryConditionParams, accountAndSubAccounts[0].Uid)
 		transactionTemplateQueryConditionParams = append(transactionTemplateQueryConditionParams, false)
 		transactionTemplateQueryConditionParams = append(transactionTemplateQueryConditionParams, models.TRANSACTION_TEMPLATE_TYPE_NORMAL)
 		transactionTemplateQueryConditionParams = append(transactionTemplateQueryConditionParams, models.TRANSACTION_TEMPLATE_TYPE_SCHEDULE)
@@ -749,7 +1033,7 @@ func (s *AccountService) DeleteAccount(c core.Context, uid int64, accountId int6
 			return errs.ErrAccountInUseCannotBeDeleted
 		}
 
-		deletedRows, err := sess.Cols("balance", "deleted", "deleted_unix_time").Where("uid=? AND deleted=?", uid, false).In("account_id", accountAndSubAccountIds).Update(updateModel)
+		deletedRows, err := sess.Cols("balance", "deleted", "deleted_unix_time").Where("deleted=? AND ledger_id=?", false, ledgerId).In("account_id", accountAndSubAccountIds).Update(updateModel)
 
 		if err != nil {
 			return err
@@ -769,7 +1053,7 @@ func (s *AccountService) DeleteAccount(c core.Context, uid int64, accountId int6
 				transactionIds[i] = relatedTransactionsByAccount[i].TransactionId
 			}
 
-			deletedTransactionRows, err := sess.Cols("deleted", "deleted_unix_time").Where("uid=? AND deleted=?", uid, false).In("transaction_id", transactionIds).Update(updateTransaction)
+			deletedTransactionRows, err := sess.Cols("deleted", "deleted_unix_time").Where("deleted=? AND ledger_id=?", false, ledgerId).In("transaction_id", transactionIds).Update(updateTransaction)
 
 			if err != nil {
 				return err
@@ -785,10 +1069,23 @@ func (s *AccountService) DeleteAccount(c core.Context, uid int64, accountId int6
 
 // DeleteSubAccount deletes an existed sub-account from database
 func (s *AccountService) DeleteSubAccount(c core.Context, uid int64, accountId int64) error {
-	if uid <= 0 {
-		return errs.ErrUserIdInvalid
+	db, _, group, err := s.locateAccountGroupForManage(c, uid, accountId)
+	if err != nil {
+		return err
 	}
-
+	var account *models.Account
+	for _, item := range group {
+		if item.AccountId == accountId && item.ParentAccountId > models.LevelOneAccountParentId {
+			account = item
+			break
+		}
+	}
+	if account == nil {
+		return errs.ErrSubAccountNotFound
+	}
+	if len(group)-1 <= 1 {
+		return errs.ErrAccountHaveNoSubAccount
+	}
 	now := time.Now().Unix()
 
 	updateModel := &models.Account{
@@ -797,24 +1094,28 @@ func (s *AccountService) DeleteSubAccount(c core.Context, uid int64, accountId i
 		DeletedUnixTime: now,
 	}
 
-	return s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
-		account := &models.Account{}
-		has, err := sess.Cols("account_id", "uid", "deleted", "parent_account_id").Where("uid=? AND deleted=? AND account_id=? AND parent_account_id<>?", uid, false, accountId, models.LevelOneAccountParentId).Limit(1).Get(account)
-
-		if err != nil {
-			return err
-		} else if !has {
-			return errs.ErrSubAccountNotFound
-		}
-
-		subAccountsCount, err := sess.Where("uid=? AND deleted=? AND parent_account_id=?", uid, false, account.ParentAccountId).Count(&models.Account{})
+	return db.DoTransaction(c, func(sess *xorm.Session) error {
+		subAccountsCount, err := sess.Where("deleted=? AND ledger_id=? AND parent_account_id=?", false, account.LedgerId, account.ParentAccountId).Count(&models.Account{})
 
 		if subAccountsCount <= 1 {
 			return errs.ErrAccountHaveNoSubAccount
 		}
 
-		var relatedTransactionsByAccount []*models.Transaction
-		err = sess.Cols("transaction_id", "uid", "deleted", "account_id", "type").Where("uid=? AND deleted=? AND account_id=?", uid, false, accountId).Limit(2).Find(&relatedTransactionsByAccount)
+		var bySource []*models.Transaction
+		err = sess.Cols("transaction_id", "deleted", "ledger_id", "account_id", "related_account_id", "type").Where("deleted=? AND ledger_id=? AND account_id=?", false, account.LedgerId, accountId).Find(&bySource)
+		if err != nil {
+			return err
+		}
+		var byDestination []*models.Transaction
+		err = sess.Cols("transaction_id", "deleted", "ledger_id", "account_id", "related_account_id", "type").Where("deleted=? AND ledger_id=? AND related_account_id=?", false, account.LedgerId, accountId).Find(&byDestination)
+		relatedMap := make(map[int64]*models.Transaction)
+		for _, transaction := range append(bySource, byDestination...) {
+			relatedMap[transaction.TransactionId] = transaction
+		}
+		relatedTransactionsByAccount := make([]*models.Transaction, 0, len(relatedMap))
+		for _, transaction := range relatedMap {
+			relatedTransactionsByAccount = append(relatedTransactionsByAccount, transaction)
+		}
 
 		if err != nil {
 			return err
@@ -830,7 +1131,7 @@ func (s *AccountService) DeleteSubAccount(c core.Context, uid int64, accountId i
 			}
 		}
 
-		exists, err := sess.Cols("uid", "deleted", "account_id", "related_account_id", "template_type", "scheduled_frequency_type", "scheduled_end_time").Where("uid=? AND deleted=? AND (template_type=? OR (template_type=? AND scheduled_frequency_type<>? AND (scheduled_end_time IS NULL OR scheduled_end_time>=?))) AND (account_id=? OR related_account_id=?)", uid, false, models.TRANSACTION_TEMPLATE_TYPE_NORMAL, models.TRANSACTION_TEMPLATE_TYPE_SCHEDULE, models.TRANSACTION_SCHEDULE_FREQUENCY_TYPE_DISABLED, now, accountId, accountId).Limit(1).Exist(&models.TransactionTemplate{})
+		exists, err := sess.Cols("uid", "deleted", "account_id", "related_account_id", "template_type", "scheduled_frequency_type", "scheduled_end_time").Where("uid=? AND deleted=? AND (template_type=? OR (template_type=? AND scheduled_frequency_type<>? AND (scheduled_end_time IS NULL OR scheduled_end_time>=?))) AND (account_id=? OR related_account_id=?)", account.Uid, false, models.TRANSACTION_TEMPLATE_TYPE_NORMAL, models.TRANSACTION_TEMPLATE_TYPE_SCHEDULE, models.TRANSACTION_SCHEDULE_FREQUENCY_TYPE_DISABLED, now, accountId, accountId).Limit(1).Exist(&models.TransactionTemplate{})
 
 		if err != nil {
 			return err
@@ -838,7 +1139,7 @@ func (s *AccountService) DeleteSubAccount(c core.Context, uid int64, accountId i
 			return errs.ErrSubAccountInUseCannotBeDeleted
 		}
 
-		deletedRows, err := sess.Cols("balance", "deleted", "deleted_unix_time").Where("uid=? AND deleted=? AND account_id=?", uid, false, accountId).Update(updateModel)
+		deletedRows, err := sess.Cols("balance", "deleted", "deleted_unix_time").Where("deleted=? AND ledger_id=? AND account_id=?", false, account.LedgerId, accountId).Update(updateModel)
 
 		if err != nil {
 			return err
@@ -858,7 +1159,7 @@ func (s *AccountService) DeleteSubAccount(c core.Context, uid int64, accountId i
 				transactionIds[i] = relatedTransactionsByAccount[i].TransactionId
 			}
 
-			deletedTransactionRows, err := sess.Cols("deleted", "deleted_unix_time").Where("uid=? AND deleted=?", uid, false).In("transaction_id", transactionIds).Update(updateTransaction)
+			deletedTransactionRows, err := sess.Cols("deleted", "deleted_unix_time").Where("deleted=? AND ledger_id=?", false, account.LedgerId).In("transaction_id", transactionIds).Update(updateTransaction)
 
 			if err != nil {
 				return err

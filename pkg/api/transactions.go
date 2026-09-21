@@ -71,6 +71,20 @@ func (a *TransactionsApi) TransactionCountHandler(c *core.WebContext) (any, *err
 	}
 
 	uid := c.GetCurrentUid()
+	if transactionCountReq.LedgerId > 0 {
+		page, ledgerErr := a.transactionListInLedger(c, uid, &models.TransactionListByMaxTimeRequest{
+			LedgerId: transactionCountReq.LedgerId, Type: transactionCountReq.Type,
+			CategoryIds: transactionCountReq.CategoryIds, AccountIds: transactionCountReq.AccountIds,
+			TagFilter: transactionCountReq.TagFilter, AmountFilter: transactionCountReq.AmountFilter,
+			Keyword: transactionCountReq.Keyword, MatchMode: transactionCountReq.MatchMode,
+			MustHavePictures: transactionCountReq.MustHavePictures, MaxTime: transactionCountReq.MaxTime,
+			MinTime: transactionCountReq.MinTime, Count: 1, WithCount: true,
+		})
+		if ledgerErr != nil {
+			return nil, ledgerErr
+		}
+		return &models.TransactionCountResponse{TotalCount: *page.TotalCount}, nil
+	}
 
 	allAccountIds, err := a.accounts.GetAccountOrSubAccountIds(c, transactionCountReq.AccountIds, uid)
 
@@ -138,6 +152,9 @@ func (a *TransactionsApi) TransactionListHandler(c *core.WebContext) (any, *errs
 		}
 
 		return nil, errs.ErrUserNotFound
+	}
+	if transactionListReq.LedgerId > 0 {
+		return a.transactionListInLedger(c, uid, &transactionListReq)
 	}
 
 	allAccountIds, err := a.accounts.GetAccountOrSubAccountIds(c, transactionListReq.AccountIds, uid)
@@ -223,6 +240,183 @@ func (a *TransactionsApi) TransactionListHandler(c *core.WebContext) (any, *errs
 	return transactionResps, nil
 }
 
+func (a *TransactionsApi) transactionListInLedger(c *core.WebContext, uid int64, request *models.TransactionListByMaxTimeRequest) (*models.TransactionInfoPageWrapperResponse, *errs.Error) {
+	_, ledger, err := services.Ledgers.GetLedgerWithAccess(c, uid, request.LedgerId, func(models.FamilyMemberRole) bool { return true })
+	if err != nil {
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+	postingUid, err := services.Ledgers.LedgerDataOwnerUid(c, uid, ledger)
+	if err != nil {
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+	accounts, err := a.accounts.GetAccountsInLedger(c, uid, request.LedgerId)
+	if err != nil {
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+	accountMap := make(map[int64]*models.Account, len(accounts))
+	for _, account := range accounts {
+		accountMap[account.AccountId] = account
+	}
+	parseIds := func(value string) ([]int64, error) {
+		if value == "" || value == "0" {
+			return nil, nil
+		}
+		return utils.StringArrayToInt64Array(strings.Split(value, ","))
+	}
+	accountIds, err := parseIds(request.AccountIds)
+	if err != nil {
+		return nil, errs.ErrAccountIdInvalid
+	}
+	for _, id := range accountIds {
+		if accountMap[id] == nil {
+			return nil, errs.ErrAccountIdInvalid
+		}
+	}
+	categoryIds, err := parseIds(request.CategoryIds)
+	if err != nil {
+		return nil, errs.ErrTransactionCategoryIdInvalid
+	}
+	noTags := request.TagFilter == models.TransactionNoTagFilterValue
+	var tagFilters []*models.TransactionTagFilter
+	if !noTags {
+		tagFilters, err = models.ParseTransactionTagFilter(request.TagFilter)
+		if err != nil {
+			return nil, errs.Or(err, errs.ErrOperationFailed)
+		}
+	}
+	rows, total, err := a.transactions.GetLedgerTransactions(c, uid, request.LedgerId, request, categoryIds, accountIds, tagFilters, noTags)
+	if err != nil {
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+	categoryMap := make(map[int64]*models.TransactionCategory)
+	rowCategoryIds := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		if row.CategoryId > 0 {
+			rowCategoryIds = append(rowCategoryIds, row.CategoryId)
+		}
+	}
+	if len(rowCategoryIds) > 0 {
+		categoryMap, err = a.transactionCategories.GetCategoriesByCategoryIds(c, postingUid, utils.ToUniqueInt64Slice(rowCategoryIds))
+		if err != nil {
+			return nil, errs.Or(err, errs.ErrOperationFailed)
+		}
+	}
+	response := &models.TransactionInfoPageWrapperResponse{Items: make(models.TransactionInfoResponseSlice, 0, len(rows))}
+	if len(rows) > int(request.Count) {
+		next := rows[request.Count].TransactionTime
+		response.NextTimeSequenceId = &next
+		rows = rows[:request.Count]
+	}
+	for _, row := range rows {
+		account := accountMap[row.AccountId]
+		if account == nil {
+			return nil, errs.ErrAccountNotFound
+		}
+		item := row.ToTransactionInfoResponse(nil, postingUid == uid || row.RecorderUid == uid)
+		if category := categoryMap[row.CategoryId]; category != nil {
+			item.Category = category.ToTransactionCategoryInfoResponse()
+		}
+		if row.Type == models.TRANSACTION_DB_TYPE_TRANSFER_IN {
+			item.DestinationAccount = account.ToAccountInfoResponse()
+		} else {
+			item.SourceAccount = account.ToAccountInfoResponse()
+		}
+		if row.RelatedAccountId > 0 && accountMap[row.RelatedAccountId] != nil {
+			item.DestinationAccount = accountMap[row.RelatedAccountId].ToAccountInfoResponse()
+		}
+		response.Items = append(response.Items, item)
+	}
+	if request.WithCount {
+		response.TotalCount = &total
+	}
+	return response, nil
+}
+
+func (a *TransactionsApi) transactionMonthListInLedger(c *core.WebContext, uid int64, request *models.TransactionListInMonthByPageRequest) (*models.TransactionInfoPageWrapperResponse2, *errs.Error) {
+	_, ledger, err := services.Ledgers.GetLedgerWithAccess(c, uid, request.LedgerId, func(models.FamilyMemberRole) bool { return true })
+	if err != nil {
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+	postingUid, err := services.Ledgers.LedgerDataOwnerUid(c, uid, ledger)
+	if err != nil {
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+	accounts, err := a.accounts.GetAccountsInLedger(c, uid, request.LedgerId)
+	if err != nil {
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+	accountMap := make(map[int64]*models.Account, len(accounts))
+	for _, account := range accounts {
+		accountMap[account.AccountId] = account
+	}
+	parseIds := func(value string) ([]int64, error) {
+		if value == "" || value == "0" {
+			return nil, nil
+		}
+		return utils.StringArrayToInt64Array(strings.Split(value, ","))
+	}
+	accountIds, err := parseIds(request.AccountIds)
+	if err != nil {
+		return nil, errs.ErrAccountIdInvalid
+	}
+	for _, id := range accountIds {
+		if accountMap[id] == nil {
+			return nil, errs.ErrAccountIdInvalid
+		}
+	}
+	categoryIds, err := parseIds(request.CategoryIds)
+	if err != nil {
+		return nil, errs.ErrTransactionCategoryIdInvalid
+	}
+	noTags := request.TagFilter == models.TransactionNoTagFilterValue
+	var tagFilters []*models.TransactionTagFilter
+	if !noTags {
+		tagFilters, err = models.ParseTransactionTagFilter(request.TagFilter)
+		if err != nil {
+			return nil, errs.Or(err, errs.ErrOperationFailed)
+		}
+	}
+	rows, err := a.transactions.GetLedgerTransactionsInMonth(c, uid, request.LedgerId, request.Year, request.Month, request.Type,
+		categoryIds, accountIds, tagFilters, noTags, request.AmountFilter, request.Keyword, request.MatchMode, request.MustHavePictures)
+	if err != nil {
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+	categoryMap := make(map[int64]*models.TransactionCategory)
+	rowCategoryIds := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		if row.CategoryId > 0 {
+			rowCategoryIds = append(rowCategoryIds, row.CategoryId)
+		}
+	}
+	if len(rowCategoryIds) > 0 {
+		categoryMap, err = a.transactionCategories.GetCategoriesByCategoryIds(c, postingUid, utils.ToUniqueInt64Slice(rowCategoryIds))
+		if err != nil {
+			return nil, errs.Or(err, errs.ErrOperationFailed)
+		}
+	}
+	items := make(models.TransactionInfoResponseSlice, 0, len(rows))
+	for _, row := range rows {
+		account := accountMap[row.AccountId]
+		if account == nil {
+			return nil, errs.ErrAccountNotFound
+		}
+		item := row.ToTransactionInfoResponse(nil, postingUid == uid || row.RecorderUid == uid)
+		if category := categoryMap[row.CategoryId]; category != nil {
+			item.Category = category.ToTransactionCategoryInfoResponse()
+		}
+		if row.Type == models.TRANSACTION_DB_TYPE_TRANSFER_IN {
+			item.DestinationAccount = account.ToAccountInfoResponse()
+		} else {
+			item.SourceAccount = account.ToAccountInfoResponse()
+		}
+		if row.RelatedAccountId > 0 && accountMap[row.RelatedAccountId] != nil {
+			item.DestinationAccount = accountMap[row.RelatedAccountId].ToAccountInfoResponse()
+		}
+		items = append(items, item)
+	}
+	return &models.TransactionInfoPageWrapperResponse2{Items: items, TotalCount: int64(len(items))}, nil
+}
+
 // TransactionMonthListHandler returns all transaction list of current user by month
 func (a *TransactionsApi) TransactionMonthListHandler(c *core.WebContext) (any, *errs.Error) {
 	var transactionListReq models.TransactionListInMonthByPageRequest
@@ -249,6 +443,9 @@ func (a *TransactionsApi) TransactionMonthListHandler(c *core.WebContext) (any, 
 		}
 
 		return nil, errs.ErrUserNotFound
+	}
+	if transactionListReq.LedgerId > 0 {
+		return a.transactionMonthListInLedger(c, uid, &transactionListReq)
 	}
 
 	allAccountIds, err := a.accounts.GetAccountOrSubAccountIds(c, transactionListReq.AccountIds, uid)
@@ -481,7 +678,7 @@ func (a *TransactionsApi) TransactionReconciliationStatementHandler(c *core.WebC
 	for i := 0; i < len(transactions); i++ {
 		allAccountIds = append(allAccountIds, transactions[i].AccountId)
 
-		if transactions[i].Type == models.TRANSACTION_DB_TYPE_TRANSFER_IN || transactions[i].Type == models.TRANSACTION_DB_TYPE_TRANSFER_OUT {
+		if (transactions[i].Type == models.TRANSACTION_DB_TYPE_TRANSFER_IN || transactions[i].Type == models.TRANSACTION_DB_TYPE_TRANSFER_OUT) && transactions[i].RelatedAccountId > 0 {
 			allAccountIds = append(allAccountIds, transactions[i].RelatedAccountId)
 		}
 	}
@@ -562,7 +759,7 @@ func (a *TransactionsApi) TransactionStatisticsHandler(c *core.WebContext) (any,
 	}
 
 	uid := c.GetCurrentUid()
-	totalAmounts, err := a.transactions.GetAccountsAndCategoriesTotalInflowAndOutflow(c, uid, statisticReq.StartTime, statisticReq.EndTime, tagFilters, noTags, statisticReq.Keyword, statisticReq.MatchMode, clientTimezone, statisticReq.UseTransactionTimezone)
+	totalAmounts, err := a.transactions.GetLedgerTotalInflowAndOutflow(c, uid, statisticReq.LedgerId, statisticReq.StartTime, statisticReq.EndTime, tagFilters, noTags, statisticReq.Keyword, statisticReq.MatchMode, clientTimezone, statisticReq.UseTransactionTimezone)
 
 	if err != nil {
 		log.Errorf(c, "[transactions.TransactionStatisticsHandler] failed to get accounts and categories total income and expense for user \"uid:%d\", because %s", uid, err.Error())
@@ -630,7 +827,7 @@ func (a *TransactionsApi) TransactionStatisticsTrendsHandler(c *core.WebContext)
 	}
 
 	uid := c.GetCurrentUid()
-	allMonthlyTotalAmounts, err := a.transactions.GetAccountsAndCategoriesMonthlyInflowAndOutflow(c, uid, startYear, startMonth, endYear, endMonth, tagFilters, noTags, statisticTrendsReq.Keyword, statisticTrendsReq.MatchMode, clientTimezone, statisticTrendsReq.UseTransactionTimezone)
+	allMonthlyTotalAmounts, err := a.transactions.GetLedgerMonthlyInflowAndOutflow(c, uid, statisticTrendsReq.LedgerId, startYear, startMonth, endYear, endMonth, tagFilters, noTags, statisticTrendsReq.Keyword, statisticTrendsReq.MatchMode, clientTimezone, statisticTrendsReq.UseTransactionTimezone)
 
 	if err != nil {
 		log.Errorf(c, "[transactions.TransactionStatisticsTrendsHandler] failed to get accounts and categories total income and expense for user \"uid:%d\", because %s", uid, err.Error())
@@ -890,6 +1087,17 @@ func (a *TransactionsApi) TransactionGetHandler(c *core.WebContext) (any, *errs.
 	}
 
 	uid := c.GetCurrentUid()
+	postingUid := uid
+	if transactionGetReq.LedgerId > 0 {
+		_, ledger, accessErr := services.Ledgers.GetLedgerWithAccess(c, uid, transactionGetReq.LedgerId, func(models.FamilyMemberRole) bool { return true })
+		if accessErr != nil {
+			return nil, errs.Or(accessErr, errs.ErrOperationFailed)
+		}
+		postingUid, accessErr = services.Ledgers.LedgerDataOwnerUid(c, uid, ledger)
+		if accessErr != nil {
+			return nil, errs.Or(accessErr, errs.ErrOperationFailed)
+		}
+	}
 	user, err := a.users.GetUserById(c, uid)
 
 	if err != nil {
@@ -900,11 +1108,14 @@ func (a *TransactionsApi) TransactionGetHandler(c *core.WebContext) (any, *errs.
 		return nil, errs.ErrUserNotFound
 	}
 
-	transaction, err := a.transactions.GetTransactionByTransactionId(c, uid, transactionGetReq.Id)
+	transaction, err := a.transactions.GetTransactionByTransactionId(c, postingUid, transactionGetReq.Id)
 
 	if err != nil {
 		log.Errorf(c, "[transactions.TransactionGetHandler] failed to get transaction \"id:%d\" for user \"uid:%d\", because %s", transactionGetReq.Id, uid, err.Error())
 		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+	if transaction.LedgerId != transactionGetReq.LedgerId {
+		return nil, errs.ErrTransactionNotFound
 	}
 
 	if transaction.Type == models.TRANSACTION_DB_TYPE_TRANSFER_IN {
@@ -919,7 +1130,7 @@ func (a *TransactionsApi) TransactionGetHandler(c *core.WebContext) (any, *errs.
 		accountIds = utils.ToUniqueInt64Slice(accountIds)
 	}
 
-	accountMap, err := a.accounts.GetAccountsByAccountIds(c, uid, accountIds)
+	accountMap, err := a.accounts.GetAccountsByAccountIds(c, postingUid, accountIds)
 
 	if _, exists := accountMap[transaction.AccountId]; !exists {
 		log.Warnf(c, "[transactions.TransactionGetHandler] account of transaction \"id:%d\" does not exist for user \"uid:%d\"", transaction.TransactionId, uid)
@@ -933,7 +1144,7 @@ func (a *TransactionsApi) TransactionGetHandler(c *core.WebContext) (any, *errs.
 		}
 	}
 
-	allTransactionTagIds, err := a.transactionTags.GetAllTagIdsOfTransactions(c, uid, []int64{transaction.TransactionId})
+	allTransactionTagIds, err := a.transactionTags.GetAllTagIdsOfTransactions(c, postingUid, []int64{transaction.TransactionId})
 
 	if err != nil {
 		log.Errorf(c, "[transactions.TransactionGetHandler] failed to get transactions tag ids for user \"uid:%d\", because %s", uid, err.Error())
@@ -945,7 +1156,7 @@ func (a *TransactionsApi) TransactionGetHandler(c *core.WebContext) (any, *errs.
 	var pictureInfos []*models.TransactionPictureInfo
 
 	if !transactionGetReq.TrimCategory {
-		category, err = a.transactionCategories.GetCategoryByCategoryId(c, uid, transaction.CategoryId)
+		category, err = a.transactionCategories.GetCategoryByCategoryId(c, postingUid, transaction.CategoryId)
 
 		if err != nil {
 			log.Errorf(c, "[transactions.TransactionGetHandler] failed to get transactions category for user \"uid:%d\", because %s", uid, err.Error())
@@ -954,7 +1165,7 @@ func (a *TransactionsApi) TransactionGetHandler(c *core.WebContext) (any, *errs.
 	}
 
 	if !transactionGetReq.TrimTag {
-		tagMap, err = a.transactionTags.GetTagsByTagIds(c, uid, utils.ToUniqueInt64Slice(a.transactionTags.GetTransactionTagIds(allTransactionTagIds)))
+		tagMap, err = a.transactionTags.GetTagsByTagIds(c, postingUid, utils.ToUniqueInt64Slice(a.transactionTags.GetTransactionTagIds(allTransactionTagIds)))
 
 		if err != nil {
 			log.Errorf(c, "[transactions.TransactionGetHandler] failed to get transactions tags for user \"uid:%d\", because %s", uid, err.Error())
@@ -963,7 +1174,7 @@ func (a *TransactionsApi) TransactionGetHandler(c *core.WebContext) (any, *errs.
 	}
 
 	if transactionGetReq.WithPictures && a.CurrentConfig().EnableTransactionPictures {
-		pictureInfos, err = a.transactionPictures.GetPictureInfosByTransactionId(c, uid, transaction.TransactionId)
+		pictureInfos, err = a.transactionPictures.GetPictureInfosByTransactionId(c, postingUid, transaction.TransactionId)
 
 		if err != nil {
 			log.Errorf(c, "[transactions.TransactionGetHandler] failed to get transactions pictures for user \"uid:%d\", because %s", uid, err.Error())
@@ -1054,6 +1265,8 @@ func (a *TransactionsApi) TransactionCreateHandler(c *core.WebContext) (any, *er
 	if transactionCreateReq.Type != models.TRANSACTION_TYPE_TRANSFER && transactionCreateReq.DestinationAccountId != 0 {
 		log.Warnf(c, "[transactions.TransactionCreateHandler] non-transfer transaction destination account cannot be set")
 		return nil, errs.ErrTransactionDestinationAccountCannotBeSet
+	} else if transactionCreateReq.Type == models.TRANSACTION_TYPE_TRANSFER && transactionCreateReq.SourceAccountId == 0 && transactionCreateReq.DestinationAccountId == 0 {
+		return nil, errs.ErrAccountIdInvalid
 	} else if transactionCreateReq.Type == models.TRANSACTION_TYPE_TRANSFER && transactionCreateReq.SourceAccountId == transactionCreateReq.DestinationAccountId {
 		log.Warnf(c, "[transactions.TransactionCreateHandler] transfer transaction source account must not be destination account")
 		return nil, errs.ErrTransactionSourceAndDestinationIdCannotBeEqual
@@ -1075,13 +1288,44 @@ func (a *TransactionsApi) TransactionCreateHandler(c *core.WebContext) (any, *er
 		return nil, errs.ErrUserNotFound
 	}
 
-	transaction := a.createNewTransactionModel(uid, &transactionCreateReq, c.ClientIP())
+	postingUid := uid
+	if transactionCreateReq.LedgerId > 0 {
+		_, ledger, accessErr := services.Ledgers.GetLedgerWithAccess(c, uid, transactionCreateReq.LedgerId, models.FamilyMemberRole.CanWrite)
+		if accessErr != nil {
+			return nil, errs.Or(accessErr, errs.ErrOperationFailed)
+		}
+		postingUid, accessErr = services.Ledgers.LedgerDataOwnerUid(c, uid, ledger)
+		if accessErr != nil {
+			return nil, errs.Or(accessErr, errs.ErrOperationFailed)
+		}
+		// Tags and pictures still belong to a user's private namespace. Until a
+		// ledger-level namespace is introduced, members may create shared rows
+		// without attaching another user's private objects.
+		if postingUid != uid && len(tagIds) > 0 {
+			return nil, errs.ErrTransactionTagNotFound
+		}
+		if postingUid != uid && len(pictureIds) > 0 {
+			return nil, errs.ErrTransactionPictureNotFound
+		}
+	}
 
-	allUsedAccounts, err := a.getTransactionUsedAccounts(c, uid, []*models.Transaction{transaction})
+	transaction := a.createNewTransactionModel(postingUid, &transactionCreateReq, c.ClientIP())
+	transaction.LedgerId = transactionCreateReq.LedgerId
+	transaction.RecorderUid = uid
+	transaction.PayerUid = uid
+
+	allUsedAccounts, err := a.getTransactionUsedAccounts(c, postingUid, []*models.Transaction{transaction})
 
 	if err != nil {
 		log.Errorf(c, "[transactions.TransactionCreateHandler] failed to get transaction used accounts for user \"uid:%d\", because %s", uid, err.Error())
 		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+	if transactionCreateReq.LedgerId > 0 {
+		for _, account := range allUsedAccounts {
+			if account.LedgerId != transactionCreateReq.LedgerId {
+				return nil, errs.ErrAccountNotFound
+			}
+		}
 	}
 
 	transactionEditable := user.CanEditTransactionByTransactionTime(transaction.TransactionTime, clientTimezone, allUsedAccounts[transaction.AccountId], allUsedAccounts[transaction.RelatedAccountId])
@@ -1093,7 +1337,7 @@ func (a *TransactionsApi) TransactionCreateHandler(c *core.WebContext) (any, *er
 	var pictureInfos []*models.TransactionPictureInfo
 
 	if len(pictureIds) > 0 {
-		pictureInfos, err = a.transactionPictures.GetNewPictureInfosByPictureIds(c, uid, pictureIds)
+		pictureInfos, err = a.transactionPictures.GetNewPictureInfosByPictureIds(c, postingUid, pictureIds)
 
 		if err != nil {
 			log.Errorf(c, "[transactions.TransactionCreateHandler] failed to get transactions pictures for user \"uid:%d\", because %s", uid, err.Error())
@@ -1116,7 +1360,7 @@ func (a *TransactionsApi) TransactionCreateHandler(c *core.WebContext) (any, *er
 			transactionId, err := utils.StringToInt64(remark)
 
 			if err == nil {
-				transaction, err = a.transactions.GetTransactionByTransactionId(c, uid, transactionId)
+				transaction, err = a.transactions.GetTransactionByTransactionId(c, postingUid, transactionId)
 
 				if err != nil {
 					log.Errorf(c, "[transactions.TransactionCreateHandler] failed to get existed transaction \"id:%d\" for user \"uid:%d\", because %s", transactionId, uid, err.Error())
@@ -1187,6 +1431,17 @@ func (a *TransactionsApi) TransactionModifyHandler(c *core.WebContext) (any, *er
 	}
 
 	uid := c.GetCurrentUid()
+	postingUid := uid
+	if transactionModifyReq.LedgerId > 0 {
+		_, ledger, accessErr := services.Ledgers.GetLedgerWithAccess(c, uid, transactionModifyReq.LedgerId, models.FamilyMemberRole.CanWrite)
+		if accessErr != nil {
+			return nil, errs.Or(accessErr, errs.ErrOperationFailed)
+		}
+		postingUid, accessErr = services.Ledgers.LedgerDataOwnerUid(c, uid, ledger)
+		if accessErr != nil {
+			return nil, errs.Or(accessErr, errs.ErrOperationFailed)
+		}
+	}
 	user, err := a.users.GetUserById(c, uid)
 
 	if err != nil {
@@ -1197,11 +1452,14 @@ func (a *TransactionsApi) TransactionModifyHandler(c *core.WebContext) (any, *er
 		return nil, errs.ErrUserNotFound
 	}
 
-	transaction, err := a.transactions.GetTransactionByTransactionId(c, uid, transactionModifyReq.Id)
+	transaction, err := a.transactions.GetTransactionByTransactionId(c, postingUid, transactionModifyReq.Id)
 
 	if err != nil {
 		log.Errorf(c, "[transactions.TransactionModifyHandler] failed to get transaction \"id:%d\" for user \"uid:%d\", because %s", transactionModifyReq.Id, uid, err.Error())
 		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+	if transaction.LedgerId != transactionModifyReq.LedgerId || (postingUid != uid && transaction.RecorderUid != uid) {
+		return nil, errs.ErrTransactionNotFound
 	}
 
 	if transaction.Type == models.TRANSACTION_DB_TYPE_TRANSFER_IN {
@@ -1231,7 +1489,7 @@ func (a *TransactionsApi) TransactionModifyHandler(c *core.WebContext) (any, *er
 		return nil, errs.ErrIncompleteOrIncorrectSubmission
 	}
 
-	allTransactionTagIds, err := a.transactionTags.GetAllTagIdsOfTransactions(c, uid, []int64{transaction.TransactionId})
+	allTransactionTagIds, err := a.transactionTags.GetAllTagIdsOfTransactions(c, postingUid, []int64{transaction.TransactionId})
 
 	if err != nil {
 		log.Errorf(c, "[transactions.TransactionModifyHandler] failed to get transactions tag ids for user \"uid:%d\", because %s", uid, err.Error())
@@ -1244,7 +1502,7 @@ func (a *TransactionsApi) TransactionModifyHandler(c *core.WebContext) (any, *er
 		transactionTagIds = make([]int64, 0, 0)
 	}
 
-	transactionPictureInfos, err := a.transactionPictures.GetPictureInfosByTransactionId(c, uid, transaction.TransactionId)
+	transactionPictureInfos, err := a.transactionPictures.GetPictureInfosByTransactionId(c, postingUid, transaction.TransactionId)
 
 	if err != nil {
 		log.Errorf(c, "[transactions.TransactionModifyHandler] failed to get transaction picture infos for user \"uid:%d\", because %s", uid, err.Error())
@@ -1255,7 +1513,10 @@ func (a *TransactionsApi) TransactionModifyHandler(c *core.WebContext) (any, *er
 
 	newTransaction := &models.Transaction{
 		TransactionId:     transaction.TransactionId,
-		Uid:               uid,
+		Uid:               postingUid,
+		LedgerId:          transaction.LedgerId,
+		RecorderUid:       transaction.RecorderUid,
+		PayerUid:          transaction.PayerUid,
 		Type:              newTransactionType,
 		CategoryId:        transactionModifyReq.CategoryId,
 		TransactionTime:   utils.GetMinTransactionTimeFromUnixTime(transactionModifyReq.Time),
@@ -1293,11 +1554,18 @@ func (a *TransactionsApi) TransactionModifyHandler(c *core.WebContext) (any, *er
 		return nil, errs.ErrNothingWillBeUpdated
 	}
 
-	allUsedAccounts, err := a.getTransactionUsedAccounts(c, uid, []*models.Transaction{transaction, newTransaction})
+	allUsedAccounts, err := a.getTransactionUsedAccounts(c, postingUid, []*models.Transaction{transaction, newTransaction})
 
 	if err != nil {
 		log.Errorf(c, "[transactions.TransactionModifyHandler] failed to get transaction used accounts for user \"uid:%d\", because %s", uid, err.Error())
 		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+	if transactionModifyReq.LedgerId > 0 {
+		for _, account := range allUsedAccounts {
+			if account.LedgerId != transactionModifyReq.LedgerId {
+				return nil, errs.ErrAccountNotFound
+			}
+		}
 	}
 
 	transactionEditable := user.CanEditTransactionByTransactionTime(transaction.TransactionTime, clientTimezone, allUsedAccounts[transaction.AccountId], allUsedAccounts[transaction.RelatedAccountId])
@@ -1324,7 +1592,7 @@ func (a *TransactionsApi) TransactionModifyHandler(c *core.WebContext) (any, *er
 		oldAndNewPictureInfoMap := a.transactionPictures.GetPictureInfoMapByList(transactionPictureInfos)
 
 		if len(addTransactionPictureIds) > 0 {
-			addPictureInfos, err := a.transactionPictures.GetNewPictureInfosByPictureIds(c, uid, addTransactionPictureIds)
+			addPictureInfos, err := a.transactionPictures.GetNewPictureInfosByPictureIds(c, postingUid, addTransactionPictureIds)
 
 			if err != nil {
 				log.Errorf(c, "[transactions.TransactionModifyHandler] failed to get transactions pictures for user \"uid:%d\", because %s", uid, err.Error())
@@ -2065,6 +2333,17 @@ func (a *TransactionsApi) TransactionDeleteHandler(c *core.WebContext) (any, *er
 	}
 
 	uid := c.GetCurrentUid()
+	postingUid := uid
+	if transactionDeleteReq.LedgerId > 0 {
+		_, ledger, accessErr := services.Ledgers.GetLedgerWithAccess(c, uid, transactionDeleteReq.LedgerId, models.FamilyMemberRole.CanWrite)
+		if accessErr != nil {
+			return nil, errs.Or(accessErr, errs.ErrOperationFailed)
+		}
+		postingUid, accessErr = services.Ledgers.LedgerDataOwnerUid(c, uid, ledger)
+		if accessErr != nil {
+			return nil, errs.Or(accessErr, errs.ErrOperationFailed)
+		}
+	}
 	user, err := a.users.GetUserById(c, uid)
 
 	if err != nil {
@@ -2075,11 +2354,14 @@ func (a *TransactionsApi) TransactionDeleteHandler(c *core.WebContext) (any, *er
 		return nil, errs.ErrUserNotFound
 	}
 
-	transaction, err := a.transactions.GetTransactionByTransactionId(c, uid, transactionDeleteReq.Id)
+	transaction, err := a.transactions.GetTransactionByTransactionId(c, postingUid, transactionDeleteReq.Id)
 
 	if err != nil {
 		log.Errorf(c, "[transactions.TransactionDeleteHandler] failed to get transaction \"id:%d\" for user \"uid:%d\", because %s", transactionDeleteReq.Id, uid, err.Error())
 		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+	if transaction.LedgerId != transactionDeleteReq.LedgerId || (postingUid != uid && transaction.RecorderUid != uid) {
+		return nil, errs.ErrTransactionNotFound
 	}
 
 	if transaction.Type == models.TRANSACTION_DB_TYPE_TRANSFER_IN {
@@ -2087,7 +2369,7 @@ func (a *TransactionsApi) TransactionDeleteHandler(c *core.WebContext) (any, *er
 		return nil, errs.ErrTransactionTypeInvalid
 	}
 
-	allUsedAccounts, err := a.getTransactionUsedAccounts(c, uid, []*models.Transaction{transaction})
+	allUsedAccounts, err := a.getTransactionUsedAccounts(c, postingUid, []*models.Transaction{transaction})
 
 	if err != nil {
 		log.Errorf(c, "[transactions.TransactionDeleteHandler] failed to get transaction used accounts for user \"uid:%d\", because %s", uid, err.Error())
@@ -2100,7 +2382,7 @@ func (a *TransactionsApi) TransactionDeleteHandler(c *core.WebContext) (any, *er
 		return nil, errs.ErrCannotDeleteTransactionWithThisTransactionTime
 	}
 
-	err = a.transactions.DeleteTransaction(c, uid, transactionDeleteReq.Id)
+	err = a.transactions.DeleteTransaction(c, postingUid, transactionDeleteReq.Id)
 
 	if err != nil {
 		log.Errorf(c, "[transactions.TransactionDeleteHandler] failed to delete transaction \"id:%d\" for user \"uid:%d\", because %s", transactionDeleteReq.Id, uid, err.Error())
@@ -2613,6 +2895,8 @@ func (a *TransactionsApi) TransactionImportHandler(c *core.WebContext) (any, *er
 		if transactionCreateReq.Type != models.TRANSACTION_TYPE_TRANSFER && transactionCreateReq.DestinationAccountId != 0 {
 			log.Warnf(c, "[transactions.TransactionImportHandler] non-transfer transaction \"index:%d\" destination account cannot be set", i)
 			return nil, errs.ErrTransactionDestinationAccountCannotBeSet
+		} else if transactionCreateReq.Type == models.TRANSACTION_TYPE_TRANSFER && transactionCreateReq.SourceAccountId == 0 && transactionCreateReq.DestinationAccountId == 0 {
+			return nil, errs.ErrAccountIdInvalid
 		} else if transactionCreateReq.Type == models.TRANSACTION_TYPE_TRANSFER && transactionCreateReq.SourceAccountId == transactionCreateReq.DestinationAccountId {
 			log.Warnf(c, "[transactions.TransactionImportHandler] transfer transaction \"index:%d\" source account must not be destination account", i)
 			return nil, errs.ErrTransactionSourceAndDestinationIdCannotBeEqual
@@ -2744,7 +3028,7 @@ func (a *TransactionsApi) filterTransactions(c *core.WebContext, uid int64, tran
 			continue
 		}
 
-		if transaction.Type == models.TRANSACTION_DB_TYPE_TRANSFER_IN || transaction.Type == models.TRANSACTION_DB_TYPE_TRANSFER_OUT {
+		if (transaction.Type == models.TRANSACTION_DB_TYPE_TRANSFER_IN || transaction.Type == models.TRANSACTION_DB_TYPE_TRANSFER_OUT) && transaction.RelatedAccountId > 0 {
 			if _, exists := accountMap[transaction.RelatedAccountId]; !exists {
 				log.Warnf(c, "[transactions.filterTransactions] related account of transaction \"id:%d\" does not exist for user \"uid:%d\"", transaction.TransactionId, uid)
 				continue
@@ -2843,7 +3127,7 @@ func (a *TransactionsApi) getTransactionEssentialDataByTransactionIds(c *core.We
 		transactionIds[i] = transactionId
 		accountIds = append(accountIds, transactions[i].AccountId)
 
-		if transactions[i].Type == models.TRANSACTION_DB_TYPE_TRANSFER_IN || transactions[i].Type == models.TRANSACTION_DB_TYPE_TRANSFER_OUT {
+		if (transactions[i].Type == models.TRANSACTION_DB_TYPE_TRANSFER_IN || transactions[i].Type == models.TRANSACTION_DB_TYPE_TRANSFER_OUT) && transactions[i].RelatedAccountId > 0 {
 			accountIds = append(accountIds, transactions[i].RelatedAccountId)
 		}
 
@@ -2900,7 +3184,7 @@ func (a *TransactionsApi) getTransactionUsedAccounts(c *core.WebContext, uid int
 	for i := 0; i < len(transactions); i++ {
 		accountIds = append(accountIds, transactions[i].AccountId)
 
-		if transactions[i].Type == models.TRANSACTION_DB_TYPE_TRANSFER_IN || transactions[i].Type == models.TRANSACTION_DB_TYPE_TRANSFER_OUT {
+		if (transactions[i].Type == models.TRANSACTION_DB_TYPE_TRANSFER_IN || transactions[i].Type == models.TRANSACTION_DB_TYPE_TRANSFER_OUT) && transactions[i].RelatedAccountId > 0 {
 			accountIds = append(accountIds, transactions[i].RelatedAccountId)
 		}
 	}
@@ -2918,7 +3202,7 @@ func (a *TransactionsApi) getTransactionUsedAccounts(c *core.WebContext, uid int
 			return nil, errs.ErrSourceAccountNotFound
 		}
 
-		if transactions[i].Type == models.TRANSACTION_DB_TYPE_TRANSFER_IN || transactions[i].Type == models.TRANSACTION_DB_TYPE_TRANSFER_OUT {
+		if (transactions[i].Type == models.TRANSACTION_DB_TYPE_TRANSFER_IN || transactions[i].Type == models.TRANSACTION_DB_TYPE_TRANSFER_OUT) && transactions[i].RelatedAccountId > 0 {
 			if _, exists := accountMap[transactions[i].RelatedAccountId]; !exists {
 				log.Warnf(c, "[transactions.getTransactionUsedAccounts] related account of transaction \"id:%d\" does not exist for user \"uid:%d\"", transactions[i].TransactionId, uid)
 				return nil, errs.ErrDestinationAccountNotFound
@@ -2935,7 +3219,7 @@ func (a *TransactionsApi) getTransactionResponseListResult(c *core.WebContext, u
 	for i := 0; i < len(transactions); i++ {
 		transaction := transactions[i]
 
-		if transaction.Type == models.TRANSACTION_DB_TYPE_TRANSFER_IN {
+		if transaction.Type == models.TRANSACTION_DB_TYPE_TRANSFER_IN && transaction.RelatedAccountId > 0 {
 			transaction = a.transactions.GetRelatedTransferTransaction(transaction)
 		}
 
@@ -2987,7 +3271,11 @@ func (a *TransactionsApi) createNewTransactionModel(uid int64, transactionCreate
 	} else if transactionCreateReq.Type == models.TRANSACTION_TYPE_INCOME {
 		transactionDbType = models.TRANSACTION_DB_TYPE_INCOME
 	} else if transactionCreateReq.Type == models.TRANSACTION_TYPE_TRANSFER {
-		transactionDbType = models.TRANSACTION_DB_TYPE_TRANSFER_OUT
+		if transactionCreateReq.SourceAccountId > 0 {
+			transactionDbType = models.TRANSACTION_DB_TYPE_TRANSFER_OUT
+		} else {
+			transactionDbType = models.TRANSACTION_DB_TYPE_TRANSFER_IN
+		}
 	}
 
 	transaction := &models.Transaction{
@@ -3004,8 +3292,17 @@ func (a *TransactionsApi) createNewTransactionModel(uid int64, transactionCreate
 	}
 
 	if transactionCreateReq.Type == models.TRANSACTION_TYPE_TRANSFER {
-		transaction.RelatedAccountId = transactionCreateReq.DestinationAccountId
-		transaction.RelatedAccountAmount = transactionCreateReq.DestinationAmount
+		if transactionCreateReq.SourceAccountId > 0 {
+			transaction.RelatedAccountId = transactionCreateReq.DestinationAccountId
+			transaction.RelatedAccountAmount = transactionCreateReq.DestinationAmount
+		} else {
+			transaction.AccountId = transactionCreateReq.DestinationAccountId
+			transaction.Amount = transactionCreateReq.DestinationAmount
+			if transaction.Amount == 0 {
+				transaction.Amount = transactionCreateReq.SourceAmount
+			}
+			transaction.RelatedAccountAmount = transaction.Amount
+		}
 	}
 
 	if transactionCreateReq.GeoLocation != nil {

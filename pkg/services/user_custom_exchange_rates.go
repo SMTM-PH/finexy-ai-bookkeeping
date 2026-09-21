@@ -15,6 +15,27 @@ type UserCustomExchangeRatesService struct {
 	ServiceUsingDB
 }
 
+// deleted_unix_time is part of the historical row primary key. Multiple writes
+// to one currency can happen within a second, so reserve the next unused value
+// instead of allowing a UNIQUE constraint failure.
+func nextUnusedExchangeRateDeletedTime(now int64, exists func(int64) (bool, error)) (int64, error) {
+	for candidate := now; ; candidate++ {
+		used, err := exists(candidate)
+		if err != nil {
+			return 0, err
+		}
+		if !used {
+			return candidate, nil
+		}
+	}
+}
+
+func reserveExchangeRateDeletedTime(sess *xorm.Session, uid int64, currency string, now int64) (int64, error) {
+	return nextUnusedExchangeRateDeletedTime(now, func(candidate int64) (bool, error) {
+		return sess.Cols("uid").Where("uid=? AND deleted_unix_time=? AND currency=?", uid, candidate, currency).Exist(&models.UserCustomExchangeRate{})
+	})
+}
+
 // Initialize a user custom exchange rate data service singleton instance
 var (
 	UserCustomExchangeRates = &UserCustomExchangeRatesService{
@@ -55,8 +76,14 @@ func (s *UserCustomExchangeRatesService) UpdateCustomExchangeRate(c core.Context
 		}
 
 		if has {
+			deletedTime, err := reserveExchangeRateDeletedTime(sess, uid, currency, now)
+
+			if err != nil {
+				return err
+			}
+
 			updateOldExchangeRateModel := &models.UserCustomExchangeRate{
-				DeletedUnixTime: now,
+				DeletedUnixTime: deletedTime,
 			}
 
 			_, err = sess.Cols("deleted_unix_time").Where("uid=? AND deleted_unix_time=? AND currency=?", uid, 0, currency).Update(updateOldExchangeRateModel)
@@ -117,6 +144,13 @@ func (s *UserCustomExchangeRatesService) DeleteCustomExchangeRate(c core.Context
 	}
 
 	return s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
+		deletedTime, err := reserveExchangeRateDeletedTime(sess, uid, currency, now)
+
+		if err != nil {
+			return err
+		}
+
+		updateModel.DeletedUnixTime = deletedTime
 		deletedRows, err := sess.Cols("deleted_unix_time").Where("uid=? AND deleted_unix_time=? AND currency=?", uid, 0, currency).Update(updateModel)
 
 		if err != nil {

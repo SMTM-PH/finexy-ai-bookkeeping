@@ -33,6 +33,7 @@ type TransactionCategory struct {
 
 // TransactionCategoryListRequest represents all parameters of transaction category listing request
 type TransactionCategoryListRequest struct {
+	LedgerId int64                   `form:"ledgerId,string" binding:"omitempty,min=1"`
 	Type     TransactionCategoryType `form:"type" binding:"min=0"`
 	ParentId int64                   `form:"parent_id,string,default=-1" binding:"min=-1"`
 }

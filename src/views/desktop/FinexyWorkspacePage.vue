@@ -15,6 +15,12 @@
                     >
                 </nav>
                 <div class="top-actions">
+                    <GlobalLedgerSwitcher
+                        :ledgers="ledgersStore.allLedgers"
+                        :selected-id="selectedLedgerId"
+                        :disabled="busy || ledgersStore.featureDisabled"
+                        @select="changeSelectedLedger"
+                    />
                     <button
                         class="icon-btn"
                         aria-label="搜索"
@@ -39,7 +45,7 @@
                         @click="accountMenuOpen = !accountMenuOpen"
                     >
                         <span>{{ currentUserInitial }}</span
-                        ><b>{{ currentUserName }}<small>个人账本</small></b
+                        ><b>{{ currentUserName }}<small>{{ selectedLedgerName }}</small></b
                         ><v-icon :icon="mdiChevronDown" size="14" />
                     </button>
                     <transition name="drop"
@@ -357,6 +363,7 @@
                                 <router-link to="/transaction/list"
                                     >查看流水</router-link
                                 ><button @click="editAccount">编辑账户</button>
+                                <button @click="openAccountLedgerEditor">迁移到账本</button>
                             </div>
                         </aside>
                         <aside v-else class="panel account-detail empty-state">
@@ -384,6 +391,29 @@
                                     }}
                                 </button></PanelHead
                             >
+                            <section class="budget-editor" aria-labelledby="monthly-budget-title">
+                                <header>
+                                    <div><small>MONTHLY BUDGET</small><b id="monthly-budget-title">每月支出限额</b></div>
+                                    <span>{{ budgetMonthLabel }}</span>
+                                </header>
+                                <label>本月支出总额度
+                                    <span class="money-input"><b>{{ userStore.currentUserDefaultCurrency || "CNY" }}</b><input v-model.trim="budgetTotalInput" inputmode="decimal" placeholder="例如 5000" /></span>
+                                </label>
+                                <details>
+                                    <summary>按支出分类设置额度（可选）</summary>
+                                    <p>分类额度用于单独提醒，不会自动加总或替代本月总额度。</p>
+                                    <div class="category-budget-list">
+                                        <label v-for="category in budgetCategories" :key="category.id">
+                                            <span>{{ category.name }}<small>{{ category.parentName }}</small></span>
+                                            <span class="money-input compact"><b>{{ userStore.currentUserDefaultCurrency || "CNY" }}</b><input :value="budgetCategoryInputs[category.id] || ''" inputmode="decimal" placeholder="不限制" @input="setBudgetCategoryInput(category.id, $event)" /></span>
+                                        </label>
+                                    </div>
+                                </details>
+                                <footer>
+                                    <button v-if="currentBudget" class="text-btn danger" type="button" :disabled="budgetSaving" @click="removeBudget">清除本月限额</button>
+                                    <button class="primary" type="button" :disabled="budgetSaving || !validBudgetTotal" @click="saveBudget">{{ budgetSaving ? "保存中" : "保存额度" }}</button>
+                                </footer>
+                            </section>
                             <div
                                 v-if="pendingOccurrences.length || dismissedOccurrences.length"
                                 class="review-block"
@@ -472,23 +502,29 @@
                             </p>
                             <article
                                 v-for="item in sortedSchedules"
-                                :key="item.title"
+                                :key="item.raw.id"
                                 class="schedule-row"
                             >
                                 <time
                                     ><b>{{ item.day }}</b
-                                    ><small>每月</small></time
+                                    ><small>{{ item.nextLabel }}</small></time
                                 ><span
                                     ><b>{{ item.title }}</b
-                                    ><small>{{ item.meta }}</small></span
+                                    ><small>{{ item.frequency }} · {{ item.meta }}</small></span
                                 ><strong>{{ item.amount }}</strong
-                                ><SwitchControl
-                                    :model-value="item.enabled"
-                                    :label="`启用${item.title}`"
-                                    @update:model-value="
-                                        toggleSchedule(item, $event)
-                                    "
-                                />
+                                ><div class="schedule-controls">
+                                    <button
+                                        class="text-btn"
+                                        type="button"
+                                        :aria-label="`编辑计划：${item.title}`"
+                                        @click="editSchedule(item)"
+                                    >编辑</button>
+                                    <SwitchControl
+                                        :model-value="item.enabled"
+                                        :label="`启用${item.title}`"
+                                        @update:model-value="toggleSchedule(item, $event)"
+                                    />
+                                </div>
                             </article>
                             <p v-if="!sortedSchedules.length" class="empty-copy">
                                 还没有周期计划。创建计划后，执行日期会显示在日历中。
@@ -576,7 +612,7 @@
                                 </header>
                                 <article
                                     v-for="item in selectedCalendarSchedules"
-                                    :key="item.title"
+                                    :key="`${item.raw.id}-${item.calendarDay}`"
                                 >
                                     <time>{{ item.day }} 日</time
                                     ><span
@@ -842,7 +878,7 @@
                                     </button>
                                 </div></template
                             ><template
-                                v-else-if="selectedSetting === 'AI 自动配置'"
+                                v-else-if="selectedSetting === 'AI 配置'"
                                 ><section
                                     class="ai-config-card"
                                     :class="{ ready: aiAutoConfigured }"
@@ -852,18 +888,36 @@
                                     </div>
                                     <div>
                                         <small>SERVER-SIDE API</small>
-                                        <h3>{{ aiAutoConfigured ? "AI 服务已自动接入" : "等待检测 AI 服务" }}</h3>
-                                        <p>浏览器不保存 API 密钥。Finexy 会自动使用自托管服务端已经配置的模型接口。</p>
+                                        <h3>{{ aiAutoConfigured ? "AI 服务已配置" : "配置 AI 服务" }}</h3>
+                                        <p>配置提交后只保存在自托管服务端；浏览器不会缓存或回显 API 密钥。</p>
                                     </div>
-                                    <span>{{ aiAutoConfigured ? "已连接" : "未检测" }}</span>
+                                    <span>{{ aiConfigurationLoading ? "读取中" : aiAutoConfigured ? "已启用" : "未启用" }}</span>
                                 </section>
+                                <div class="form-grid ai-config-form">
+                                    <label>接口类型<input value="OpenAI 兼容接口" disabled /></label>
+                                    <label>模型 ID <small>*</small><input v-model.trim="aiModelId" :disabled="!aiConfigurationEditable" placeholder="例如 deepseek-chat" autocomplete="off" /></label>
+                                    <label class="wide">API 地址 <small>*</small><input v-model.trim="aiBaseUrl" :disabled="!aiConfigurationEditable" type="url" placeholder="https://api.deepseek.com" autocomplete="url" /></label>
+                                    <label class="wide">API Key <input v-model="aiApiKey" :disabled="!aiConfigurationEditable" type="password" :placeholder="aiApiKeyConfigured ? '已配置；留空表示保持不变' : '请输入 API Key'" autocomplete="new-password" /></label>
+                                    <label>推理模式<select v-model="aiThinking" :disabled="!aiConfigurationEditable"><option value="off">关闭</option><option value="">由模型决定</option><option value="on">开启</option><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></label>
+                                    <label>请求超时（秒）<input v-model.number="aiTimeoutSeconds" :disabled="!aiConfigurationEditable" type="number" min="1" max="300" inputmode="numeric" /></label>
+                                </div>
+                                <div class="setting-row">
+                                    <span><b>启用 AI 文本记账</b><small>自然语言记账和 AI 月报将使用以上模型</small></span>
+                                    <SwitchControl v-model="aiEnabled" label="启用 AI 文本记账" :disabled="!aiConfigurationEditable" />
+                                </div>
+                                <div class="setting-row">
+                                    <span><b>模型支持图片（多模态）</b><small>开启后，收据或账单图片会直接发送给上述视觉模型识别；请确认所填模型支持图片输入</small></span>
+                                    <SwitchControl v-model="aiImageEnabled" label="启用 AI 图片识别" :disabled="!aiConfigurationEditable" />
+                                </div>
+                                <p class="ai-owner-note">使用方式：进入“交易”页面，点击“新增”右侧菜单，选择“AI 图片识别”，再上传或拖入收据图片。批量图片可从“导入”选择“AI 图片”。</p>
                                 <dl class="service-status ai-status">
                                     <div><dt>文本识别</dt><dd :class="{ income: aiTextRecognitionReady }">{{ aiTextRecognitionReady ? "可用" : "未配置" }}</dd></div>
                                     <div><dt>图片识别</dt><dd :class="{ income: aiImageRecognitionReady }">{{ aiImageRecognitionReady ? "可用" : "未配置" }}</dd></div>
-                                    <div><dt>密钥存储</dt><dd>仅服务端</dd></div>
+                                    <div><dt>API 密钥</dt><dd :class="{ income: aiApiKeyConfigured }">{{ aiApiKeyConfigured ? "仅服务端保存" : "尚未填写" }}</dd></div>
                                 </dl>
-                                <button class="primary save" type="button" @click="detectAIConfiguration">
-                                    <v-icon :icon="mdiRobotOutline" size="16" />自动检测并配置
+                                <p v-if="!aiConfigurationEditable && !aiConfigurationLoading" class="ai-owner-note" role="status">只有此服务器最早创建的有效账户可以修改全局 AI 配置。</p>
+                                <button class="primary save" type="button" :disabled="saving || aiConfigurationLoading || !aiConfigurationEditable || !aiBaseUrl || !aiModelId || (!aiApiKeyConfigured && !aiApiKey)" @click="saveAIConfiguration">
+                                    <v-icon :icon="saving ? mdiLoading : mdiCheck" :class="{ spin: saving }" size="16" />{{ saving ? "正在保存" : "保存并立即生效" }}
                                 </button></template
                             ><template v-else
                                 ><dl class="service-status">
@@ -886,7 +940,7 @@
                                         '安全设置',
                                         '数据管理',
                                         '本地服务',
-                                        'AI 自动配置',
+                                        'AI 配置',
                                     ].includes(selectedSetting)
                                 "
                                 class="primary save"
@@ -1032,7 +1086,7 @@
                                 <tr>
                                     <th>货币</th>
                                     <th>代码</th>
-                                    <th>1 单位可兑换</th>
+                                    <th>1 单位外币折合人民币</th>
                                     <th>今日变化</th>
                                     <th>状态</th>
                                 </tr>
@@ -1204,37 +1258,37 @@
                         </div>
                     </section>
 
-                    <section v-else class="about-layout">
+                    <section v-else-if="pageKey === 'about'" class="about-layout">
                         <div class="about-hero">
                             <i>F</i>
                             <p>FINEXY PERSONAL FINANCE</p>
                             <h2>清楚地记录，安心地生活。</h2>
                             <span
                                 >基于Finexy，为个人自托管场景提供简洁可靠的财务管理体验。</span
-                            ><b>版本 1.6.1</b>
+                            ><b>{{ clientDisplayVersion }}</b>
                         </div>
                         <div class="panel status">
                             <PanelHead eyebrow="SYSTEM STATUS" title="运行状态"
                                 ><span class="sync"
-                                    ><i></i>全部正常</span
+                                    ><i></i>当前页面已连接</span
                                 ></PanelHead
                             >
                             <dl>
                                 <div>
                                     <dt>应用服务</dt>
-                                    <dd>运行正常</dd>
+                                    <dd>已连接</dd>
                                 </div>
                                 <div>
-                                    <dt>本地数据库</dt>
-                                    <dd>已连接</dd>
+                                    <dt>客户端版本</dt>
+                                    <dd>{{ clientDisplayVersion }}</dd>
                                 </div>
                                 <div>
                                     <dt>数据存储</dt>
                                     <dd>自托管</dd>
                                 </div>
                                 <div>
-                                    <dt>最近备份</dt>
-                                    <dd>今天 03:00</dd>
+                                    <dt>构建时间</dt>
+                                    <dd>{{ clientBuildTime || "正式发行版" }}</dd>
                                 </div>
                             </dl>
                             <footer>
@@ -1248,9 +1302,289 @@
                             </footer>
                         </div>
                     </section>
+
+                    <section
+                        v-else-if="pageKey === 'goals'"
+                        class="panel goals"
+                    >
+                        <PanelHead eyebrow="SAVINGS GOALS" title="存钱计划">
+                            <label class="ledger-switch"
+                                >账本
+                                <select
+                                    :value="selectedGoalLedgerId"
+                                    aria-label="选择存钱计划所属账本"
+                                    @change="switchGoalLedger"
+                                >
+                                    <option
+                                        v-for="ledger in ledgersStore.allLedgers"
+                                        :key="ledger.id"
+                                        :value="ledger.id"
+                                    >
+                                        {{
+                                            ledger.id === DefaultLedgerId
+                                                ? `${ledger.name}（默认）`
+                                                : `${ledger.name}（${ledger.isFamilyLedger ? "家庭" : "个人"}）`
+                                        }}
+                                    </option>
+                                </select></label
+                            >
+                        </PanelHead>
+                        <div
+                            v-if="savingsGoalsStore.featureDisabled"
+                            class="empty-state"
+                        >
+                            <h2>存钱计划在本服务上不可用</h2>
+                            <p>当前部署的服务端尚未启用存钱目标接口。</p>
+                        </div>
+                        <div
+                            v-else-if="savingsGoalsStore.goals.length"
+                            class="goal-list"
+                        >
+                            <article
+                                v-for="goal in savingsGoalsStore.goals"
+                                :key="goal.id"
+                                class="goal-card"
+                            >
+                                <header>
+                                    <b>{{ goal.name }}</b
+                                    ><span
+                                        class="pill"
+                                        :class="{ achieved: goal.achieved }"
+                                        >{{
+                                            goal.achieved ? "已达成" : "进行中"
+                                        }}</span
+                                    >
+                                </header>
+                                <div class="goal-amounts">
+                                    <strong>{{
+                                        formatGoalMoney(goal.savedAmount)
+                                    }}</strong
+                                    ><small
+                                        >/ 目标
+                                        {{
+                                            formatGoalMoney(
+                                                goal.targetAmount,
+                                            )
+                                        }}</small
+                                    >
+                                </div>
+                                <div class="goal-progress" role="img" :aria-label="`已存入 ${goal.progressPercent.toFixed(1)}%`">
+                                    <i
+                                        :style="{
+                                            width:
+                                                Math.min(
+                                                    100,
+                                                    goal.progressPercent,
+                                                ) + '%',
+                                        }"
+                                    ></i>
+                                </div>
+                                <small class="goal-meta"
+                                    >目标
+                                    {{
+                                        formatGoalMoney(goal.targetAmount)
+                                    }}
+                                    · 目标日期
+                                    {{ formatGoalDate(goal.deadlineTime) }}
+                                    · 存入不计收入，取出不计支出</small
+                                >
+                                <footer>
+                                    <button
+                                        type="button"
+                                        @click="
+                                            openFundEditor(goal, 'deposit')
+                                        "
+                                    >
+                                        存入
+                                    </button>
+                                    <button
+                                        type="button"
+                                        :disabled="goal.savedAmount <= 0"
+                                        @click="
+                                            openFundEditor(goal, 'withdraw')
+                                        "
+                                    >
+                                        取出
+                                    </button>
+                                    <button
+                                        type="button"
+                                        @click="openGoalEditor(goal)"
+                                    >
+                                        编辑
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="danger"
+                                        :disabled="goal.savedAmount > 0"
+                                        @click="deleteGoalWithConfirm(goal)"
+                                    >
+                                        删除
+                                    </button>
+                                </footer>
+                            </article>
+                        </div>
+                        <div v-else class="empty-state">
+                            <h2>还没有存钱目标</h2>
+                            <p>
+                                创建一个目标，把大计划拆成每月能存下的小额；存入与取出只在账本资金内划转。
+                            </p>
+                            <button
+                                class="primary"
+                                type="button"
+                                @click="openGoalEditor()"
+                            >
+                                新建目标
+                            </button>
+                        </div>
+                    </section>
+
+                    <section v-else-if="pageKey === 'family'" class="panel family">
+                        <PanelHead eyebrow="LEDGER / 账本" title="账本管理" />
+                        <div class="family-summary">
+                            <div>
+                                <h2>{{ managedLedger.name }}</h2>
+                                <p>每个账本都有独立成员与数据范围。单人账本也可以随时邀请他人一起记账。</p>
+                            </div>
+                        </div>
+                        <div class="family-footer">
+                            <button type="button" @click="acceptLedgerInvite">用邀请码加入账本</button>
+                            <button v-if="managedLedgerId !== selectedLedgerId" type="button" @click="ledgersStore.select(managedLedgerId)">切换到此账本</button>
+                            <span v-else class="pill">正在使用</span>
+                        </div>
+                        <p class="join-guide">
+                            收到邀请后，点击“用邀请码加入账本”，先核对账本名称、邀请人和权限，再确认加入。
+                        </p>
+                        <section v-if="managedLedgerOverview" class="ledger-overview" aria-label="账本数据概览">
+                            <div><small>账户</small><strong>{{ managedLedgerOverview.accountCount }}</strong></div>
+                            <div><small>流水</small><strong>{{ managedLedgerOverview.transactionCount }}</strong></div>
+                            <div><small>存钱目标</small><strong>{{ managedLedgerOverview.savingsGoalCount }}</strong></div>
+                            <div><small>有效成员</small><strong>{{ managedLedgerOverview.activeMemberCount }}</strong></div>
+                            <footer>
+                                <small>账户余额</small>
+                                <span v-if="managedLedgerOverview.balances.length">
+                                    <b v-for="balance in managedLedgerOverview.balances" :key="balance.currency">{{ formatAmountToLocalizedNumeralsWithCurrency(balance.balance, balance.currency) }}</b>
+                                </span>
+                                <span v-else>暂无可用账户</span>
+                            </footer>
+                        </section>
+                        <div class="member-list">
+                            <article v-for="ledger in ledgersStore.allLedgers" :key="ledger.id" class="member-row">
+                                <div>
+                                    <b>{{ ledger.name }}</b>
+                                    <small>{{ ledger.id === DefaultLedgerId ? "兼容默认账本" : (ledger.comment || "独立账本") }}</small>
+                                </div>
+                                <button type="button" :class="{ primary: ledger.id === managedLedgerId }"
+                                    @click="selectManagedLedger(ledger.id)">
+                                    {{ ledger.id === managedLedgerId ? "正在查看" : "查看详情" }}
+                                </button>
+                            </article>
+                        </div>
+                        <p v-if="managedLedgerError" role="alert">{{ managedLedgerError }} <button type="button" @click="selectManagedLedger(managedLedgerId)">重试</button></p>
+                        <p v-if="managedLedgerLoading" role="status">正在加载账本成员…</p>
+                        <div v-if="managedLedgerId === DefaultLedgerId" class="empty-state">
+                            <h2>默认账本暂不支持共享</h2>
+                            <p>点击页面右上角“创建账本”，选择“家庭共享”模板；创建后即可在账本详情邀请成员。</p>
+                        </div>
+                        <template v-else>
+                            <h3>成员（{{ ledgersStore.members.filter(member => member.status === 1).length }}）</h3>
+                            <div class="member-list">
+                                <article v-for="member in ledgersStore.members" :key="member.id" class="member-row" :class="{ inactive: member.status !== 1 }">
+                                    <div>
+                                        <b>{{ member.nickname || ('成员 ' + member.uid) }}</b>
+                                        <small>{{ ledgerRoleLabel(member.role) }}</small>
+                                    </div>
+                                    <div v-if="member.status === 1 && member.role !== 1 && currentLedgerCanManage && (member.role !== 2 || managedLedgerIsOwner)" class="member-actions">
+                                        <button type="button" @click="changeLedgerRole(member.id, member.role)">权限</button>
+                                        <button type="button" class="danger" @click="removeLedgerMember(member.id)">移除</button>
+                                    </div>
+                                </article>
+                            </div>
+                            <h3 v-if="currentLedgerCanManage">邀请记录</h3>
+                            <div v-if="ledgersStore.invitations.length" class="member-list">
+                                <article v-for="invitation in ledgersStore.invitations" :key="invitation.id" class="member-row">
+                                    <div><b>{{ invitation.inviteeName }}</b><small>{{ ledgerRoleLabel(invitation.role) }} · {{ invitation.status === 1 ? "待接受" : "已处理" }}</small></div>
+                                    <button v-if="invitation.status === 1 && currentLedgerCanManage" type="button" @click="revokeLedgerInvite(invitation.id)">撤销</button>
+                                </article>
+                            </div>
+                            <p v-else-if="currentLedgerCanManage" class="muted-note">还没有邀请记录。</p>
+                            <footer class="family-footer">
+                                <button v-if="currentLedgerCanManage" class="primary" type="button" @click="inviteLedgerMember">邀请成员</button>
+                                <button v-if="managedLedgerIsOwner" type="button" class="danger" @click="deleteManagedLedger">删除账本</button>
+                            </footer>
+                        </template>
+                    </section>
                 </main>
             </div>
         </div>
+
+        <v-dialog v-model="ledgerActionOpen" :persistent="ledgerActionBusy" max-width="520">
+            <v-card :title="ledgerActionTitle">
+                <v-card-text>
+                    <p class="mb-4">{{ ledgerActionLedgerName }}</p>
+                    <p v-if="ledgerActionKind === 'remove'">移除后对方将无法访问此账本，历史流水保留。</p>
+                    <template v-else-if="ledgerActionKind === 'delete'">
+                        <template v-if="!ledgerDeletePreview">
+                            <p>{{ ledgerActionBusy ? '正在检查账本关联数据…' : '尚未取得删除影响数据。' }}</p>
+                            <v-btn v-if="!ledgerActionBusy" variant="outlined" @click="deleteManagedLedger">重新检查</v-btn>
+                        </template>
+                        <div v-else class="delete-impact" :class="{ blocked: !ledgerDeletePreview.canDelete }">
+                            <strong>{{ ledgerDeletePreview.canDelete ? '可以删除此账本' : '暂时无法删除' }}</strong>
+                            <p>{{ ledgerDeletePreview.activeMemberCount }} 位有效成员 · {{ ledgerDeletePreview.pendingInvitationCount }} 个待接受邀请</p>
+                            <dl>
+                                <div><dt>账户记录</dt><dd>{{ ledgerDeletePreview.accountCount }}</dd></div>
+                                <div><dt>流水记录</dt><dd>{{ ledgerDeletePreview.transactionCount }}</dd></div>
+                                <div><dt>存钱目标</dt><dd>{{ ledgerDeletePreview.savingsGoalCount }}</dd></div>
+                                <div><dt>目标资金记录</dt><dd>{{ ledgerDeletePreview.savingsGoalFundCount }}</dd></div>
+                            </dl>
+                            <p v-if="ledgerDeletePreview.canDelete">删除后所有成员将无法访问，待接受邀请会同时失效。</p>
+                            <p v-else>请先迁移或删除上述关联财务数据，再重新检查。</p>
+                        </div>
+                        <v-text-field v-if="ledgerDeletePreview?.canDelete" v-model="ledgerActionInput" label="输入账本名称确认删除" :disabled="ledgerActionBusy" />
+                    </template>
+                    <template v-else-if="ledgerActionToken">
+                        <div class="invitation-result" role="status">
+                            <small>账本邀请码</small>
+                            <div class="invitation-code">{{ ledgerActionToken }}</div>
+                            <p>24 小时内一次有效。请让对方打开“账本”页面，点击“用邀请码加入账本”，核对信息后确认加入。</p>
+                            <v-btn variant="outlined" :prepend-icon="mdiContentCopy" @click="copyLedgerInvitation">复制邀请码</v-btn>
+                        </div>
+                    </template>
+                    <template v-else-if="ledgerActionKind === 'accept' && ledgerInvitationPreview">
+                        <div class="invite-preview">
+                            <small>将加入账本</small>
+                            <strong>{{ ledgerInvitationPreview.ledger.name }}</strong>
+                            <p>{{ ledgerInvitationPreview.ledger.comment || '该账本没有填写说明。' }}</p>
+                            <dl>
+                                <div><dt>邀请权限</dt><dd>{{ ledgerRoleLabel(ledgerInvitationPreview.role) }}</dd></div>
+                                <div><dt>邀请备注</dt><dd>{{ ledgerInvitationPreview.inviteeName }}</dd></div>
+                                <div v-if="ledgerInvitationPreview.inviterNickname"><dt>邀请人</dt><dd>{{ ledgerInvitationPreview.inviterNickname }}</dd></div>
+                                <div><dt>有效期至</dt><dd>{{ new Date(ledgerInvitationPreview.expiredTime * 1000).toLocaleString() }}</dd></div>
+                            </dl>
+                        </div>
+                        <v-btn variant="text" :disabled="ledgerActionBusy" @click="ledgerInvitationPreview = null">重新输入邀请码</v-btn>
+                    </template>
+                    <template v-else>
+                        <ol v-if="ledgerActionKind === 'accept'" class="invite-steps" aria-label="加入账本步骤">
+                            <li><span>1</span>粘贴邀请人发来的邀请码</li>
+                            <li><span>2</span>预览账本、邀请人和成员权限</li>
+                            <li><span>3</span>确认后加入，并从顶部切换账本</li>
+                        </ol>
+                        <v-text-field v-if="ledgerActionKind !== 'role'" v-model="ledgerActionInput" :label="ledgerActionKind === 'invite' ? '受邀人称呼' : '账本邀请码'" :disabled="ledgerActionBusy" maxlength="64" />
+                        <v-radio-group v-if="ledgerActionKind !== 'accept'" v-model="ledgerActionRole" label="成员权限" :disabled="ledgerActionBusy">
+                            <v-radio v-if="ledgerActionKind === 'role' && managedLedgerIsOwner" label="管理员：管理账目与普通成员" :value="2" />
+                            <v-radio label="普通成员：可以记账" :value="3" />
+                            <v-radio label="只读成员：仅查看" :value="4" />
+                        </v-radio-group>
+                    </template>
+                    <p v-if="ledgerActionError" role="alert">{{ ledgerActionError }}</p>
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer />
+                    <v-btn :disabled="ledgerActionBusy" @click="ledgerActionOpen = false">{{ ledgerActionToken ? '完成' : '取消' }}</v-btn>
+                    <v-btn v-if="!ledgerActionToken && !(ledgerActionKind === 'delete' && ledgerDeletePreview && !ledgerDeletePreview.canDelete)" :loading="ledgerActionBusy" :disabled="ledgerActionKind === 'delete' && !ledgerDeletePreview" :color="ledgerActionKind === 'remove' || ledgerActionKind === 'delete' ? 'error' : 'primary'" @click="submitLedgerAction">{{ ledgerActionSubmitLabel }}</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
 
         <Teleport to="body"
             ><transition name="drawer"
@@ -1792,6 +2126,154 @@
         >
         <transition name="drop"
             ><div
+                v-if="goalEditorOpen"
+                class="modal-mask"
+                @click.self="closeGoalEditor"
+            >
+                <form class="modal" role="dialog" aria-modal="true" aria-labelledby="goal-editor-title" @submit.prevent="submitGoalEditor">
+                    <header>
+                        <div>
+                            <small>SAVINGS GOAL</small>
+                            <h2 id="goal-editor-title">
+                                {{ editingGoal ? "编辑存钱目标" : "新建存钱目标" }}
+                            </h2>
+                        </div>
+                        <button type="button" aria-label="关闭" @click="closeGoalEditor">
+                            <v-icon :icon="mdiClose" />
+                        </button>
+                    </header>
+                    <div class="modal-fields">
+                        <p class="muted-note">
+                            目标归属
+                            {{ selectedGoalLedgerName }}；创建或编辑目标本身不会移动资金。
+                        </p>
+                        <label>目标名称 *<input v-model.trim="goalFormName" required maxlength="30" autofocus placeholder="例如：全家旅行基金" /></label>
+                        <label>目标金额（{{ userStore.currentUserDefaultCurrency || "CNY" }}） *<input v-model.trim="goalFormTarget" inputmode="decimal" required placeholder="0.00" /></label>
+                        <label>目标日期（可选）<input v-model="goalFormDeadline" type="date" /></label>
+                        <label>备注<input v-model.trim="goalFormComment" maxlength="100" placeholder="记录为什么存这笔钱" /></label>
+                        <p v-if="goalEditorError" class="form-error" role="alert">{{ goalEditorError }}</p>
+                    </div>
+                    <footer>
+                        <button type="button" @click="closeGoalEditor">取消</button>
+                        <button class="primary" type="button" :disabled="goalEditorBusy" @click="submitGoalEditor">
+                            {{ goalEditorBusy ? "保存中" : editingGoal ? "保存修改" : "创建目标" }}
+                        </button>
+                    </footer>
+                </form>
+            </div></transition
+        >
+        <transition name="drop"
+            ><div
+                v-if="fundEditorOpen && fundFormGoal"
+                class="modal-mask"
+                @click.self="closeFundEditor"
+            >
+                <form class="modal" role="dialog" aria-modal="true" aria-labelledby="fund-editor-title" @submit.prevent="submitFundEditor">
+                    <header>
+                        <div>
+                            <small>{{ fundEditorMode === "deposit" ? "DEPOSIT" : "WITHDRAW" }}</small>
+                            <h2 id="fund-editor-title">
+                                {{ fundEditorMode === "deposit" ? `向「${fundFormGoal.name}」存入` : `从「${fundFormGoal.name}」取出` }}
+                            </h2>
+                        </div>
+                        <button type="button" aria-label="关闭" @click="closeFundEditor">
+                            <v-icon :icon="mdiClose" />
+                        </button>
+                    </header>
+                    <div class="modal-fields">
+                        <p class="muted-note">
+                            已存
+                            {{ formatGoalMoney(fundFormGoal.savedAmount) }} /
+                            目标 {{ formatGoalMoney(fundFormGoal.targetAmount) }}。存入只把账本资金划入目标，不计入收入；取出回到所选账户，不计入支出，最多不超过已存金额。
+                        </p>
+                        <label>金额（{{ userStore.currentUserDefaultCurrency || "CNY" }}） *<input v-model.trim="fundFormAmount" inputmode="decimal" required autofocus placeholder="0.00" /></label>
+                        <label>资金账户 *
+                            <select v-model="fundFormAccountId" required>
+                                <option value="" disabled>选择账户</option>
+                                <option
+                                    v-for="account in savingsGoalsStore.fundAccounts"
+                                    :key="account.id"
+                                    :value="account.id"
+                                >
+                                    {{ fundAccountLabel(account) }}
+                                </option>
+                            </select>
+                            <small>账户必须属于「{{ selectedGoalLedgerName }}」；不属于该账本的账户会被服务端拒绝。</small>
+                        </label>
+                        <label>备注<input v-model.trim="fundFormComment" maxlength="60" placeholder="可选" /></label>
+                        <p v-if="fundEditorError" class="form-error" role="alert">{{ fundEditorError }}</p>
+                    </div>
+                    <footer>
+                        <button type="button" @click="closeFundEditor">取消</button>
+                        <button class="primary" type="button" :disabled="fundEditorBusy" @click="submitFundEditor">
+                            {{ fundEditorBusy ? "处理中" : fundEditorMode === "deposit" ? "确认存入" : "确认取出" }}
+                        </button>
+                    </footer>
+                </form>
+            </div></transition
+        >
+        <transition name="drop"
+            ><div
+                v-if="ledgerEditorOpen"
+                class="modal-mask"
+                @click.self="closeLedgerEditor"
+            >
+                <form class="modal" role="dialog" aria-modal="true" aria-labelledby="ledger-editor-title" @submit.prevent="ledgerEditorStep === 1 ? ledgerEditorStep = 2 : submitLedgerEditor()">
+                    <header>
+                        <div><small>CREATE LEDGER · {{ ledgerEditorStep }}/2</small><h2 id="ledger-editor-title">{{ ledgerEditorStep === 1 ? "选择账本模板" : "填写账本信息" }}</h2></div>
+                        <button type="button" aria-label="关闭" @click="closeLedgerEditor"><v-icon :icon="mdiClose" /></button>
+                    </header>
+                    <div class="modal-fields">
+                        <template v-if="ledgerEditorStep === 1">
+                            <button class="template-option" type="button" :class="{ selected: ledgerTemplate === 'personal' }" @click="selectLedgerTemplate('personal')"><b>个人账本</b><span>自己记录日常收支</span></button>
+                            <button class="template-option" type="button" :class="{ selected: ledgerTemplate === 'family' }" @click="selectLedgerTemplate('family')"><b>家庭共享</b><span>创建后邀请家人一起记账</span></button>
+                            <p class="muted-note">模板只预填名称和描述，创建后使用相同的账本与成员规则。</p>
+                        </template>
+                        <template v-else>
+                            <p class="muted-note">创建后你是所有者，可随时邀请成员。</p>
+                            <label>账本名称 *<input v-model.trim="ledgerFormName" required maxlength="64" autofocus placeholder="例如：个人生活" /></label>
+                            <label>描述<input v-model.trim="ledgerFormComment" maxlength="200" placeholder="可选" /></label>
+                        </template>
+                        <p v-if="ledgerEditorError" class="form-error" role="alert">{{ ledgerEditorError }}</p>
+                    </div>
+                    <footer>
+                        <button type="button" @click="closeLedgerEditor">取消</button>
+                        <button v-if="ledgerEditorStep === 2" type="button" :disabled="ledgerEditorBusy" @click="ledgerEditorStep = 1">上一步</button>
+                        <button class="primary" type="submit" :disabled="ledgerEditorBusy">{{ ledgerEditorStep === 1 ? "下一步" : ledgerEditorBusy ? "创建中" : "创建账本" }}</button>
+                    </footer>
+                </form>
+            </div></transition
+        >
+        <transition name="drop"
+            ><div
+                v-if="accountLedgerEditorOpen"
+                class="modal-mask"
+                @click.self="closeAccountLedgerEditor"
+            >
+                <form class="modal" role="dialog" aria-modal="true" aria-labelledby="account-ledger-editor-title" @submit.prevent="submitAccountLedgerEditor">
+                    <header>
+                        <div><small>MOVE ACCOUNT</small><h2 id="account-ledger-editor-title">迁移账户到账本</h2></div>
+                        <button type="button" aria-label="关闭" @click="closeAccountLedgerEditor"><v-icon :icon="mdiClose" /></button>
+                    </header>
+                    <div class="modal-fields">
+                        <p class="muted-note">“{{ accountLedgerEditorAccount?.name }}”的子账户和兼容历史流水会一并迁移，余额不会改变。关联存钱计划、交易模板、待确认周期或其他账户转账时，服务端会拒绝迁移并保留原数据。</p>
+                        <label>目标账本 *
+                            <select v-model="accountLedgerTargetId" required autofocus>
+                                <option value="" disabled>选择目标账本</option>
+                                <option v-for="ledger in availableAccountTargetLedgers" :key="ledger.id" :value="ledger.id">{{ ledger.name }}{{ ledger.isFamilyLedger ? " · 家庭" : " · 个人" }}</option>
+                            </select>
+                        </label>
+                        <p v-if="accountLedgerEditorError" class="form-error" role="alert">{{ accountLedgerEditorError }}</p>
+                    </div>
+                    <footer>
+                        <button type="button" @click="closeAccountLedgerEditor">取消</button>
+                        <button class="primary" type="submit" :disabled="accountLedgerEditorBusy || !accountLedgerTargetId">{{ accountLedgerEditorBusy ? "迁移中" : "确认迁移" }}</button>
+                    </footer>
+                </form>
+            </div></transition
+        >
+        <transition name="drop"
+            ><div
                 v-if="aboutInfo"
                 class="modal-mask"
                 @click.self="aboutInfo = null"
@@ -1836,6 +2318,7 @@
         <TransactionEditDialog
             ref="transactionEditDialog"
             :type="TransactionEditPageType.Transaction"
+            :ledger-id="selectedLedgerId === DefaultLedgerId ? undefined : selectedLedgerId"
         />
         <TransactionEditDialog
             ref="templateEditDialog"
@@ -1843,6 +2326,7 @@
         />
         <AccountEditDialog ref="accountEditDialog" />
         <CategoryEditDialog ref="categoryEditDialog" />
+        <ConfirmDialog ref="confirmDialog" />
     </div>
 </template>
 
@@ -1863,6 +2347,8 @@ import TransactionEditDialog from "@/views/desktop/transactions/list/dialogs/Edi
 import { TransactionEditPageType } from "@/views/base/transactions/TransactionEditPageBase.ts";
 import AccountEditDialog from "@/views/desktop/accounts/list/dialogs/EditDialog.vue";
 import CategoryEditDialog from "@/views/desktop/categories/list/dialogs/EditDialog.vue";
+import ConfirmDialog from "@/components/desktop/ConfirmDialog.vue";
+import GlobalLedgerSwitcher from "@/components/desktop/GlobalLedgerSwitcher.vue";
 import { useAccountsStore } from "@/stores/account.ts";
 import { useTransactionCategoriesStore } from "@/stores/transactionCategory.ts";
 import { useTransactionTagsStore } from "@/stores/transactionTag.ts";
@@ -1873,13 +2359,16 @@ import { useSettingsStore } from "@/stores/setting.ts";
 import { useTransactionsStore } from "@/stores/transaction.ts";
 import { useAIReviewItemsStore } from "@/stores/aiReviewItem.ts";
 import { useScheduledOccurrencesStore } from "@/stores/scheduledOccurrence.ts";
-import { useOverviewStore } from "@/stores/overview.ts";
+import { useLedgersStore } from "@/stores/ledger.ts";
+import { useSavingsGoalsStore } from "@/stores/savingsGoal.ts";
+import { useMonthlyBudgetStore } from "@/stores/monthlyBudget.ts";
 import { useUserStore } from "@/stores/user.ts";
 import { useRootStore } from "@/stores/index.ts";
 import { TransactionTag } from "@/models/transaction_tag.ts";
 import { TransactionCategory } from "@/models/transaction_category.ts";
 import { TransactionTemplate } from "@/models/transaction_template.ts";
 import { Transaction } from "@/models/transaction.ts";
+import { Account } from "@/models/account.ts";
 import type { AIReviewItemInfoResponse } from "@/models/ai_review_item.ts";
 import {
     ProductAssetCategory,
@@ -1887,15 +2376,23 @@ import {
     type ProductAssetInfoResponse,
 } from "@/models/product_asset.ts";
 import { CategoryType } from "@/core/category.ts";
-import { TemplateType } from "@/core/template.ts";
+import { ScheduledTemplateFrequencyType, TemplateType } from "@/core/template.ts";
 import { TransactionType } from "@/core/transaction.ts";
 import { ScheduledOccurrence } from "@/models/scheduled_occurrence.ts";
+import { DefaultLedgerId, type LedgerDeletePreview, type LedgerInvitationPreview, type LedgerOverview } from "@/models/ledger.ts";
+import { SavingsGoal } from "@/models/savings_goal.ts";
 import { generateRandomUUID } from "@/lib/misc.ts";
+import { scheduleDaysInMonth } from "@/lib/schedule.ts";
+import { getCnyValueForCurrency } from "@/lib/exchange_rate.ts";
 import { AMOUNT_FACTOR } from "@/consts/numeral.ts";
 import { getCurrentUnixTime } from "@/lib/datetime.ts";
+import services from "@/lib/services.ts";
+import logger from "@/lib/logger.ts";
+import { getClientDisplayVersion, getClientBuildTime } from "@/lib/version.ts";
 import {
     isTransactionFromAIImageRecognitionEnabled,
-    isTransactionFromAITextRecognitionEnabled,
+    setTransactionFromAIImageRecognitionEnabled,
+    setTransactionFromAITextRecognitionEnabled,
 } from "@/lib/server_settings.ts";
 import { useI18n } from "@/locales/helpers.ts";
 import {
@@ -1911,12 +2408,14 @@ import {
     mdiClose,
     mdiCogOutline,
     mdiControllerClassicOutline,
+    mdiContentCopy,
     mdiCreditCardOutline,
     mdiDownloadOutline,
     mdiFileDocumentOutline,
     mdiFilterOutline,
     mdiFridgeOutline,
     mdiHelpCircleOutline,
+    mdiBookOpenOutline,
     mdiInformationOutline,
     mdiLaptop,
     mdiLayersOutline,
@@ -1924,6 +2423,7 @@ import {
     mdiLogout,
     mdiMagnify,
     mdiPackageVariantClosed,
+    mdiPiggyBankOutline,
     mdiPlayOutline,
     mdiPlus,
     mdiRefresh,
@@ -1947,6 +2447,8 @@ type PageKey =
     | "templates"
     | "rates"
     | "assets"
+    | "goals"
+    | "family"
     | "settings"
     | "about";
 type Tone = "success" | "warning" | "neutral";
@@ -1995,6 +2497,7 @@ interface RecommendedTemplate {
     title: string;
     description: string;
     type: number;
+    recurring?: boolean;
 }
 
 const PanelHead = defineComponent({
@@ -2041,7 +2544,7 @@ const StatusPill = defineComponent({
     },
 });
 const SwitchControl = defineComponent({
-    props: { modelValue: Boolean, label: { type: String, required: true } },
+    props: { modelValue: Boolean, label: { type: String, required: true }, disabled: Boolean },
     emits: ["update:modelValue"],
     setup(props, { emit }) {
         return () =>
@@ -2049,6 +2552,7 @@ const SwitchControl = defineComponent({
                 h("input", {
                     type: "checkbox",
                     checked: props.modelValue,
+                    disabled: props.disabled,
                     "aria-label": props.label,
                     onChange: (e: Event) =>
                         emit(
@@ -2075,6 +2579,8 @@ const accountEditDialog =
     useTemplateRef<AccountDialogType>("accountEditDialog");
 const categoryEditDialog =
     useTemplateRef<CategoryDialogType>("categoryEditDialog");
+type ConfirmDialogType = InstanceType<typeof ConfirmDialog>;
+const confirmDialog = useTemplateRef<ConfirmDialogType>("confirmDialog");
 const accountsStore = useAccountsStore();
 const categoriesStore = useTransactionCategoriesStore();
 const tagsStore = useTransactionTagsStore();
@@ -2085,10 +2591,19 @@ const settingsStore = useSettingsStore();
 const transactionsStore = useTransactionsStore();
 const aiReviewItemsStore = useAIReviewItemsStore();
 const occurrencesStore = useScheduledOccurrencesStore();
-const overviewStore = useOverviewStore();
+const ledgersStore = useLedgersStore();
+const savingsGoalsStore = useSavingsGoalsStore();
+const monthlyBudgetStore = useMonthlyBudgetStore();
 const userStore = useUserStore();
 const rootStore = useRootStore();
 const { formatAmountToLocalizedNumeralsWithCurrency } = useI18n();
+const selectedLedgerId = computed(() => ledgersStore.selectedLedgerId);
+const selectedLedgerName = computed(() => ledgersStore.selectedLedger.name);
+const selectedLedgerCanWrite = computed(() => {
+    if (selectedLedgerId.value === DefaultLedgerId) return true;
+    const me = ledgersStore.members.find(member => member.isCurrentUser && member.status === 1);
+    return me?.role === 1 || me?.role === 2 || me?.role === 3;
+});
 const topTabs = [
     { label: "总览", path: "/", key: "home" },
     { label: "流水", path: "/transaction/list", key: "activity" },
@@ -2107,6 +2622,16 @@ const toolItems = [
         path: "/product/assets",
         icon: mdiPackageVariantClosed,
     },
+    {
+        label: "存钱计划",
+        path: "/savings/goals",
+        icon: mdiPiggyBankOutline,
+    },
+    {
+        label: "账本",
+        path: "/ledger/manage",
+        icon: mdiBookOpenOutline,
+    },
 ];
 const pageMap: Record<string, PageKey> = {
     "/transaction/list": "activity",
@@ -2120,6 +2645,8 @@ const pageMap: Record<string, PageKey> = {
     "/template/list": "templates",
     "/exchange_rates": "rates",
     "/product/assets": "assets",
+    "/savings/goals": "goals",
+    "/ledger/manage": "family",
     "/app/settings": "settings",
     "/about": "about",
 };
@@ -2264,6 +2791,34 @@ const configs: Record<PageKey, RawConfig> = {
             ["日均使用成本", "—", "正在计算持有成本", "neutral"],
         ],
     },
+    goals: {
+        eyebrow: "SAVINGS / 存钱计划",
+        title: "把大目标，存成小确幸。",
+        description:
+            "按账本管理存钱目标；存入与取出只在账本资金内划转，不计入收入与支出。",
+        action: "新建目标",
+        actionIcon: mdiPlus,
+        values: [
+            ["累计存入", "—", "正在读取存钱计划", "neutral"],
+            ["进行中目标", "—", "正在统计目标数量", "neutral"],
+            ["目标缺口", "—", "按未达成目标计算", "neutral"],
+            ["已达成", "—", "累计存入达到目标金额", "up"],
+        ],
+    },
+    family: {
+        eyebrow: "LEDGERS / 账本",
+        title: "每一本账，都各自清楚。",
+        description:
+            "创建独立账本、查看账本数据，并按账本邀请成员一起记账。",
+        action: "创建账本",
+        actionIcon: mdiPlus,
+        values: [
+            ["我的账本", "—", "正在读取账本信息", "neutral"],
+            ["活跃成员", "—", "正在读取成员列表", "neutral"],
+            ["待接受邀请", "—", "一次有效，可随时撤销", "neutral"],
+            ["我的角色", "—", "由所有者分配", "up"],
+        ],
+    },
     settings: {
         eyebrow: "SYSTEM / 设置",
         title: "系统为你而工作。",
@@ -2295,9 +2850,7 @@ const config = computed<Config>(() => {
     const source = configs[pageKey.value];
     let values = source.values;
     if (pageKey.value === "activity") {
-        const month = overviewStore.transactionOverview.thisMonth;
-        const income = month?.incomeAmount ?? 0;
-        const expense = month?.expenseAmount ?? 0;
+        const { income, expense } = currentLedgerMonthTotals.value;
         values = [
             ["本月收入", formatBookkeepingMoney(income), "来自当前账本", "up"],
             ["本月支出", formatBookkeepingMoney(expense), "来自当前账本", "down"],
@@ -2323,9 +2876,7 @@ const config = computed<Config>(() => {
             ["最近执行日", enabled.length ? `${Math.min(...enabled.map(item => Number(item.day)))} 日` : "暂无", "本月计划", "neutral"],
         ];
     } else if (pageKey.value === "reports") {
-        const month = overviewStore.transactionOverview.thisMonth;
-        const income = month?.incomeAmount ?? 0;
-        const expense = month?.expenseAmount ?? 0;
+        const { income, expense } = currentLedgerMonthTotals.value;
         const transactionCount = transactions.value.length;
         values = [
             ["本月净收入", formatBookkeepingMoney(income - expense), "收入减去支出", income >= expense ? "up" : "down"],
@@ -2383,6 +2934,47 @@ const config = computed<Config>(() => {
                 "neutral",
             ],
         ];
+    } else if (pageKey.value === "goals" && savingsGoalsStore.loaded) {
+        const list = savingsGoalsStore.goals;
+        const saved = list.reduce((sum, item) => sum + item.savedAmount, 0);
+        const achieved = list.filter((item) => item.achieved).length;
+        const gap = list.reduce(
+            (sum, item) => sum + Math.max(0, item.targetAmount - item.savedAmount),
+            0,
+        );
+        values = [
+            [
+                "累计存入",
+                formatGoalMoney(saved),
+                `${selectedGoalLedgerName.value} · 不计入收支`,
+                "up",
+            ],
+            [
+                "进行中目标",
+                `${list.length - achieved} 个`,
+                `共 ${list.length} 个目标`,
+                "neutral",
+            ],
+            [
+                "目标缺口",
+                formatGoalMoney(gap),
+                "按未达成目标计算",
+                "neutral",
+            ],
+            [
+                "已达成",
+                `${achieved} 个`,
+                "累计存入达到目标金额",
+                "up",
+            ],
+        ];
+    } else if (pageKey.value === "family") {
+        values = [
+            ["当前账本", selectedLedgerName.value, "数据始终按账本隔离", "up"],
+            ["可用账本", `${ledgersStore.allLedgers.length} 个`, "个人也可创建多个账本", "neutral"],
+            ["成员", `${ledgersStore.members.filter(member => member.status === 1).length} 位`, "可在账本详情邀请", "neutral"],
+            ["待接受邀请", `${ledgersStore.invitations.filter(item => item.status === 1).length} 个`, "邀请一次有效", "neutral"],
+        ];
     } else if (pageKey.value === "categories") {
         const primary = Object.values(
             categoriesStore.allTransactionCategories,
@@ -2422,6 +3014,13 @@ const config = computed<Config>(() => {
             ["刷新入口", "1 个", "顶部更新汇率", "neutral"],
             ["自动更新", settingsStore.appSettings.autoUpdateExchangeRatesData ? "已开启" : "已关闭", "可在应用设置调整", "neutral"],
         ];
+    } else if (pageKey.value === "about") {
+        values = [
+            ["客户端版本", clientDisplayVersion, "来自当前构建", "neutral"],
+            ["服务状态", "已连接", "当前页面可访问服务端", "up"],
+            ["数据位置", "自托管", "由当前服务器保存", "neutral"],
+            ["构建时间", clientBuildTime || "正式发行版", "不再显示模拟运行数据", "neutral"],
+        ];
     }
     return {
         ...source,
@@ -2436,6 +3035,21 @@ const config = computed<Config>(() => {
 });
 
 const transactions = ref<Item[]>([]);
+const ledgerReportTrends = ref<Array<{
+    year: number;
+    month: number;
+    items: Array<{ categoryId: string; amount: number }>;
+}>>([]);
+const currentLedgerMonthTotals = computed(() => {
+    let income = 0;
+    let expense = 0;
+    for (const item of transactions.value) {
+        if (!(item.raw instanceof Transaction)) continue;
+        if (item.raw.type === TransactionType.Income) income += item.raw.sourceAmount;
+        else if (item.raw.type === TransactionType.Expense) expense += item.raw.sourceAmount;
+    }
+    return { income, expense };
+});
 const accounts = computed<Item[]>(() => {
     const colors = ["#12141A", "#F05537", "#4F46E5"];
     const live = accountsStore.allVisiblePlainAccounts
@@ -2456,22 +3070,33 @@ const accounts = computed<Item[]>(() => {
     return live;
 });
 const selectedAccount = ref<Item | null>(null);
+const accountLedgerEditorOpen = ref(false);
+const accountLedgerEditorAccount = ref<Account | null>(null);
+const accountLedgerTargetId = ref("");
+const accountLedgerEditorBusy = ref(false);
+const accountLedgerEditorError = ref("");
+const availableAccountTargetLedgers = computed(() =>
+    ledgersStore.allLedgers.filter((ledger) => ledger.id !== selectedLedgerId.value),
+);
 const schedules = computed(() => {
     const live = (
         templatesStore.allTransactionTemplates[TemplateType.Schedule.type] || []
     )
-        .slice(0, 8)
-        .map((item, index) => ({
-            day: String(item.scheduledAt || index + 1)
-                .padStart(2, "0")
-                .slice(-2),
+        .map((item) => ({
+            day: item.nextScheduledTime
+                ? String(new Date(item.nextScheduledTime * 1000).getDate()).padStart(2, "0")
+                : "—",
+            nextLabel: item.nextScheduledTime
+                ? `${new Date(item.nextScheduledTime * 1000).getMonth() + 1}月`
+                : "无下次",
             title: item.name,
             meta: item.comment || "周期交易",
+            frequency: scheduleFrequencyLabel(item),
             amount: formatAmountToLocalizedNumeralsWithCurrency(
                 item.sourceAmount,
                 item.sourceAccount?.currency || userStore.currentUserDefaultCurrency,
             ),
-            enabled: !item.hidden,
+            enabled: !item.hidden && item.scheduledFrequencyType !== ScheduledTemplateFrequencyType.Disabled.type,
             raw: item,
         }));
     return live;
@@ -2538,25 +3163,32 @@ const rates = computed(() => {
         JPY: ["日元", "¥"],
         HKD: ["港币", "HK$"],
     };
-    const live = (
-        exchangeRatesStore.latestExchangeRates.data?.exchangeRates || []
-    )
+    const sourceRates = exchangeRatesStore.latestExchangeRates.data?.exchangeRates || [];
+    const live = sourceRates
         .filter((item) => names[item.currency])
         .slice(0, 5)
-        .map((item) => ({
-            name: names[item.currency]![0],
-            code: item.currency,
-            symbol: names[item.currency]![1],
-            rate: item.rate,
-            change: "已更新",
-        }));
+        .map((item) => {
+            const converted = getCnyValueForCurrency(sourceRates, item.currency);
+            return {
+                name: names[item.currency]![0],
+                code: item.currency,
+                symbol: names[item.currency]![1],
+                rate: converted === null
+                    ? "--"
+                    : new Intl.NumberFormat("zh-CN", {
+                          minimumFractionDigits: converted >= 1 ? 2 : 4,
+                          maximumFractionDigits: converted >= 1 ? 4 : 6,
+                      }).format(converted),
+                change: "已更新",
+            };
+        });
     return live;
 });
 const recommendedTemplates: RecommendedTemplate[] = [
     { title: "日常餐饮", description: "适合早餐、午餐等高频生活支出", type: TransactionType.Expense },
     { title: "通勤交通", description: "适合公交、地铁和打车支出", type: TransactionType.Expense },
-    { title: "工资收入", description: "适合每月固定工资或劳务收入", type: TransactionType.Income },
-    { title: "固定订阅", description: "适合软件、影音等周期订阅", type: TransactionType.Expense },
+    { title: "工资收入", description: "每月周期计划，到期后进入待确认入账", type: TransactionType.Income, recurring: true },
+    { title: "固定订阅", description: "每月周期计划，到期后进入待确认入账", type: TransactionType.Expense, recurring: true },
 ];
 const assets = computed<AssetItem[]>(() =>
     productAssetsStore.assets.map((item) => ({
@@ -2611,8 +3243,8 @@ const appMenu = [
     },
     { title: "本地服务", meta: "连接和存储状态", icon: "服", color: "#149C63" },
     {
-        title: "AI 自动配置",
-        meta: "检测并接入服务端 API",
+        title: "AI 配置",
+        meta: "模型、接口与密钥",
         icon: "AI",
         color: "#7C3AED",
     },
@@ -2648,11 +3280,20 @@ const timeZone = ref(settingsStore.appSettings.timeZone || "system");
 const autoUpdateRates = ref(
     settingsStore.appSettings.autoUpdateExchangeRatesData,
 );
-const aiTextRecognitionReady = isTransactionFromAITextRecognitionEnabled();
-const aiImageRecognitionReady = isTransactionFromAIImageRecognitionEnabled();
-const aiAutoConfigured = ref(
-    localStorage.getItem("finexy.aiAutoConfigured") === "true" &&
-        (aiTextRecognitionReady || aiImageRecognitionReady),
+const aiTextRecognitionReady = ref(false);
+const aiImageRecognitionReady = ref(isTransactionFromAIImageRecognitionEnabled());
+const aiImageEnabled = ref(false);
+const aiConfigurationLoading = ref(false);
+const aiConfigurationEditable = ref(false);
+const aiEnabled = ref(false);
+const aiBaseUrl = ref("https://api.deepseek.com");
+const aiModelId = ref("deepseek-chat");
+const aiApiKey = ref("");
+const aiApiKeyConfigured = ref(false);
+const aiThinking = ref("off");
+const aiTimeoutSeconds = ref(60);
+const aiAutoConfigured = computed(
+    () => aiEnabled.value && aiTextRecognitionReady.value && aiApiKeyConfigured.value,
 );
 const nameTouched = ref(false);
 const saving = ref(false);
@@ -2666,6 +3307,9 @@ const newNote = ref("");
 const scheduleAscending = ref(true);
 const calendarDate = ref(new Date());
 const selectedCalendarDay = ref(new Date().getDate());
+const budgetTotalInput = ref("");
+const budgetCategoryInputs = ref<Record<string, string>>({});
+const budgetSaving = ref(false);
 const aboutInfo = ref<{ title: string; paragraphs: string[] } | null>(null);
 const toast = ref("");
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
@@ -2758,6 +3402,8 @@ const currentUserName = computed(
 const currentUserInitial = computed(
     () => currentUserName.value.trim().slice(0, 1).toUpperCase() || "用",
 );
+const clientDisplayVersion = getClientDisplayVersion();
+const clientBuildTime = getClientBuildTime();
 const primaryActionLabel = computed(() =>
     selectedSetting.value === "安全设置"
         ? "切换账号"
@@ -2765,8 +3411,8 @@ const primaryActionLabel = computed(() =>
           ? "导出报表"
           : selectedSetting.value === "本地服务"
             ? "刷新状态"
-            : selectedSetting.value === "AI 自动配置"
-              ? "自动配置"
+            : selectedSetting.value === "AI 配置"
+              ? "保存配置"
               : config.value.action,
 );
 const primaryActionIcon = computed(() =>
@@ -2776,12 +3422,14 @@ const primaryActionIcon = computed(() =>
           ? mdiDownloadOutline
           : selectedSetting.value === "本地服务"
             ? mdiRefresh
-            : selectedSetting.value === "AI 自动配置"
+            : selectedSetting.value === "AI 配置"
               ? mdiRobotOutline
               : config.value.actionIcon,
 );
 const pendingTransactions = computed<Item[]>(() =>
-    aiReviewItemsStore.items.map(reviewItemToItem),
+    selectedLedgerId.value === DefaultLedgerId
+        ? aiReviewItemsStore.items.map(reviewItemToItem)
+        : [],
 );
 const activityTransactions = computed(() => [
     ...pendingTransactions.value,
@@ -2829,31 +3477,45 @@ const catalogItems = computed(() =>
 );
 const sortedSchedules = computed(() =>
     [...schedules.value].sort(
-        (a, b) =>
-            (Number(a.day) - Number(b.day)) *
-            (scheduleAscending.value ? 1 : -1),
+        (a, b) => {
+            const aTime = a.raw.nextScheduledTime || Number.MAX_SAFE_INTEGER;
+            const bTime = b.raw.nextScheduledTime || Number.MAX_SAFE_INTEGER;
+            return (aTime - bTime) * (scheduleAscending.value ? 1 : -1);
+        },
     ),
 );
-const scheduleDays = computed(() => [
-    ...new Set(
-        schedules.value
-            .filter((item) => item.enabled)
-            .map((item) => Number(item.day))
-            .filter((day) => day >= 1 && day <= calendarDays.value),
+const budgetYearMonth = computed(() => {
+    const now = new Date();
+    return now.getFullYear() * 100 + now.getMonth() + 1;
+});
+const budgetMonthLabel = computed(() => `${new Date().getFullYear()}年${new Date().getMonth() + 1}月`);
+const currentBudget = computed(() => monthlyBudgetStore.budgets[budgetYearMonth.value] || null);
+const validBudgetTotal = computed(() => parseBudgetAmount(budgetTotalInput.value) > 0);
+const budgetCategories = computed(() =>
+    (categoriesStore.allTransactionCategories[CategoryType.Expense] || []).flatMap(parent =>
+        (parent.subCategories || []).filter(category => category.visible).map(category => ({
+            id: category.id,
+            name: category.name,
+            parentName: parent.name,
+        })),
     ),
-]);
+);
+const calendarScheduleEntries = computed(() =>
+    schedules.value.flatMap(item =>
+        scheduleDaysInMonth(item.raw, calendarDate.value.getFullYear(), calendarDate.value.getMonth())
+            .map(day => ({ ...item, day: String(day).padStart(2, "0"), calendarDay: day })),
+    ),
+);
+const scheduleDays = computed(() => [...new Set(calendarScheduleEntries.value.map(item => item.calendarDay))]);
 const selectedCalendarSchedules = computed(() =>
-    schedules.value.filter(
-        (item) =>
-            item.enabled && Number(item.day) === selectedCalendarDay.value,
-    ),
+    calendarScheduleEntries.value.filter(item => item.calendarDay === selectedCalendarDay.value),
 );
 const selectedCalendarLabel = computed(
     () =>
         `${calendarDate.value.getMonth() + 1}月${selectedCalendarDay.value}日`,
 );
 const scheduleTotal = computed(
-    () => `共 ${schedules.value.length} 项周期计划`,
+    () => `本月 ${calendarScheduleEntries.value.length} 次执行`,
 );
 const calendarDays = computed(() =>
     new Date(
@@ -2890,14 +3552,24 @@ const reportMonthKeys = [
     "thisMonth",
 ] as const;
 const reportDataset = computed(() => {
-    const items = reportMonthKeys.map((key, index) => {
+    const trendByMonth = new Map(
+        ledgerReportTrends.value.map(row => [`${row.year}-${row.month}`, row]),
+    );
+    const items = reportMonthKeys.map((_, index) => {
         const date = new Date();
         date.setMonth(date.getMonth() - (reportMonthKeys.length - 1 - index));
-        const overview = overviewStore.transactionOverview[key];
+        const row = trendByMonth.get(`${date.getFullYear()}-${date.getMonth() + 1}`);
+        let incomeAmount = 0;
+        let expenseAmount = 0;
+        for (const item of row?.items || []) {
+            const category = categoriesStore.allTransactionCategoriesMap[item.categoryId];
+            if (category?.type === CategoryType.Income) incomeAmount += item.amount;
+            else if (category?.type === CategoryType.Expense) expenseAmount += item.amount;
+        }
         return {
             label: `${date.getMonth() + 1}月`,
-            incomeAmount: overview?.incomeAmount ?? 0,
-            expenseAmount: overview?.expenseAmount ?? 0,
+            incomeAmount,
+            expenseAmount,
         };
     });
     const maximum = Math.max(0, ...items.flatMap(item => [item.incomeAmount, item.expenseAmount]));
@@ -2935,11 +3607,11 @@ const expenseBreakdown = computed(() => {
         .slice(0, 4)
         .map(item => ({ ...item, percent: sum ? Math.round(item.amount * 100 / sum) : 0 }));
 });
-const reportExpenseTotal = computed(() => overviewStore.transactionOverview.thisMonth?.expenseAmount ?? 0);
+const reportExpenseTotal = computed(() => currentLedgerMonthTotals.value.expense);
 const settingsDescription = computed(() => {
     if (pageKey.value === "account") return "更改会保存到当前个人账本。";
-    if (selectedSetting.value === "AI 自动配置")
-        return "自动读取服务端能力，不把 API 密钥保存到浏览器。";
+    if (selectedSetting.value === "AI 配置")
+        return "在页面中维护服务端 OpenAI 兼容接口，保存后立即生效且重启后保留。";
     return "更改会保存在当前设备并立即生效。";
 });
 const selectedAIReviewItem = computed(() =>
@@ -3110,6 +3782,10 @@ function openQuickTransactionFromRoute() {
               ? TransactionType.Expense
               : undefined;
     if (type === undefined) return;
+    if (!selectedLedgerCanWrite.value) {
+        showToast("你在此账本中是只读成员，不能新增流水");
+        return;
+    }
     const nextQuery = { ...route.query };
     delete nextQuery["action"];
     void router.replace({ path: route.path, query: nextQuery });
@@ -3136,11 +3812,30 @@ async function logoutAccount() {
         showError(error);
     }
 }
+async function changeSelectedLedger(ledgerId: string) {
+    if (ledgerId === selectedLedgerId.value) return;
+    try {
+        ledgersStore.select(ledgerId);
+        detail.value = null;
+        selectedAccount.value = null;
+        accountFilter.value = "all";
+        currentPage.value = 1;
+        ledgerReportTrends.value = [];
+        await loadPageData(true, false);
+        showToast(`已切换到「${selectedLedgerName.value}」`);
+    } catch (error) {
+        showError(error);
+    }
+}
 async function loadPageData(force = false, showRefreshMessage = force) {
     busy.value = true;
     try {
+        await ledgersStore.load();
+        const ledgerId = selectedLedgerId.value;
+        const explicitLedgerId = ledgerId === DefaultLedgerId ? undefined : ledgerId;
+        if (explicitLedgerId) await ledgersStore.loadAccess(ledgerId);
         if (pageKey.value === "manage")
-            await accountsStore.loadAllAccounts({ force });
+            await accountsStore.loadAllAccounts({ force, ledgerId });
         else if (pageKey.value === "categories")
             await categoriesStore.loadAllCategories({ force });
         else if (pageKey.value === "tags")
@@ -3160,6 +3855,13 @@ async function loadPageData(force = false, showRefreshMessage = force) {
                     force,
                 }),
                 occurrencesStore.load(),
+                categoriesStore.loadAllCategories({ force: false }),
+                monthlyBudgetStore.load(budgetYearMonth.value, force).then(budget => {
+                    budgetTotalInput.value = budget ? String(budget.amount / AMOUNT_FACTOR) : "";
+                    budgetCategoryInputs.value = Object.fromEntries(
+                        Object.entries(budget?.categoryAmounts || {}).map(([id, amount]) => [id, String(amount / AMOUNT_FACTOR)]),
+                    );
+                }),
             ]);
         else if (pageKey.value === "rates")
             await exchangeRatesStore.getLatestExchangeRates({
@@ -3168,14 +3870,38 @@ async function loadPageData(force = false, showRefreshMessage = force) {
             });
         else if (pageKey.value === "assets")
             await productAssetsStore.loadAll(force);
+        else if (pageKey.value === "goals")
+            await Promise.all([
+                savingsGoalsStore.load(selectedGoalLedgerId.value),
+                accountsStore.loadAllAccounts({ force, ledgerId }),
+            ]);
+        else if (pageKey.value === "family") {
+            await ledgersStore.load();
+            await selectManagedLedger(managedLedgerId.value);
+        }
         else if (pageKey.value === "reports") {
             await Promise.all([
-                accountsStore.loadAllAccounts({ force: false }),
+                accountsStore.loadAllAccounts({ force: false, ledgerId }),
                 categoriesStore.loadAllCategories({ force }),
-                overviewStore.loadTransactionOverview({ force, loadLast11Months: true }),
             ]);
             const now = new Date();
+            const start = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+            const yearMonth = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+            const trendResponse = await services.getTransactionStatisticsTrends({
+                ledgerId: explicitLedgerId,
+                startYearMonth: yearMonth(start),
+                endYearMonth: yearMonth(now),
+                tagFilter: "",
+                keyword: "",
+                matchMode: 0,
+                useTransactionTimezone: false,
+            });
+            if (!trendResponse.data?.success || !trendResponse.data.result) {
+                throw new Error("无法读取当前账本报表");
+            }
+            ledgerReportTrends.value = trendResponse.data.result;
             const result = await transactionsStore.loadMonthlyAllTransactions({
+                ledgerId: explicitLedgerId,
                 year: now.getFullYear(),
                 month: now.getMonth() + 1,
                 autoExpand: true,
@@ -3185,18 +3911,20 @@ async function loadPageData(force = false, showRefreshMessage = force) {
         }
         else if (pageKey.value === "activity") {
             await Promise.all([
-                accountsStore.loadAllAccounts({ force: false }),
+                accountsStore.loadAllAccounts({ force: false, ledgerId }),
                 categoriesStore.loadAllCategories({ force: false }),
-                tagsStore.loadAllTags({ force: false }),
-                templatesStore.loadAllTemplates({
-                    templateType: TemplateType.Normal.type,
-                    force: false,
-                }),
-                aiReviewItemsStore.load(),
-                overviewStore.loadTransactionOverview({ force, loadLast11Months: true }),
+                ...(ledgerId === DefaultLedgerId ? [
+                    tagsStore.loadAllTags({ force: false }),
+                    templatesStore.loadAllTemplates({
+                        templateType: TemplateType.Normal.type,
+                        force: false,
+                    }),
+                    aiReviewItemsStore.load(),
+                ] : []),
             ]);
             const now = new Date();
             const result = await transactionsStore.loadMonthlyAllTransactions({
+                ledgerId: explicitLedgerId,
                 year: now.getFullYear(),
                 month: now.getMonth() + 1,
                 autoExpand: true,
@@ -3300,6 +4028,83 @@ function openDetail(item: Item) {
             : null;
     detail.value = item;
 }
+function parseBudgetAmount(value: string): number {
+    const normalized = value.trim().replace(/,/g, "");
+    if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) return 0;
+    const amount = Math.round(Number(normalized) * AMOUNT_FACTOR);
+    return Number.isSafeInteger(amount) ? amount : 0;
+}
+function setBudgetCategoryInput(categoryId: string, event: Event) {
+    budgetCategoryInputs.value[categoryId] = (event.target as HTMLInputElement).value;
+}
+async function saveBudget() {
+    const amount = parseBudgetAmount(budgetTotalInput.value);
+    if (!amount || budgetSaving.value) return;
+    const categoryAmounts: Record<string, number> = {};
+    for (const [categoryId, input] of Object.entries(budgetCategoryInputs.value)) {
+        if (!input.trim()) continue;
+        const categoryAmount = parseBudgetAmount(input);
+        if (!categoryAmount) {
+            showToast("分类额度必须是大于 0、最多两位小数的金额");
+            return;
+        }
+        categoryAmounts[categoryId] = categoryAmount;
+    }
+    budgetSaving.value = true;
+    try {
+        await monthlyBudgetStore.save(budgetYearMonth.value, amount, categoryAmounts);
+        showToast("本月支出限额已保存");
+    } catch (error) {
+        showError(error);
+    } finally {
+        budgetSaving.value = false;
+    }
+}
+async function removeBudget() {
+    if (budgetSaving.value) return;
+    budgetSaving.value = true;
+    try {
+        await monthlyBudgetStore.remove(budgetYearMonth.value);
+        budgetTotalInput.value = "";
+        budgetCategoryInputs.value = {};
+        showToast("本月支出限额已清除");
+    } catch (error) {
+        showError(error);
+    } finally {
+        budgetSaving.value = false;
+    }
+}
+function scheduleFrequencyLabel(template: TransactionTemplate): string {
+    const values = (template.scheduledFrequency || "").split(",").filter(Boolean);
+    if (template.scheduledFrequencyType === ScheduledTemplateFrequencyType.Disabled.type) return "已暂停";
+    if (template.scheduledFrequencyType === ScheduledTemplateFrequencyType.Daily.type) return "每天";
+    if (template.scheduledFrequencyType === ScheduledTemplateFrequencyType.EveryNDays.type) return `每 ${values[0] || "?"} 天`;
+    if (template.scheduledFrequencyType === ScheduledTemplateFrequencyType.Weekly.type) return "每周";
+    if (template.scheduledFrequencyType === ScheduledTemplateFrequencyType.Monthly.type) return "每月";
+    if (template.scheduledFrequencyType === ScheduledTemplateFrequencyType.Yearly.type) return "每年";
+    return "周期未设置";
+}
+function editSchedule(item: { raw?: unknown; title: string }) {
+    if (!(item.raw instanceof TransactionTemplate)) return;
+    templateEditDialog.value
+        ?.open({ id: item.raw.id, currentTemplate: item.raw })
+        .then(async () => {
+            await loadPageData(false);
+            focusNextScheduleMonth(item.raw as TransactionTemplate);
+        })
+        .catch((error) => {
+            if (error) showError(error);
+        });
+}
+function focusNextScheduleMonth(template?: TransactionTemplate) {
+    const next = template?.nextScheduledTime || Math.min(
+        ...schedules.value.map(item => item.raw.nextScheduledTime || Number.MAX_SAFE_INTEGER),
+    );
+    if (!Number.isFinite(next) || next === Number.MAX_SAFE_INTEGER) return;
+    const date = new Date(next * 1000);
+    calendarDate.value = new Date(date.getFullYear(), date.getMonth(), 1);
+    selectedCalendarDay.value = date.getDate();
+}
 function toggleScheduleSort() {
     scheduleAscending.value = !scheduleAscending.value;
     showToast(`已切换为日期${scheduleAscending.value ? "正序" : "倒序"}`);
@@ -3347,9 +4152,12 @@ function createRecommendedTemplate(item: RecommendedTemplate) {
     }
     templateEditDialog.value
         ?.open({
-            templateType: TemplateType.Normal.type,
+            templateType: item.recurring ? TemplateType.Schedule.type : TemplateType.Normal.type,
             type: item.type,
-            comment: item.title,
+            name: item.title,
+            comment: item.description,
+            scheduledFrequencyType: item.recurring ? ScheduledTemplateFrequencyType.Monthly.type : undefined,
+            scheduledFrequency: item.recurring ? String(new Date().getDate()) : undefined,
         })
         .then(() => loadPageData(false))
         .catch((error) => {
@@ -3537,8 +4345,361 @@ function restoreOccurrence(item: ScheduledOccurrence) {
         .catch(showError)
         .finally(() => (busy.value = false));
 }
+
+// --- 存钱计划页 ---------------------------------------------------------
+
+const selectedGoalLedgerId = computed(() => selectedLedgerId.value);
+const goalEditorOpen = ref(false);
+const editingGoal = ref<SavingsGoal | null>(null);
+const goalFormName = ref("");
+const goalFormTarget = ref("");
+const goalFormDeadline = ref("");
+const goalFormComment = ref("");
+const goalEditorBusy = ref(false);
+const goalEditorError = ref("");
+const fundEditorOpen = ref(false);
+const fundEditorMode = ref<"deposit" | "withdraw">("deposit");
+const fundFormGoal = ref<SavingsGoal | null>(null);
+const fundFormAmount = ref("");
+const fundFormAccountId = ref("");
+const fundFormComment = ref("");
+const fundEditorBusy = ref(false);
+const fundEditorError = ref("");
+
+const selectedGoalLedgerName = computed(() => {
+    const ledger = ledgersStore.allLedgers.find(
+        (item) => item.id === selectedGoalLedgerId.value,
+    );
+    return ledger ? ledger.name : "默认个人账本";
+});
+
+const formatGoalMoney = (amount: number): string =>
+    formatAmountToLocalizedNumeralsWithCurrency(
+        amount,
+        userStore.currentUserDefaultCurrency || "CNY",
+    );
+
+const formatGoalDate = (unixTime: number): string =>
+    unixTime > 0 ? new Date(unixTime * 1000).toLocaleDateString() : "不限";
+
+function switchGoalLedger(event: Event): void {
+    void changeSelectedLedger((event.target as HTMLSelectElement).value);
+}
+
+function openGoalEditor(goal?: SavingsGoal): void {
+    editingGoal.value = goal || null;
+    goalFormName.value = goal ? goal.name : "";
+    goalFormTarget.value = goal ? String(goal.targetAmount / AMOUNT_FACTOR) : "";
+    goalFormDeadline.value = goal && goal.deadlineTime > 0 ? new Date(goal.deadlineTime * 1000).toISOString().slice(0, 10) : "";
+    goalFormComment.value = goal ? goal.comment : "";
+    goalEditorError.value = "";
+    goalEditorOpen.value = true;
+}
+
+function closeGoalEditor(): void {
+    goalEditorOpen.value = false;
+}
+
+function submitGoalEditor(): void {
+    const amount = Math.round(Number(goalFormTarget.value) * AMOUNT_FACTOR);
+    if (!goalFormName.value.trim()) {
+        goalEditorError.value = "请输入目标名称。";
+        return;
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+        goalEditorError.value = "目标金额需大于 0 且最多两位小数。";
+        return;
+    }
+    goalEditorBusy.value = true;
+    goalEditorError.value = "";
+    const deadline = goalFormDeadline.value
+        ? new Date(`${goalFormDeadline.value}T00:00:00Z`).getTime() / 1000
+        : 0;
+    const request = editingGoal.value
+        ? savingsGoalsStore.modifyGoal(
+              editingGoal.value,
+              goalFormName.value.trim(),
+              amount,
+              deadline,
+              goalFormComment.value.trim(),
+          )
+        : savingsGoalsStore.createGoal(
+              selectedGoalLedgerId.value,
+              goalFormName.value.trim(),
+              amount,
+              deadline,
+              goalFormComment.value.trim(),
+          );
+    request
+        .then(() => {
+            goalEditorOpen.value = false;
+            showToast(editingGoal.value ? "存钱目标已更新" : "存钱目标已创建");
+        })
+        .catch(showError)
+        .finally(() => (goalEditorBusy.value = false));
+}
+
+function openFundEditor(goal: SavingsGoal, mode: "deposit" | "withdraw"): void {
+    fundEditorMode.value = mode;
+    fundFormGoal.value = goal;
+    fundFormAmount.value = "";
+    fundFormAccountId.value = "";
+    fundFormComment.value = "";
+    fundEditorError.value = "";
+    fundEditorOpen.value = true;
+    void savingsGoalsStore
+        .loadFundAccounts(selectedGoalLedgerId.value)
+        .catch(showError);
+}
+
+function fundAccountLabel(account: { name: string, balance: number, currency: string }): string {
+    return `${account.name}（${formatAmountToLocalizedNumeralsWithCurrency(account.balance, account.currency)}）`;
+}
+
+function closeFundEditor(): void {
+    fundEditorOpen.value = false;
+}
+
+function submitFundEditor(): void {
+    const goal = fundFormGoal.value;
+    if (!goal) return;
+    const amount = Math.round(Number(fundFormAmount.value) * AMOUNT_FACTOR);
+    if (!Number.isFinite(amount) || amount <= 0) {
+        fundEditorError.value = "金额需大于 0 且最多两位小数。";
+        return;
+    }
+    if (!fundFormAccountId.value) {
+        fundEditorError.value = "请选择资金账户。";
+        return;
+    }
+    fundEditorBusy.value = true;
+    fundEditorError.value = "";
+    const request =
+        fundEditorMode.value === "deposit"
+            ? savingsGoalsStore.deposit(goal, amount, fundFormAccountId.value, fundFormComment.value.trim())
+            : savingsGoalsStore.withdraw(goal, amount, fundFormAccountId.value, fundFormComment.value.trim());
+    request
+        .then(() => {
+            fundEditorOpen.value = false;
+            showToast(fundEditorMode.value === "deposit" ? "已存入目标，不计入收支" : "已取出到账户，不计入收支");
+			void accountsStore.loadAllAccounts({ force: true });
+        })
+        .catch(showError)
+        .finally(() => (fundEditorBusy.value = false));
+}
+
+function deleteGoalWithConfirm(goal: SavingsGoal): void {
+    confirmDialog
+        .value?.open("删除存钱目标", "该目标没有资金记录才能删除，删除后不能恢复。")
+        .then(() => {
+            busy.value = true;
+            savingsGoalsStore
+                .deleteGoal(goal)
+                .then(() => showToast("目标已删除"))
+                .catch(showError)
+                .finally(() => (busy.value = false));
+        })
+        .catch(() => {});
+}
+
+// --- 账本页 -------------------------------------------------------------
+
+const ledgerEditorOpen = ref(false);
+const ledgerEditorStep = ref(1);
+const ledgerTemplate = ref<"personal" | "family">("personal");
+const ledgerFormName = ref("");
+const ledgerFormComment = ref("");
+const ledgerEditorBusy = ref(false);
+const ledgerEditorError = ref("");
+const managedLedgerId = ref(ledgersStore.selectedLedgerId);
+const managedLedger = computed(() => ledgersStore.allLedgers.find(ledger => ledger.id === managedLedgerId.value) ?? ledgersStore.selectedLedger);
+const managedLedgerIsOwner = computed(() => ledgersStore.members.some(member => member.isCurrentUser && member.status === 1 && member.role === 1));
+const managedLedgerLoading = ref(false);
+const managedLedgerError = ref("");
+const managedLedgerOverview = ref<LedgerOverview | null>(null);
+let managedLedgerGeneration = 0;
+const currentLedgerCanManage = computed(() => {
+    const me = ledgersStore.members.find((member) => member.isCurrentUser && member.status === 1);
+    return me?.role === 1 || me?.role === 2;
+});
+
+function ledgerRoleLabel(role: number): string {
+    return role === 1 ? "所有者" : role === 2 ? "管理员" : role === 4 ? "只读成员" : "普通成员";
+}
+
+async function selectManagedLedger(ledgerId: string): Promise<void> {
+    const generation = ++managedLedgerGeneration;
+    managedLedgerId.value = ledgerId;
+    managedLedgerLoading.value = true;
+    managedLedgerError.value = "";
+    managedLedgerOverview.value = null;
+    try {
+        const [, overview] = await Promise.all([ledgersStore.loadAccess(ledgerId), ledgersStore.loadOverview(ledgerId)]);
+        if (generation === managedLedgerGeneration) managedLedgerOverview.value = overview;
+    } catch {
+        if (generation === managedLedgerGeneration) managedLedgerError.value = "账本成员或邀请加载失败，请重试。";
+    } finally {
+        if (generation === managedLedgerGeneration) managedLedgerLoading.value = false;
+    }
+}
+
+function selectLedgerTemplate(template: "personal" | "family"): void {
+    ledgerTemplate.value = template;
+    ledgerFormName.value = template === "family" ? "家庭账本" : "我的账本";
+    ledgerFormComment.value = template === "family" ? "家人共同记录日常收支" : "";
+    ledgerEditorError.value = "";
+}
+
+type LedgerActionKind = 'invite' | 'accept' | 'role' | 'remove' | 'delete';
+const ledgerActionOpen = ref(false);
+const ledgerActionBusy = ref(false);
+const ledgerActionKind = ref<LedgerActionKind>('invite');
+const ledgerActionInput = ref('');
+const ledgerActionRole = ref(3);
+const ledgerActionMemberId = ref('');
+const ledgerActionLedgerId = ref('0');
+const ledgerActionLedgerName = ref('');
+const ledgerActionError = ref('');
+const ledgerActionToken = ref('');
+const ledgerInvitationPreview = ref<LedgerInvitationPreview | null>(null);
+const ledgerDeletePreview = ref<LedgerDeletePreview | null>(null);
+const ledgerActionTitle = computed(() => ({ invite: '生成邀请码', accept: '加入账本', role: '保存权限', remove: '移除成员', delete: '删除账本' })[ledgerActionKind.value]);
+const ledgerActionSubmitLabel = computed(() => ledgerActionKind.value === 'accept' && !ledgerInvitationPreview.value ? '查看邀请' : ledgerActionTitle.value);
+
+function openLedgerAction(kind: LedgerActionKind): void {
+    ledgerActionKind.value = kind;
+    ledgerActionInput.value = '';
+    ledgerActionRole.value = 3;
+    ledgerActionError.value = '';
+    ledgerActionToken.value = '';
+    ledgerInvitationPreview.value = null;
+    ledgerDeletePreview.value = null;
+    ledgerActionLedgerId.value = managedLedgerId.value;
+    ledgerActionLedgerName.value = kind === 'accept' ? '输入收到的账本邀请码' : managedLedger.value.name;
+    ledgerActionOpen.value = true;
+}
+function inviteLedgerMember(): void { openLedgerAction('invite'); }
+function acceptLedgerInvite(): void { openLedgerAction('accept'); }
+function changeLedgerRole(memberId: string, role: number): void {
+    openLedgerAction('role'); ledgerActionMemberId.value = memberId; ledgerActionRole.value = role;
+}
+function removeLedgerMember(memberId: string): void {
+    openLedgerAction('remove'); ledgerActionMemberId.value = memberId;
+    const member = ledgersStore.members.find(item => item.id === memberId);
+    ledgerActionLedgerName.value += ' · ' + (member?.nickname || member?.uid || '成员');
+}
+async function deleteManagedLedger(): Promise<void> {
+    openLedgerAction('delete');
+    ledgerActionBusy.value = true;
+    try { ledgerDeletePreview.value = await ledgersStore.previewDelete(ledgerActionLedgerId.value); }
+    catch { ledgerActionError.value = '无法检查账本关联数据，请稍后重试。'; }
+    finally { ledgerActionBusy.value = false; }
+}
+async function copyLedgerInvitation(): Promise<void> {
+    try { await navigator.clipboard.writeText(ledgerActionToken.value); showToast('邀请码已复制'); }
+    catch { ledgerActionError.value = '无法自动复制，请选中上方邀请码手动复制。'; }
+}
+async function submitLedgerAction(): Promise<void> {
+    if (ledgerActionBusy.value) return;
+    const kind = ledgerActionKind.value;
+    const ledgerId = ledgerActionLedgerId.value;
+    if ((kind === 'invite' || kind === 'accept') && !ledgerActionInput.value.trim()) {
+        ledgerActionError.value = kind === 'invite' ? '请输入受邀人称呼。' : '请输入邀请码。'; return;
+    }
+    if (kind === 'delete' && ledgerActionInput.value.trim() !== ledgerActionLedgerName.value) {
+        ledgerActionError.value = '请输入完整账本名称。'; return;
+    }
+    if (kind === 'delete' && !ledgerDeletePreview.value?.canDelete) {
+        ledgerActionError.value = '账本仍有关联财务数据，暂时不能删除。'; return;
+    }
+    ledgerActionBusy.value = true; ledgerActionError.value = '';
+    try {
+        if (kind === 'invite') {
+            const invitation = await ledgersStore.invite(ledgerActionInput.value, ledgerActionRole.value, ledgerId);
+            ledgerActionToken.value = invitation.token;
+        } else if (kind === 'accept') {
+            if (!ledgerInvitationPreview.value) {
+                ledgerInvitationPreview.value = await ledgersStore.previewInvitation(ledgerActionInput.value);
+                ledgerActionLedgerName.value = '确认加入前请核对账本和权限';
+                return;
+            }
+            const ledger = await ledgersStore.accept(ledgerActionInput.value);
+            ledgerActionOpen.value = false;
+            await selectManagedLedger(ledger.id);
+            showToast('已加入账本，可点击切换到此账本');
+            return;
+        } else if (kind === 'role') {
+            await ledgersStore.changeRole(ledgerActionMemberId.value, ledgerActionRole.value, ledgerId);
+        } else if (kind === 'remove') {
+            await ledgersStore.removeMember(ledgerActionMemberId.value, ledgerId);
+        } else {
+            await ledgersStore.deleteLedger(ledgerId);
+            ledgerActionOpen.value = false;
+            managedLedgerId.value = ledgersStore.selectedLedgerId;
+            await selectManagedLedger(managedLedgerId.value);
+            showToast('账本已删除');
+            return;
+        }
+        if (kind !== 'invite') { ledgerActionOpen.value = false; showToast('账本成员已更新'); }
+        if (managedLedgerId.value === ledgerId) await selectManagedLedger(ledgerId);
+    } catch {
+        ledgerActionError.value = '操作失败，请检查权限或输入后重试。';
+    } finally { ledgerActionBusy.value = false; }
+}
+async function revokeLedgerInvite(invitationId: string): Promise<void> {
+    const ledgerId = managedLedgerId.value;
+    try {
+        await ledgersStore.revokeInvitation(invitationId, ledgerId);
+        if (managedLedgerId.value === ledgerId) await selectManagedLedger(ledgerId);
+        showToast('邀请已撤销');
+    } catch (error) { showError(error); }
+}
+
+function openLedgerEditor(): void {
+    ledgerEditorStep.value = 1;
+    selectLedgerTemplate("personal");
+    ledgerEditorOpen.value = true;
+}
+
+function closeLedgerEditor(): void {
+    if (!ledgerEditorBusy.value) ledgerEditorOpen.value = false;
+}
+
+function submitLedgerEditor(): void {
+    const name = ledgerFormName.value.trim();
+    if (!name) {
+        ledgerEditorError.value = "请输入账本名称。";
+        return;
+    }
+    ledgerEditorBusy.value = true;
+    ledgerEditorError.value = "";
+    ledgersStore.createLedger(name, ledgerFormComment.value.trim())
+        .then((ledger) => {
+            ledgerEditorOpen.value = false;
+            ledgersStore.select(ledger.id);
+            void selectManagedLedger(ledger.id);
+            showToast("账本已创建并切换");
+        })
+        .catch((error) => {
+            ledgerEditorError.value = error?.message || "创建失败，请稍后重试。";
+        })
+        .finally(() => (ledgerEditorBusy.value = false));
+}
+
 function primaryAction() {
+    if (pageKey.value === "goals") {
+        openGoalEditor();
+        return;
+    }
+    if (pageKey.value === "family") {
+        openLedgerEditor();
+        return;
+    }
     if (pageKey.value === "activity") {
+        if (!selectedLedgerCanWrite.value) {
+            showToast("你在此账本中是只读成员，不能新增流水");
+            return;
+        }
         transactionEditDialog.value
             ?.open({})
             .then(() => loadPageData(true, false))
@@ -3548,6 +4709,10 @@ function primaryAction() {
         return;
     }
     if (pageKey.value === "manage") {
+        if (selectedLedgerId.value !== DefaultLedgerId) {
+            showToast("家庭账本账户当前为只读浏览");
+            return;
+        }
         accountEditDialog.value
             ?.open()
             .then(() => loadPageData(false))
@@ -3564,7 +4729,10 @@ function primaryAction() {
                         ? TemplateType.Schedule.type
                         : TemplateType.Normal.type,
             })
-            .then(() => loadPageData(false))
+            .then(async () => {
+                await loadPageData(false);
+                if (pageKey.value === "program") focusNextScheduleMonth();
+            })
             .catch((error) => {
                 if (error) showError(error);
             });
@@ -3613,8 +4781,8 @@ function primaryAction() {
         showToast("本地服务连接正常");
         return;
     }
-    if (pageKey.value === "settings" && selectedSetting.value === "AI 自动配置") {
-        detectAIConfiguration();
+    if (pageKey.value === "settings" && selectedSetting.value === "AI 配置") {
+        void saveAIConfiguration();
         return;
     }
     if (pageKey.value === "account" || pageKey.value === "settings") {
@@ -3646,7 +4814,7 @@ async function createItem() {
                         1000,
                 ) || getCurrentUnixTime();
             const common = {
-                sourceTransactionId: asset?.sourceTransactionId || "",
+                sourceTransactionId: asset?.sourceTransactionId || "0",
                 category: assetFormCategory.value,
                 name: newName.value,
                 brand: assetBrand.value,
@@ -3690,6 +4858,10 @@ async function createItem() {
     }
 }
 function editAccount() {
+    if (selectedLedgerId.value !== DefaultLedgerId) {
+        showToast("家庭账本账户当前为只读浏览");
+        return;
+    }
     if (!selectedAccount.value) {
         primaryAction();
         return;
@@ -3710,12 +4882,65 @@ function editAccount() {
             if (error) showError(error);
         });
 }
+function openAccountLedgerEditor() {
+    const account = selectedAccount.value?.raw;
+    if (!(account instanceof Account)) {
+        showToast("请先选择要迁移的账户");
+        return;
+    }
+    if (!availableAccountTargetLedgers.value.length) {
+        showToast("当前没有可迁移到的其他账本");
+        return;
+    }
+    accountLedgerEditorAccount.value = account;
+    accountLedgerTargetId.value = availableAccountTargetLedgers.value[0]?.id || "";
+    accountLedgerEditorError.value = "";
+    accountLedgerEditorOpen.value = true;
+}
+function closeAccountLedgerEditor() {
+    if (accountLedgerEditorBusy.value) return;
+    accountLedgerEditorOpen.value = false;
+    accountLedgerEditorAccount.value = null;
+    accountLedgerTargetId.value = "";
+    accountLedgerEditorError.value = "";
+}
+async function submitAccountLedgerEditor() {
+    const account = accountLedgerEditorAccount.value;
+    const targetLedgerId = accountLedgerTargetId.value;
+    if (!account || !targetLedgerId) return;
+    accountLedgerEditorBusy.value = true;
+    accountLedgerEditorError.value = "";
+    try {
+        await accountsStore.moveAccountToLedger({ account, targetLedgerId });
+        accountLedgerEditorBusy.value = false;
+        accountLedgerEditorOpen.value = false;
+        accountLedgerEditorAccount.value = null;
+        selectedAccount.value = null;
+        ledgersStore.select(targetLedgerId);
+        showToast(`账户已迁移到「${ledgersStore.selectedLedger.name}」`);
+        try {
+            await loadPageData(true, false);
+        } catch (refreshError) {
+            showToast("账户迁移已完成，但页面刷新失败，请稍后手动刷新");
+            logger.error("account moved but target ledger refresh failed", refreshError);
+        }
+    } catch (error) {
+        accountLedgerEditorError.value = "迁移失败：账户可能仍被模板、存钱计划、待确认周期或其他账户转账引用";
+        showError(error);
+    } finally {
+        accountLedgerEditorBusy.value = false;
+    }
+}
 function editDetail() {
     if (!detail.value) return;
     if (
         pageKey.value === "activity" &&
         detail.value.raw instanceof Transaction
     ) {
+        if (!selectedLedgerCanWrite.value || !detail.value.raw.editable) {
+            showToast("你不能修改这条流水");
+            return;
+        }
         const transaction = detail.value.raw;
         detail.value = null;
         void nextTick().then(() => transactionEditDialog.value
@@ -3774,15 +4999,60 @@ function editDetail() {
     showToast("该详情已是最新状态");
 }
 
-function detectAIConfiguration() {
-    const ready = aiTextRecognitionReady || aiImageRecognitionReady;
-    aiAutoConfigured.value = ready;
-    localStorage.setItem("finexy.aiAutoConfigured", String(ready));
-    showToast(
-        ready
-            ? "已自动接入服务端 AI API，密钥不会下发到浏览器"
-            : "未检测到 AI API，请先在服务端环境变量中配置模型",
-    );
+async function loadAIConfiguration() {
+    if (aiConfigurationLoading.value) return;
+    aiConfigurationLoading.value = true;
+    try {
+        const response = await services.getAIConfiguration();
+        const configuration = response.data.result;
+        aiConfigurationEditable.value = configuration.editable;
+        aiEnabled.value = configuration.enabled;
+        aiImageEnabled.value = configuration.imageEnabled;
+        aiBaseUrl.value = configuration.baseUrl || "https://api.deepseek.com";
+        aiModelId.value = configuration.modelId || "deepseek-chat";
+        aiThinking.value = configuration.enableThinking || "off";
+        aiTimeoutSeconds.value = Math.max(1, Math.round((configuration.requestTimeout || 60000) / 1000));
+        aiApiKeyConfigured.value = configuration.apiKeyConfigured;
+        aiApiKey.value = "";
+        aiTextRecognitionReady.value = configuration.enabled && configuration.apiKeyConfigured && !!configuration.baseUrl && !!configuration.modelId;
+        aiImageRecognitionReady.value = configuration.imageEnabled && configuration.apiKeyConfigured && !!configuration.baseUrl && !!configuration.modelId;
+    } catch (error) {
+        showError(error);
+    } finally {
+        aiConfigurationLoading.value = false;
+    }
+}
+async function saveAIConfiguration() {
+    if (saving.value || !aiConfigurationEditable.value) return;
+    if (!aiBaseUrl.value || !aiModelId.value || (!aiApiKeyConfigured.value && !aiApiKey.value)) {
+        showToast("请完整填写 API 地址、模型 ID 和 API Key");
+        return;
+    }
+    saving.value = true;
+    try {
+        const response = await services.updateAIConfiguration({
+            enabled: aiEnabled.value,
+            imageEnabled: aiImageEnabled.value,
+            baseUrl: aiBaseUrl.value,
+            apiKey: aiApiKey.value,
+            modelId: aiModelId.value,
+            enableThinking: aiThinking.value,
+            requestTimeout: Math.max(1, Math.min(300, Math.round(aiTimeoutSeconds.value || 60))) * 1000,
+        });
+        const configuration = response.data.result;
+        aiApiKey.value = "";
+        aiApiKeyConfigured.value = configuration.apiKeyConfigured;
+        aiTextRecognitionReady.value = configuration.enabled && configuration.apiKeyConfigured;
+        aiImageEnabled.value = configuration.imageEnabled;
+        aiImageRecognitionReady.value = configuration.imageEnabled && configuration.apiKeyConfigured;
+        setTransactionFromAITextRecognitionEnabled(aiTextRecognitionReady.value);
+        setTransactionFromAIImageRecognitionEnabled(aiImageRecognitionReady.value);
+        showToast("AI 配置已保存并立即生效");
+    } catch (error) {
+        showError(error);
+    } finally {
+        saving.value = false;
+    }
 }
 async function dismissReviewItem() {
     const item = selectedAIReviewItem.value;
@@ -3889,8 +5159,8 @@ function openAboutInfo(type: "privacy" | "license") {
             ? {
                   title: "隐私与数据",
                   paragraphs: [
-                      "所有账本数据由你部署的Finexy服务保存，Finexy 页面不会把财务数据发送到第三方。",
-                      "账号、备份和网络访问权限均由你的自托管环境控制。",
+                      "账本数据由你部署的 Finexy 服务保存。只有在你主动使用 AI 识别或报告功能时，相关文字才会发送到服务器所配置的模型接口。",
+                      "账号、备份、模型接口和网络访问权限均由你的自托管环境控制；API 密钥只保存在服务端。",
                   ],
               }
             : {
@@ -3903,14 +5173,22 @@ function openAboutInfo(type: "privacy" | "license") {
 }
 function checkForUpdates() {
     busy.value = true;
-    setTimeout(() => {
+    services.getServerVersion().then(response => {
+        const server = response.data.result;
+        const serverVersion = server?.version ? `v${server.version}` : "未知";
+        showToast(`客户端 ${clientDisplayVersion} · 服务端 ${serverVersion}`);
+    }).catch(showError).finally(() => {
         busy.value = false;
-        showToast("当前已是最新版本 1.6.1");
-    }, 400);
+    });
 }
 onMounted(() => {
     void loadPageData(false);
     openQuickTransactionFromRoute();
+});
+watch(selectedSetting, (value) => {
+    if (pageKey.value === "settings" && value === "AI 配置") {
+        void loadAIConfiguration();
+    }
 });
 watch(pageKey, () => {
     detail.value = null;
@@ -4628,7 +5906,7 @@ dd {
 }
 .schedule-row {
     display: grid;
-    grid-template-columns: 46px 1fr auto 42px;
+    grid-template-columns: 46px minmax(0, 1fr) auto auto;
     align-items: center;
     gap: 11px;
     padding: 12px 0;
@@ -4658,6 +5936,95 @@ dd {
 .schedule-row span b,
 .schedule-row > strong {
     font-size: 10.5px;
+}
+.schedule-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.schedule-controls .text-btn {
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+}
+.budget-editor {
+    display: grid;
+    gap: 14px;
+    margin: 4px 0 18px;
+    padding: 16px;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: var(--panel);
+}
+.budget-editor > header,
+.budget-editor > footer,
+.category-budget-list label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+.budget-editor > header div,
+.budget-editor > label,
+.category-budget-list label > span:first-child {
+    display: grid;
+    gap: 3px;
+}
+.budget-editor header small,
+.category-budget-list small {
+    color: var(--muted);
+    font-size: 11px;
+}
+.budget-editor details > p {
+    margin: 8px 0;
+    color: var(--muted);
+    font-size: 12px;
+}
+.budget-editor summary {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    font-weight: 650;
+}
+.money-input {
+    display: flex;
+    align-items: center;
+    margin-top: 6px;
+    border: 1px solid var(--line);
+    border-radius: 11px;
+    background: #fff;
+    overflow: hidden;
+}
+.money-input b {
+    padding: 0 10px;
+    color: var(--muted);
+    font-size: 12px;
+}
+.money-input input {
+    width: 100%;
+    min-height: 44px;
+    padding: 0 10px;
+    border: 0;
+    outline: 0;
+    color: #101828;
+    background: #fff;
+}
+.money-input.compact {
+    width: 180px;
+    margin: 0;
+}
+.category-budget-list {
+    display: grid;
+    max-height: 260px;
+    overflow-y: auto;
+}
+.category-budget-list label {
+    padding: 8px 0;
+    border-top: 1px solid var(--line);
+}
+.budget-editor > footer {
+    justify-content: flex-end;
 }
 .review-block {
     display: grid;
@@ -7608,6 +8975,25 @@ dl > div {
 .ai-status {
     margin-top: 4px;
 }
+.ai-config-form label.wide {
+    grid-column: 1 / -1;
+}
+.ai-config-form input:disabled,
+.ai-config-form select:disabled {
+    cursor: not-allowed;
+    color: var(--muted);
+    background: var(--panel);
+}
+.ai-owner-note {
+    margin: 0;
+    padding: 10px 12px;
+    border: 1px solid #f5d8a8;
+    border-radius: 10px;
+    color: #8a4b08;
+    background: #fff8eb;
+    font-size: 12px;
+    line-height: 1.55;
+}
 .asset-name-card label > span,
 .asset-form-grid label > span,
 .asset-name-card label small,
@@ -7819,5 +9205,340 @@ dl > div {
     color: #101828;
     -webkit-text-fill-color: currentColor;
     font-size: 14px;
+}
+
+/* --- 存钱计划与家庭共享 ---------------------------------------- */
+.ledger-switch {
+    display: inline-flex;
+    gap: 8px;
+    align-items: center;
+    font-size: 13px;
+    color: var(--muted);
+}
+.ledger-switch select {
+    min-height: 40px;
+    padding: 7px 10px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--panel);
+}
+.ledger-overview {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin: 18px 0 4px;
+}
+.ledger-overview > div,
+.ledger-overview > footer {
+    padding: 13px 15px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--panel);
+}
+.ledger-overview > div { display: grid; gap: 4px; }
+.ledger-overview small { color: var(--muted); font-size: 11px; }
+.ledger-overview strong { font-size: 21px; }
+.ledger-overview > footer {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+.ledger-overview > footer span { display: flex; flex-wrap: wrap; gap: 12px; }
+@media (max-width: 760px) {
+    .ledger-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .ledger-overview > footer { align-items: flex-start; flex-direction: column; }
+}
+.goal-list,
+.member-list {
+    display: grid;
+    gap: 14px;
+    margin-top: 16px;
+}
+.goal-card {
+    padding: 16px 18px;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: var(--panel);
+}
+.goal-card header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+.goal-card header b {
+    font-size: 15px;
+}
+.goal-card footer {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+}
+.goal-card footer button {
+    min-height: 38px;
+    padding: 6px 14px;
+    border-radius: 99px;
+    font-size: 13px;
+}
+.goal-card footer button.danger,
+.member-row button.danger {
+    color: #b42318;
+}
+.goal-amounts {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    margin-top: 8px;
+}
+.goal-amounts strong {
+    font-size: 22px;
+    letter-spacing: -0.4px;
+}
+.goal-progress {
+    height: 8px;
+    margin-top: 10px;
+    overflow: hidden;
+    border-radius: 8px;
+    background: var(--line);
+}
+.goal-progress i {
+    display: block;
+    height: 100%;
+    border-radius: 8px;
+    background: var(--brand, #f05537);
+}
+.goal-meta {
+    display: block;
+    margin-top: 8px;
+    color: var(--muted);
+    font-size: 12px;
+}
+.pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    border-radius: 7px;
+    background: var(--panel);
+    color: var(--muted);
+    font-size: 12px;
+}
+.pill.achieved {
+    background: #e8f5ee;
+    color: #087a49;
+}
+.family-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 16px;
+    padding: 16px 18px;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: var(--panel);
+}
+.family-summary h2 {
+    font-size: 18px;
+}
+.family-summary p {
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 13px;
+}
+.panel h3 {
+    margin-top: 22px;
+    font-size: 14px;
+    color: var(--muted);
+}
+.member-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 13px 16px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: #fff;
+}
+.member-row.inactive {
+    opacity: 0.55;
+}
+.member-row small {
+    display: block;
+    margin-top: 3px;
+    color: var(--muted);
+    font-size: 12px;
+}
+.member-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+.member-actions select {
+    min-height: 38px;
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--panel);
+}
+.member-actions button {
+    min-height: 38px;
+    padding: 6px 14px;
+    border-radius: 99px;
+    font-size: 13px;
+}
+.family-footer {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 20px;
+}
+.family-footer button {
+    min-height: 44px;
+    padding: 9px 18px;
+    border-radius: 99px;
+}
+.family-footer button.danger {
+    color: #b42318;
+}
+.join-guide {
+    margin: 10px 0 0;
+    color: var(--muted);
+    font-size: 12.5px;
+    line-height: 1.65;
+}
+.muted-note {
+    margin-top: 8px;
+    color: var(--muted);
+    font-size: 12.5px;
+}
+.invite-preview {
+    display: grid;
+    gap: 8px;
+    padding: 16px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--panel);
+}
+.invite-preview > small { color: var(--muted); font-size: 11px; font-weight: 700; }
+.invite-preview > strong { font-size: 19px; }
+.invite-preview > p { color: var(--muted); font-size: 13px; }
+.invite-preview dl { display: grid; gap: 7px; margin-top: 4px; }
+.invite-preview dl div { display: flex; justify-content: space-between; gap: 16px; font-size: 13px; }
+.invite-preview dt { color: var(--muted); }
+.invite-preview dd { margin: 0; text-align: right; font-weight: 650; }
+.invitation-result {
+    display: grid;
+    gap: 12px;
+    padding: 18px;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: var(--panel);
+}
+.invitation-result > small {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 750;
+    letter-spacing: .08em;
+}
+.invitation-result > p {
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.65;
+}
+.invitation-result .invitation-code {
+    margin: 0;
+    background: color-mix(in srgb, var(--panel) 82%, var(--ink) 6%);
+    font-size: 18px;
+    font-weight: 750;
+    letter-spacing: .08em;
+}
+.invite-steps {
+    display: grid;
+    gap: 10px;
+    margin: 0 0 16px;
+    padding: 0;
+    list-style: none;
+}
+.invite-steps li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--muted);
+    font-size: 13px;
+}
+.invite-steps span {
+    display: grid;
+    width: 24px;
+    height: 24px;
+    flex: none;
+    place-items: center;
+    border-radius: 50%;
+    color: var(--panel);
+    background: var(--ink);
+    font-size: 11px;
+    font-weight: 750;
+}
+.delete-impact { display:grid; gap:9px; margin:10px 0 14px; padding:15px; border:1px solid #B8E4CE; border-radius:14px; background:#F2FBF6; }
+.delete-impact.blocked { border-color:#F0C7C3; background:#FFF5F4; }
+.delete-impact > p { color:var(--muted); font-size:13px; }
+.delete-impact dl { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+.delete-impact dl div { display:flex; justify-content:space-between; padding:8px 10px; border-radius:9px; background:rgba(255,255,255,.78); font-size:13px; }
+.delete-impact dd { margin:0; font-weight:750; }
+.invitation-code {
+    margin: 12px 0;
+    padding: 16px;
+    border: 1px dashed var(--control, #8a929f);
+    border-radius: 12px;
+    background: var(--panel);
+    font-family: monospace;
+    font-size: 16px;
+    text-align: center;
+    overflow-wrap: anywhere;
+    user-select: all;
+}
+.modal-fields label {
+    display: block;
+    margin-top: 14px;
+    font-size: 13px;
+    font-weight: 600;
+}
+.modal-fields label small {
+    display: block;
+    margin-top: 4px;
+    font-weight: 400;
+}
+.modal-fields .template-option {
+    display: grid;
+    width: 100%;
+    min-height: 58px;
+    justify-items: start;
+    gap: 3px;
+    margin-top: 10px;
+    padding: 10px 14px;
+    border: 1px solid var(--line);
+    border-radius: 13px;
+    background: var(--panel);
+    text-align: left;
+}
+.modal-fields .template-option b {
+    font-size: 13.5px;
+}
+.modal-fields .template-option span {
+    color: var(--muted);
+    font-size: 12px;
+}
+.modal-fields .template-option.selected {
+    border-color: var(--ink);
+    box-shadow: inset 0 0 0 1px var(--ink);
+}
+.form-error {
+    margin-top: 12px;
+    color: #b42318;
+    font-size: 13px;
 }
 </style>

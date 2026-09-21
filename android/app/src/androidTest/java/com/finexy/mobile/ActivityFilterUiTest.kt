@@ -22,4 +22,14 @@ class ActivityFilterUiTest {
         rule.onNodeWithText("私人午餐").assertDoesNotExist()
         rule.onNodeWithText("历史工作午餐").assertDoesNotExist()
     }
+
+    @Test fun globalLedgerSwitcherExposesFamilyReadOnlyState() {
+        rule.onNodeWithContentDescription("切换到账本：温暖小家").performClick()
+        rule.onNodeWithText("家庭账本 · 只读").assertIsDisplayed()
+        rule.onNodeWithText("家庭账本当前只读。").assertIsDisplayed()
+        rule.onNodeWithText("工作午餐").performScrollTo().performClick()
+        rule.onNodeWithText("删除这笔流水？").assertDoesNotExist()
+        chip("个人账本").performClick()
+        rule.onNodeWithText("每一笔，都清楚。").assertIsDisplayed()
+    }
 }

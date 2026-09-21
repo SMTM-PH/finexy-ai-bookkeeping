@@ -37,7 +37,7 @@ func (a *MonthlyBudgetsApi) MonthlyBudgetSetHandler(c *core.WebContext) (any, *e
 	if err := c.ShouldBindJSON(&request); err != nil {
 		return nil, errs.NewIncompleteOrIncorrectSubmissionError(err)
 	}
-	budget, err := a.monthlyBudgets.SetMonthlyBudget(c, c.GetCurrentUid(), request.YearMonth, request.Amount)
+	budget, err := a.monthlyBudgets.SetMonthlyBudget(c, c.GetCurrentUid(), request.YearMonth, request.Amount, request.CategoryAmounts)
 	if err != nil {
 		return nil, errs.Or(err, errs.ErrOperationFailed)
 	}

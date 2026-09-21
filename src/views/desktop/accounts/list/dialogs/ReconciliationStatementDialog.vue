@@ -331,7 +331,7 @@ import { TimezoneTypeForStatistics } from '@/core/timezone.ts';
 import { TransactionType } from '@/core/transaction.ts';
 import { AccountBalanceTrendChartType, ChartDateAggregationType } from '@/core/statistics.ts';
 import { KnownFileType } from '@/core/file.ts';
-import { Transaction, type TransactionReconciliationStatementResponseItem } from '@/models/transaction.ts';
+import { Transaction, type TransactionReconciliationStatementResponse, type TransactionReconciliationStatementResponseItem } from '@/models/transaction.ts';
 
 import { isEquals } from '@/lib/common.ts';
 import { getCurrentUnixTime } from '@/lib/datetime.ts';
@@ -578,7 +578,7 @@ function reload(force: boolean): void {
         endTime: endTime.value
     }).then(result => {
         if (force) {
-            if (isEquals(reconciliationStatements.value, result)) {
+            if (isEquals<TransactionReconciliationStatementResponse | undefined>(reconciliationStatements.value, result)) {
                 snackbar.value?.showMessage('Data is up to date');
             } else {
                 snackbar.value?.showMessage('Data has been updated');

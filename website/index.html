@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Finexy — 自托管 AI 个人财务工作台 | Android · Web · NAS 本地部署</title>
-  <meta name="description" content="Finexy 是开源自托管的 AI 个人财务系统：Android 与 Web 多端联动、微信一句话记账、中文票据本地 OCR、NAS 本地部署，账本数据完全由你掌控。">
+  <title>Finexy — 以账本为中心的自托管财务系统 | Android · Web · NAS</title>
+  <meta name="description" content="Finexy 是以账本为中心的开源自托管财务系统：多账本快速切换、邀请成员共同记账，支持 Android、Web、Windows、中文票据 OCR 与 NAS 部署。">
   <meta name="theme-color" content="#F05537">
   <link rel="icon" type="image/png" href="assets/img/favicon.png">
   <link rel="apple-touch-icon" href="assets/img/touchicon.png">
   <meta property="og:type" content="website">
-  <meta property="og:title" content="Finexy — 自托管 AI 个人财务工作台">
-  <meta property="og:description" content="让每一笔钱，都有清晰去向。Android / Web 多端联动，微信一句话记账，NAS 本地部署，数据完全自持。">
+  <meta property="og:title" content="Finexy — 以账本为中心的自托管财务系统">
+  <meta property="og:description" content="个人可以创建多个账本，也可以邀请成员共同记录。Android / Web / Windows 多端联动，数据完全自持。">
   <meta property="og:image" content="assets/img/finexy-dashboard.png">
   <link rel="stylesheet" href="assets/css/style.css">
   <script>document.documentElement.classList.add('js');</script>
@@ -57,8 +57,8 @@
           </p>
           <h1>让每一笔钱，<br>都有<span class="accent">清晰去向</span>。</h1>
           <p class="hero-sub">
-            Finexy 是自托管的 AI 个人财务工作台：Android 与 Web 多端联动，微信里发一句话就能记账，
-            票据本地 OCR、预算、资产与报表整合在统一界面。账本部署在你自己的 NAS 或服务器上，完全由你掌控。
+            为个人生活、家庭共同开支或独立目标创建不同账本，随时切换，也可以邀请成员共同记录。
+            Android、Web 与 Windows 使用同一套账本和同步体系；数据部署在你自己的 NAS 或服务器上。
           </p>
           <div class="hero-cta">
             <a class="btn btn-primary btn-lg" href="https://github.com/SMTM-PH/finexy-ai-bookkeeping/releases" target="_blank" rel="noopener">下载最新版本</a>
@@ -81,7 +81,7 @@
               <span class="b-dot" style="background:#62D3A0"></span>
               <span class="b-url">finexy.local:8080</span>
             </div>
-            <img src="assets/img/finexy-dashboard.png" alt="Finexy 财务工作台界面：总余额、收支统计、预算与近期活动" width="1440" height="900" loading="eager">
+            <img src="assets/img/finexy-dashboard.png" alt="Finexy 当前账本总览：账本切换、余额、本月收支、预算与近期活动" width="1440" height="1000" loading="eager">
           </figure>
         </div>
       </div>
@@ -98,23 +98,23 @@
       <div class="container">
         <div class="section-head">
           <p class="eyebrow">核心能力</p>
-          <h2>一个工作台，管好全部财务</h2>
-          <p class="section-sub">从随手记账到深度分析，Finexy 把个人财务的每个环节收进同一个界面。</p>
+          <h2>每一本账，都各自清楚</h2>
+          <p class="section-sub">个人可以创建多个账本，也可以从同一账本邀请成员、记录流水并管理目标。</p>
         </div>
         <div class="feature-grid">
           <article class="card reveal">
             <span class="icon-chip" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9L12 3z"/><path d="M19 14l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8.8-2z"/></svg>
             </span>
-            <h3>微信一句话记账</h3>
-            <p>接入 OpenClaw（龙虾）等支持 MCP 的 AI 助手，在微信里发一句"午餐 36 元"，AI 解析金额、分类与账户，确认后入账。</p>
+            <h3>多账本快速切换</h3>
+            <p>个人生活、家庭开支和独立目标分别记录；切换账本后，余额、流水、账户和目标一起切换。</p>
           </article>
           <article class="card reveal">
             <span class="icon-chip" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-2.4-1.6L13.2 21l-2.4-1.6L8.4 21 6 19.4V3z"/><path d="M9 7h6M9 11h6M9 15h3"/></svg>
             </span>
-            <h3>中文票据本地 OCR</h3>
-            <p>自托管 OCR 服务识别中文小票，再由大模型结构化字段。票据图片不出你的服务器，服务端不保存原图。</p>
+            <h3>成员协作与权限</h3>
+            <p>用一次性邀请码加入账本，加入前核对邀请人和权限；所有者、管理员、成员和只读角色各司其职。</p>
           </article>
           <article class="card reveal">
             <span class="icon-chip" aria-hidden="true">
@@ -177,7 +177,7 @@
             <span class="b-dot" style="background:#62D3A0"></span>
             <span class="b-url">finexy.local:8080/</span>
           </div>
-          <img src="assets/img/finexy-dashboard.png" alt="财务工作台：总余额、总收支卡片、盈亏柱状图、每月支出限额与近期活动列表" width="1440" height="900" loading="lazy">
+          <img src="assets/img/finexy-dashboard.png" alt="当前账本总览：总余额、本月结余、收入支出趋势、预算与近期活动" width="1440" height="1000" loading="lazy">
         </figure>
         <div class="crop-grid">
           <figure class="crop-card reveal">
@@ -188,14 +188,14 @@
             </figcaption>
           </figure>
           <figure class="crop-card reveal">
-            <span class="crop crop-b" role="img" aria-label="盈亏情况柱状图：逐月对比盈利与亏损"></span>
+            <span class="crop crop-b" role="img" aria-label="收支趋势柱状图：逐月对比收入与支出"></span>
             <figcaption>
               <h3>趋势看得清楚</h3>
-              <p>逐月盈亏对比、分类与标签统计，CSV 导出随心分析。</p>
+              <p>逐月收入与支出对比、分类与标签统计，CSV 导出随心分析。</p>
             </figcaption>
           </figure>
           <figure class="crop-card reveal">
-            <span class="crop crop-c" role="img" aria-label="每月支出限额进度条与财务待办"></span>
+            <span class="crop crop-c" role="img" aria-label="每月支出限额进度条与需要处理事项"></span>
             <figcaption>
               <h3>预算不超线</h3>
               <p>月度支出限额实时进度，财务待办集中提醒，超支前先知道。</p>
@@ -436,7 +436,7 @@
             </span>
             <h3>NAS / Docker</h3>
             <p>在线部署配置包与离线镜像 tar，适配群晖、威联通等 AMD64 NAS。</p>
-            <span class="dl-meta">deploy.zip / images.tar · v1.8.0</span>
+            <span class="dl-meta">deploy.zip / images.tar · v1.9.0</span>
           </a>
           <a class="dl-card reveal" href="https://github.com/SMTM-PH/finexy-ai-bookkeeping/releases" target="_blank" rel="noopener">
             <span class="dl-icon" aria-hidden="true">
@@ -444,7 +444,7 @@
             </span>
             <h3>Windows 客户端</h3>
             <p>安装版与便携版，x64。客户端连接到已部署的 Finexy 服务。</p>
-            <span class="dl-meta">Setup.exe / Portable.exe · v1.8.0</span>
+            <span class="dl-meta">Setup.exe / Portable.exe · v1.9.0</span>
           </a>
           <a class="dl-card reveal" href="#deploy">
             <span class="dl-icon" aria-hidden="true">
@@ -483,7 +483,7 @@
           <span class="brand-mark" aria-hidden="true">F</span>
           <span class="brand-name">Finexy</span>
         </a>
-        <p>自托管 AI 个人财务工作台。<br>你的数据，始终由你保管。</p>
+        <p>以账本为中心的自托管财务系统。<br>你的数据，始终由你保管。</p>
       </div>
       <nav class="footer-col" aria-label="项目链接">
         <h4>项目</h4>

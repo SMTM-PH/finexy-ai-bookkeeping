@@ -70,6 +70,21 @@ func (s *TransactionCategoryService) GetAllCategoriesByUid(c core.Context, uid i
 	return categories, err
 }
 
+// GetAllCategoriesInLedger returns the category namespace used by a ledger.
+// Explicit ledgers store transactions in the ledger owner's shard, so every
+// member must select categories from that same namespace.
+func (s *TransactionCategoryService) GetAllCategoriesInLedger(c core.Context, uid, ledgerId int64, categoryType models.TransactionCategoryType, parentCategoryId int64) ([]*models.TransactionCategory, error) {
+	_, ledger, err := Ledgers.GetLedgerWithAccess(c, uid, ledgerId, func(models.FamilyMemberRole) bool { return true })
+	if err != nil {
+		return nil, err
+	}
+	ownerUid, err := Ledgers.LedgerDataOwnerUid(c, uid, ledger)
+	if err != nil {
+		return nil, err
+	}
+	return s.GetAllCategoriesByUid(c, ownerUid, categoryType, parentCategoryId)
+}
+
 // GetSubCategoriesByCategoryIds returns sub-category models according to category ids
 func (s *TransactionCategoryService) GetSubCategoriesByCategoryIds(c core.Context, uid int64, categoryIds []int64) ([]*models.TransactionCategory, error) {
 	if uid <= 0 {

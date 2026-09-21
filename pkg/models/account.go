@@ -68,9 +68,13 @@ var defaultCreditCardAccountStatementDate = 0
 
 // Account represents account data stored in database
 type Account struct {
-	AccountId       int64           `xorm:"PK"`
-	Uid             int64           `xorm:"INDEX(IDX_account_uid_deleted_parent_account_id_order) NOT NULL"`
-	Deleted         bool            `xorm:"INDEX(IDX_account_uid_deleted_parent_account_id_order) NOT NULL"`
+	AccountId int64 `xorm:"PK"`
+	Uid       int64 `xorm:"INDEX(IDX_account_uid_deleted_parent_account_id_order) NOT NULL"`
+	Deleted   bool  `xorm:"INDEX(IDX_account_uid_deleted_parent_account_id_order) NOT NULL"`
+	// LedgerId scopes the account to one ledger. Zero means the user's default
+	// personal ledger, which keeps every pre-existing account in place without
+	// a data migration. Family ledger accounts carry the family ledger id.
+	LedgerId        int64           `xorm:"INDEX(IDX_account_uid_ledger_id) NOT NULL DEFAULT 0"`
 	Category        AccountCategory `xorm:"NOT NULL"`
 	Type            AccountType     `xorm:"NOT NULL"`
 	ParentAccountId int64           `xorm:"INDEX(IDX_account_uid_deleted_parent_account_id_order) NOT NULL"`
@@ -108,6 +112,10 @@ type AccountCreateRequest struct {
 	CreditCardStatementDate int                     `json:"creditCardStatementDate" binding:"min=0,max=28"`
 	SubAccounts             []*AccountCreateRequest `json:"subAccounts" binding:"omitempty"`
 	ClientSessionId         string                  `json:"clientSessionId"`
+	// LedgerId assigns the account to one ledger at creation time. Omitted or
+	// zero keeps the account in the user's default personal ledger. The
+	// ledger of an existing account is immutable in this delivery stage.
+	LedgerId int64 `json:"ledgerId,string" binding:"omitempty,min=1"`
 }
 
 // AccountModifyRequest represents all parameters of account modification request
@@ -136,7 +144,8 @@ type AccountUpdateLastReconciledTimeRequest struct {
 
 // AccountListRequest represents all parameters of account listing request
 type AccountListRequest struct {
-	VisibleOnly bool `form:"visible_only"`
+	VisibleOnly bool  `form:"visible_only"`
+	LedgerId    int64 `form:"ledgerId,string" binding:"omitempty,min=1"`
 }
 
 // AccountGetRequest represents all parameters of account getting request
@@ -166,25 +175,35 @@ type AccountDeleteRequest struct {
 	Id int64 `json:"id,string" binding:"required,min=1"`
 }
 
+// AccountMoveLedgerRequest moves a complete root-account group, including its
+// history, to another ledger. The implicit default ledger is encoded as zero.
+type AccountMoveLedgerRequest struct {
+	Id             int64  `json:"id,string" binding:"required,min=1"`
+	TargetLedgerId *int64 `json:"targetLedgerId,string" binding:"required,gte=0"`
+}
+
 // AccountInfoResponse represents a view-object of account
 type AccountInfoResponse struct {
-	Id                      int64                    `json:"id,string"`
-	Name                    string                   `json:"name"`
-	ParentId                int64                    `json:"parentId,string"`
-	Category                AccountCategory          `json:"category"`
-	Type                    AccountType              `json:"type"`
-	Icon                    int64                    `json:"icon,string"`
-	Color                   string                   `json:"color"`
-	Currency                string                   `json:"currency"`
-	Balance                 int64                    `json:"balance"`
-	LastReconciledTime      *int64                   `json:"lastReconciledTime,omitempty"`
-	Comment                 string                   `json:"comment"`
-	CreditCardStatementDate *int                     `json:"creditCardStatementDate,omitempty"`
-	DisplayOrder            int32                    `json:"displayOrder"`
-	IsAsset                 bool                     `json:"isAsset,omitempty"`
-	IsLiability             bool                     `json:"isLiability,omitempty"`
-	Hidden                  bool                     `json:"hidden"`
-	SubAccounts             AccountInfoResponseSlice `json:"subAccounts,omitempty"`
+	Id                      int64           `json:"id,string"`
+	Name                    string          `json:"name"`
+	ParentId                int64           `json:"parentId,string"`
+	Category                AccountCategory `json:"category"`
+	Type                    AccountType     `json:"type"`
+	Icon                    int64           `json:"icon,string"`
+	Color                   string          `json:"color"`
+	Currency                string          `json:"currency"`
+	Balance                 int64           `json:"balance"`
+	LastReconciledTime      *int64          `json:"lastReconciledTime,omitempty"`
+	Comment                 string          `json:"comment"`
+	CreditCardStatementDate *int            `json:"creditCardStatementDate,omitempty"`
+	DisplayOrder            int32           `json:"displayOrder"`
+	IsAsset                 bool            `json:"isAsset,omitempty"`
+	IsLiability             bool            `json:"isLiability,omitempty"`
+	Hidden                  bool            `json:"hidden"`
+	// LedgerId exposes the ledger scope of the account; zero means the
+	// user's default personal ledger.
+	LedgerId    int64                    `json:"ledgerId,string"`
+	SubAccounts AccountInfoResponseSlice `json:"subAccounts,omitempty"`
 }
 
 // GetLastReconciledTime returns the last reconciled time of the account
@@ -230,6 +249,7 @@ func (a *Account) ToAccountInfoResponse() *AccountInfoResponse {
 		IsAsset:                 assetAccountCategory[a.Category],
 		IsLiability:             liabilityAccountCategory[a.Category],
 		Hidden:                  a.Hidden,
+		LedgerId:                a.LedgerId,
 	}
 }
 

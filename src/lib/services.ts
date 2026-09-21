@@ -39,7 +39,8 @@ import type {
     AccountInfoResponse,
     AccountHideRequest,
     AccountMoveRequest,
-    AccountDeleteRequest
+    AccountDeleteRequest,
+    AccountMoveLedgerRequest
 } from '@/models/account.ts';
 import type {
     AuthResponse,
@@ -125,6 +126,13 @@ import type {
     TransactionTagInfoResponse
 } from '@/models/transaction_tag.ts';
 import type {
+    LedgerMemberInfoResponse,
+    LedgerInvitationInfoResponse,
+    LedgerInvitationPreviewResponse,
+    LedgerDeletePreviewResponse,
+    LedgerOverviewResponse
+} from '@/models/ledger.ts';
+import type {
     TransactionTemplateCreateRequest,
     TransactionTemplateModifyRequest,
     TransactionTemplateHideRequest,
@@ -147,6 +155,17 @@ import type {
 import type { LocalOCRResponse } from '@/models/local_ocr.ts';
 import type { AIReviewItemCreateRequest, AIReviewItemInfoResponse } from '@/models/ai_review_item.ts';
 import type { ScheduledOccurrenceActionRequest, ScheduledOccurrenceInfoResponse } from '@/models/scheduled_occurrence.ts';
+import type {
+    FamilyGroupInfoResponse, FamilyGroupCreateRequest, FamilyGroupModifyRequest,
+    FamilyMemberInfoResponse, FamilyMemberListRequest, FamilyMemberRoleChangeRequest,
+    FamilyMemberRemoveRequest, FamilyMemberLeaveRequest, FamilyInvitationInfoResponse,
+    FamilyInvitationCreateRequest, FamilyInvitationRevokeRequest, FamilyInvitationAcceptRequest
+} from '@/models/family.ts';
+import type { LedgerInfoResponse, LedgerCreateRequest, LedgerModifyRequest } from '@/models/ledger.ts';
+import type {
+    SavingsGoalInfoResponse, SavingsGoalCreateRequest, SavingsGoalModifyRequest,
+    SavingsGoalFundRequest, SavingsGoalFundInfoResponse
+} from '@/models/savings_goal.ts';
 import type { AIReportInfoResponse } from '@/models/ai_report.ts';
 import type {
     InsightsExplorerCreateRequest,
@@ -195,6 +214,10 @@ import type {
 import type {
     RecognizedTransactionResponse
 } from '@/models/large_language_model.ts';
+import type {
+    AIConfigurationResponse,
+    AIConfigurationUpdateRequest
+} from '@/models/ai_configuration.ts';
 
 import {
     getCurrentToken,
@@ -524,8 +547,8 @@ export default {
             timeout: DEFAULT_CLEAR_ALL_TRANSACTIONS_API_TIMEOUT
         } as ApiRequestConfig);
     },
-    getAllAccounts: ({ visibleOnly }: { visibleOnly: boolean }): ApiResponsePromise<AccountInfoResponse[]> => {
-        return axios.get<ApiResponse<AccountInfoResponse[]>>('v1/accounts/list.json?visible_only=' + visibleOnly);
+    getAllAccounts: ({ visibleOnly, ledgerId }: { visibleOnly: boolean; ledgerId?: string }): ApiResponsePromise<AccountInfoResponse[]> => {
+        return axios.get<ApiResponse<AccountInfoResponse[]>>('v1/accounts/list.json?visible_only=' + visibleOnly + (ledgerId ? `&ledgerId=${encodeURIComponent(ledgerId)}` : ''));
     },
     getAccount: ({ id }: { id: string }): ApiResponsePromise<AccountInfoResponse> => {
         return axios.get<ApiResponse<AccountInfoResponse>>('v1/accounts/get.json?id=' + id);
@@ -544,6 +567,9 @@ export default {
     },
     moveAccount: (req: AccountMoveRequest): ApiResponsePromise<boolean> => {
         return axios.post<ApiResponse<boolean>>('v1/accounts/move.json', req);
+    },
+    moveAccountToLedger: (req: AccountMoveLedgerRequest): ApiResponsePromise<AccountInfoResponse[]> => {
+        return axios.post<ApiResponse<AccountInfoResponse[]>>('v1/accounts/move_ledger.json', req);
     },
     deleteAccount: (req: AccountDeleteRequest): ApiResponsePromise<boolean> => {
         return axios.post<ApiResponse<boolean>>('v1/accounts/delete.json', req);
@@ -579,13 +605,13 @@ export default {
         const tagFilter = encodeURIComponent(req.tagFilter);
         const amountFilter = encodeURIComponent(req.amountFilter);
         const keyword = encodeURIComponent(req.keyword);
-        return axios.get<ApiResponse<TransactionInfoPageWrapperResponse>>(`v1/transactions/list.json?max_time=${req.maxTime}&min_time=${req.minTime}&type=${req.type}&category_ids=${req.categoryIds}&account_ids=${req.accountIds}&tag_filter=${tagFilter}&amount_filter=${amountFilter}&keyword=${keyword}&match_mode=${req.matchMode}&must_have_pictures=${!!req.mustHavePictures}&count=${req.count}&page=${req.page}&with_count=${req.withCount}&with_pictures=${!!req.withPictures}&trim_account=true&trim_category=true&trim_tag=true`);
+        return axios.get<ApiResponse<TransactionInfoPageWrapperResponse>>(`v1/transactions/list.json?max_time=${req.maxTime}&min_time=${req.minTime}&type=${req.type}&category_ids=${req.categoryIds}&account_ids=${req.accountIds}&tag_filter=${tagFilter}&amount_filter=${amountFilter}&keyword=${keyword}&match_mode=${req.matchMode}&must_have_pictures=${!!req.mustHavePictures}&count=${req.count}&page=${req.page}&with_count=${req.withCount}&with_pictures=${!!req.withPictures}&trim_account=true&trim_category=true&trim_tag=true${req.ledgerId ? `&ledgerId=${encodeURIComponent(req.ledgerId)}` : ''}`);
     },
     getAllTransactionsByMonth: (req: TransactionListInMonthByPageRequest): ApiResponsePromise<TransactionInfoPageWrapperResponse2> => {
         const tagFilter = encodeURIComponent(req.tagFilter);
         const amountFilter = encodeURIComponent(req.amountFilter);
         const keyword = encodeURIComponent(req.keyword);
-        return axios.get<ApiResponse<TransactionInfoPageWrapperResponse2>>(`v1/transactions/list/by_month.json?year=${req.year}&month=${req.month}&type=${req.type}&category_ids=${req.categoryIds}&account_ids=${req.accountIds}&tag_filter=${tagFilter}&amount_filter=${amountFilter}&keyword=${keyword}&match_mode=${req.matchMode}&must_have_pictures=${!!req.mustHavePictures}&with_pictures=${!!req.withPictures}&trim_account=true&trim_category=true&trim_tag=true`);
+        return axios.get<ApiResponse<TransactionInfoPageWrapperResponse2>>(`v1/transactions/list/by_month.json?year=${req.year}&month=${req.month}&type=${req.type}&category_ids=${req.categoryIds}&account_ids=${req.accountIds}&tag_filter=${tagFilter}&amount_filter=${amountFilter}&keyword=${keyword}&match_mode=${req.matchMode}&must_have_pictures=${!!req.mustHavePictures}&with_pictures=${!!req.withPictures}&trim_account=true&trim_category=true&trim_tag=true${req.ledgerId ? `&ledgerId=${encodeURIComponent(req.ledgerId)}` : ''}`);
     },
     getAllTransactions: (req: TransactionAllListRequest): ApiResponsePromise<TransactionInfoResponse[]> => {
         return axios.get<ApiResponse<TransactionInfoResponse[]>>(`v1/transactions/list/all.json?trim_account=true&with_pictures=${!!req.withPictures}&trim_category=true&trim_tag=true&start_time=${req.startTime}&end_time=${req.endTime}`);
@@ -595,6 +621,7 @@ export default {
     },
     getTransactionStatistics: (req: TransactionStatisticRequest): ApiResponsePromise<TransactionStatisticResponse> => {
         const queryParams: string[] = [];
+		if (req.ledgerId) queryParams.push(`ledgerId=${encodeURIComponent(req.ledgerId)}`);
 
         if (req.startTime) {
             queryParams.push(`start_time=${req.startTime}`);
@@ -620,6 +647,7 @@ export default {
     },
     getTransactionStatisticsTrends: (req: TransactionStatisticTrendsRequest): ApiResponsePromise<TransactionStatisticTrendsResponseItem[]> => {
         const queryParams: string[] = [];
+		if (req.ledgerId) queryParams.push(`ledgerId=${encodeURIComponent(req.ledgerId)}`);
 
         if (req.startYearMonth) {
             queryParams.push(`start_year_month=${req.startYearMonth}`);
@@ -670,12 +698,12 @@ export default {
 
         return axios.get<ApiResponse<TransactionAmountsResponse>>(`v1/transactions/amounts.json?${queryParams}`);
     },
-    getTransaction: ({ id, withPictures }: { id: string, withPictures: boolean | undefined }): ApiResponsePromise<TransactionInfoResponse> => {
+    getTransaction: ({ id, withPictures, ledgerId }: { id: string, withPictures: boolean | undefined, ledgerId?: string }): ApiResponsePromise<TransactionInfoResponse> => {
         if (!isDefined(withPictures)) {
             withPictures = true;
         }
 
-        return axios.get<ApiResponse<TransactionInfoResponse>>(`v1/transactions/get.json?id=${id}&with_pictures=${withPictures}&trim_account=true&trim_category=true&trim_tag=true`);
+        return axios.get<ApiResponse<TransactionInfoResponse>>(`v1/transactions/get.json?id=${id}&with_pictures=${withPictures}&trim_account=true&trim_category=true&trim_tag=true${ledgerId ? `&ledgerId=${ledgerId}` : ''}`);
     },
     addTransaction: (req: TransactionCreateRequest): ApiResponsePromise<TransactionInfoResponse> => {
         return axios.post<ApiResponse<TransactionInfoResponse>>('v1/transactions/add.json', req);
@@ -798,8 +826,8 @@ export default {
     removeUnusedTransactionPicture: (req: TransactionPictureUnusedDeleteRequest): ApiResponsePromise<boolean> => {
         return axios.post<ApiResponse<boolean>>('v1/transaction/pictures/remove_unused.json', req);
     },
-    getAllTransactionCategories: (): ApiResponsePromise<Record<number, TransactionCategoryInfoResponse[]>> => {
-        return axios.get<ApiResponse<Record<number, TransactionCategoryInfoResponse[]>>>('v1/transaction/categories/list.json');
+    getAllTransactionCategories: (ledgerId?: string): ApiResponsePromise<Record<number, TransactionCategoryInfoResponse[]>> => {
+        return axios.get<ApiResponse<Record<number, TransactionCategoryInfoResponse[]>>>('v1/transaction/categories/list.json' + (ledgerId ? `?ledgerId=${ledgerId}` : ''));
     },
     getTransactionCategory: ({ id }: { id: string }): ApiResponsePromise<TransactionCategoryInfoResponse> => {
         return axios.get<ApiResponse<TransactionCategoryInfoResponse>>('v1/transaction/categories/get.json?id=' + id);
@@ -897,6 +925,117 @@ export default {
     restoreScheduledOccurrence: (req: ScheduledOccurrenceActionRequest): ApiResponsePromise<boolean> => {
         return axios.post<ApiResponse<boolean>>('v1/schedule/review/restore.json', req);
     },
+    createFamilyGroup: (req: FamilyGroupCreateRequest): ApiResponsePromise<FamilyGroupInfoResponse> => {
+        return axios.post<ApiResponse<FamilyGroupInfoResponse>>('v1/family/group/create.json', req);
+    },
+    listFamilyGroups: (): ApiResponsePromise<FamilyGroupInfoResponse[]> => {
+        return axios.get<ApiResponse<FamilyGroupInfoResponse[]>>('v1/family/group/list.json');
+    },
+    modifyFamilyGroup: (req: FamilyGroupModifyRequest): ApiResponsePromise<FamilyGroupInfoResponse> => {
+        return axios.post<ApiResponse<FamilyGroupInfoResponse>>('v1/family/group/modify.json', req);
+    },
+    deleteFamilyGroup: ({ id }: { id: string }): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/family/group/delete.json', { id: id });
+    },
+    listFamilyMembers: ({ familyId }: FamilyMemberListRequest): ApiResponsePromise<FamilyMemberInfoResponse[]> => {
+        return axios.get<ApiResponse<FamilyMemberInfoResponse[]>>('v1/family/member/list.json', { params: { familyId: familyId } });
+    },
+    getMyFamilyMember: ({ familyId }: FamilyMemberListRequest): ApiResponsePromise<FamilyMemberInfoResponse | null> => {
+        return axios.get<ApiResponse<FamilyMemberInfoResponse | null>>('v1/family/member/me.json', { params: { familyId: familyId } });
+    },
+    changeFamilyMemberRole: (req: FamilyMemberRoleChangeRequest): ApiResponsePromise<FamilyMemberInfoResponse> => {
+        return axios.post<ApiResponse<FamilyMemberInfoResponse>>('v1/family/member/change_role.json', req);
+    },
+    removeFamilyMember: (req: FamilyMemberRemoveRequest): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/family/member/remove.json', req);
+    },
+    leaveFamily: (req: FamilyMemberLeaveRequest): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/family/member/leave.json', req);
+    },
+    createFamilyInvitation: (req: FamilyInvitationCreateRequest): ApiResponsePromise<FamilyInvitationInfoResponse> => {
+        return axios.post<ApiResponse<FamilyInvitationInfoResponse>>('v1/family/invitation/create.json', req);
+    },
+    listFamilyInvitations: ({ familyId }: FamilyMemberListRequest): ApiResponsePromise<FamilyInvitationInfoResponse[]> => {
+        return axios.get<ApiResponse<FamilyInvitationInfoResponse[]>>('v1/family/invitation/list.json', { params: { familyId: familyId } });
+    },
+    revokeFamilyInvitation: (req: FamilyInvitationRevokeRequest): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/family/invitation/revoke.json', req);
+    },
+    acceptFamilyInvitation: (req: FamilyInvitationAcceptRequest): ApiResponsePromise<FamilyGroupInfoResponse> => {
+        return axios.post<ApiResponse<FamilyGroupInfoResponse>>('v1/family/invitation/accept.json', req);
+    },
+    listLedgers: ({ familyId }: { familyId?: string } = {}): ApiResponsePromise<LedgerInfoResponse[]> => {
+        return axios.get<ApiResponse<LedgerInfoResponse[]>>('v1/ledger/list.json', { params: { familyId: familyId } });
+    },
+    createLedger: (req: LedgerCreateRequest): ApiResponsePromise<LedgerInfoResponse> => {
+        return axios.post<ApiResponse<LedgerInfoResponse>>('v1/ledger/create.json', req);
+    },
+    modifyLedger: (req: LedgerModifyRequest): ApiResponsePromise<LedgerInfoResponse> => {
+        return axios.post<ApiResponse<LedgerInfoResponse>>('v1/ledger/modify.json', req);
+    },
+    deleteLedger: ({ id }: { id: string }): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/ledger/delete.json', { id: id });
+    },
+    getLedgerOverview: ({ ledgerId }: { ledgerId: string }): ApiResponsePromise<LedgerOverviewResponse> => {
+        return axios.get<ApiResponse<LedgerOverviewResponse>>('v1/ledger/overview.json', { params: { ledgerId } });
+    },
+    previewLedgerDelete: ({ id }: { id: string }): ApiResponsePromise<LedgerDeletePreviewResponse> => {
+        return axios.get<ApiResponse<LedgerDeletePreviewResponse>>('v1/ledger/delete/preview.json', { params: { id } });
+    },
+    listLedgerMembers: ({ ledgerId }: { ledgerId: string }): ApiResponsePromise<LedgerMemberInfoResponse[]> => {
+        return axios.get<ApiResponse<LedgerMemberInfoResponse[]>>('v1/ledger/member/list.json', { params: { ledgerId } });
+    },
+    changeLedgerMemberRole: (req: { ledgerId: string; memberId: string; role: number }): ApiResponsePromise<LedgerMemberInfoResponse> => {
+        return axios.post<ApiResponse<LedgerMemberInfoResponse>>('v1/ledger/member/change_role.json', req);
+    },
+    removeLedgerMember: (req: { ledgerId: string; memberId: string }): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/ledger/member/remove.json', req);
+    },
+    leaveLedger: (req: { ledgerId: string }): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/ledger/member/leave.json', req);
+    },
+    createLedgerInvitation: (req: { ledgerId: string; inviteeName: string; role: number; expiresInSeconds?: number }): ApiResponsePromise<LedgerInvitationInfoResponse> => {
+        return axios.post<ApiResponse<LedgerInvitationInfoResponse>>('v1/ledger/invitation/create.json', req);
+    },
+    listLedgerInvitations: ({ ledgerId }: { ledgerId: string }): ApiResponsePromise<LedgerInvitationInfoResponse[]> => {
+        return axios.get<ApiResponse<LedgerInvitationInfoResponse[]>>('v1/ledger/invitation/list.json', { params: { ledgerId } });
+    },
+    revokeLedgerInvitation: (req: { ledgerId: string; invitationId: string }): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/ledger/invitation/revoke.json', req);
+    },
+    previewLedgerInvitation: (req: { token: string }): ApiResponsePromise<LedgerInvitationPreviewResponse> => {
+        return axios.post<ApiResponse<LedgerInvitationPreviewResponse>>('v1/ledger/invitation/preview.json', req);
+    },
+    acceptLedgerInvitation: (req: { token: string }): ApiResponsePromise<LedgerInfoResponse> => {
+        return axios.post<ApiResponse<LedgerInfoResponse>>('v1/ledger/invitation/accept.json', req);
+    },
+    listSavingsGoals: ({ ledgerId }: { ledgerId?: string } = {}): ApiResponsePromise<SavingsGoalInfoResponse[]> => {
+        return axios.get<ApiResponse<SavingsGoalInfoResponse[]>>('v1/savings_goal/list.json', { params: { ledgerId: ledgerId } });
+    },
+    getSavingsGoal: ({ id }: { id: string }): ApiResponsePromise<SavingsGoalInfoResponse> => {
+        return axios.get<ApiResponse<SavingsGoalInfoResponse>>('v1/savings_goal/get.json?id=' + id);
+    },
+    createSavingsGoal: (req: SavingsGoalCreateRequest): ApiResponsePromise<SavingsGoalInfoResponse> => {
+        return axios.post<ApiResponse<SavingsGoalInfoResponse>>('v1/savings_goal/create.json', req);
+    },
+    modifySavingsGoal: (req: SavingsGoalModifyRequest): ApiResponsePromise<SavingsGoalInfoResponse> => {
+        return axios.post<ApiResponse<SavingsGoalInfoResponse>>('v1/savings_goal/modify.json', req);
+    },
+    deleteSavingsGoal: ({ id }: { id: string }): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/savings_goal/delete.json', { id: id });
+    },
+    depositToSavingsGoal: (req: SavingsGoalFundRequest): ApiResponsePromise<SavingsGoalFundInfoResponse> => {
+        return axios.post<ApiResponse<SavingsGoalFundInfoResponse>>('v1/savings_goal/deposit.json', req);
+    },
+    withdrawFromSavingsGoal: (req: SavingsGoalFundRequest): ApiResponsePromise<SavingsGoalFundInfoResponse> => {
+        return axios.post<ApiResponse<SavingsGoalFundInfoResponse>>('v1/savings_goal/withdraw.json', req);
+    },
+    listSavingsGoalFunds: ({ goalId }: { goalId: string }): ApiResponsePromise<SavingsGoalFundInfoResponse[]> => {
+        return axios.get<ApiResponse<SavingsGoalFundInfoResponse[]>>('v1/savings_goal/funds/list.json', { params: { goalId: goalId } });
+    },
+    listSavingsGoalAccounts: ({ ledgerId }: { ledgerId?: string } = {}): ApiResponsePromise<AccountInfoResponse[]> => {
+        return axios.get<ApiResponse<AccountInfoResponse[]>>('v1/savings_goal/accounts.json', { params: { ledgerId: ledgerId } });
+    },
     getAllExplorations: (): ApiResponsePromise<InsightsExplorerInfoResponse[]> => {
         return axios.get<ApiResponse<InsightsExplorerInfoResponse[]>>('v1/insights/explorers/list.json');
     },
@@ -924,6 +1063,12 @@ export default {
         }, {
             timeout: DEFAULT_LLM_API_TIMEOUT
         } as ApiRequestConfig);
+    },
+    getAIConfiguration: (): ApiResponsePromise<AIConfigurationResponse> => {
+        return axios.get<ApiResponse<AIConfigurationResponse>>('v1/llm/configuration/get.json');
+    },
+    updateAIConfiguration: (req: AIConfigurationUpdateRequest): ApiResponsePromise<AIConfigurationResponse> => {
+        return axios.post<ApiResponse<AIConfigurationResponse>>('v1/llm/configuration/update.json', req);
     },
     recognizeReceiptImage: ({ imageFile, cancelableUuid }: { imageFile: File, cancelableUuid?: string }): ApiResponsePromise<RecognizedTransactionResponse> => {
         return axios.postForm<ApiResponse<RecognizedTransactionResponse>>('v1/llm/transactions/recognize_receipt_image.json', {

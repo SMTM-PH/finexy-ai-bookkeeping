@@ -89,7 +89,7 @@
                         <v-tab value="map" :disabled="!transaction.geoLocation" v-if="type === TransactionEditPageType.Transaction && !!getMapProvider()">
                             <span>{{ tt('Location on Map') }}</span>
                         </v-tab>
-                        <v-tab value="pictures" :disabled="mode !== TransactionEditPageMode.Add && mode !== TransactionEditPageMode.Edit && (!transaction.pictures || !transaction.pictures.length)" v-if="type === TransactionEditPageType.Transaction && isTransactionPicturesEnabled()">
+                        <v-tab value="pictures" :disabled="mode !== TransactionEditPageMode.Add && mode !== TransactionEditPageMode.Edit && (!transaction.pictures || !transaction.pictures.length)" v-if="type === TransactionEditPageType.Transaction && isTransactionPicturesEnabled() && !props.ledgerId">
                             <span>{{ tt('Pictures') }}</span>
                         </v-tab>
                     </v-tabs>
@@ -104,13 +104,20 @@
                                     <v-text-field
                                         type="text"
                                         persistent-placeholder
-                                        :disabled="loading || submitting || recognizing"
+                                        :disabled="loading || submitting || recognizing || !!props.ledgerId"
                                         :label="tt('Template Name')"
                                         :placeholder="tt('Template Name')"
                                         v-model="transaction.name"
                                     />
                                 </v-col>
-                                <v-col cols="12" md="6">
+                                <v-col cols="12" v-if="transaction.type === TransactionType.Transfer">
+                                    <div class="transfer-direction" role="group" aria-label="转账方向">
+                                        <button v-for="option in transferDirectionOptions" :key="option.value" type="button" :class="{ active: transferDirection === option.value }" :disabled="loading || submitting || recognizing || mode === TransactionEditPageMode.View" @click="setTransferDirection(option.value)">
+                                            <b>{{ option.label }}</b><small>{{ option.help }}</small>
+                                        </button>
+                                    </div>
+                                </v-col>
+                                <v-col cols="12" :md="transferDirection === 'internal' && transaction.type === TransactionType.Transfer ? 6 : 12" v-if="transaction.type !== TransactionType.Transfer || transferDirection !== 'in'">
                                     <amount-input class="transaction-edit-amount font-weight-bold"
                                                   :color="sourceAmountColor"
                                                   :currency="sourceAccountCurrency"
@@ -124,7 +131,7 @@
                                                   :enable-formula="mode !== TransactionEditPageMode.View"
                                                   v-model="transaction.sourceAmount"/>
                                 </v-col>
-                                <v-col cols="12" :md="6" v-if="transaction.type === TransactionType.Transfer">
+                                <v-col cols="12" :md="transferDirection === 'internal' ? 6 : 12" v-if="transaction.type === TransactionType.Transfer && transferDirection !== 'out'">
                                     <amount-input class="transaction-edit-amount font-weight-bold" color="primary"
                                                   :currency="destinationAccountCurrency"
                                                   :show-currency="true"
@@ -209,7 +216,7 @@
                                         </template>
                                     </v-tooltip>
                                 </v-col>
-                                <v-col cols="12" :md="transaction.type === TransactionType.Transfer ? 6 : 12">
+                                <v-col cols="12" :md="transaction.type === TransactionType.Transfer && transferDirection === 'internal' ? 6 : 12" v-if="transaction.type !== TransactionType.Transfer || transferDirection !== 'in'">
                                     <v-tooltip :disabled="!!allVisibleAccounts.length" :text="allVisibleAccounts.length ? '' : tt('No available account')">
                                         <template v-slot:activator="{ props }">
                                             <div v-bind="props" class="d-block">
@@ -234,7 +241,7 @@
                                         </template>
                                     </v-tooltip>
                                 </v-col>
-                                <v-col cols="12" md="6" v-if="transaction.type === TransactionType.Transfer">
+                                <v-col cols="12" :md="transferDirection === 'internal' ? 6 : 12" v-if="transaction.type === TransactionType.Transfer && transferDirection !== 'out'">
                                     <v-tooltip :disabled="!!allVisibleAccounts.length" :text="allVisibleAccounts.length ? '' : tt('No available account')">
                                         <template v-slot:activator="{ props }">
                                             <div v-bind="props" class="d-block">
@@ -306,7 +313,10 @@
                                         :disabled="loading || submitting || recognizing"
                                         :clearable="true"
                                         :label="tt('Start Date')"
-                                        :no-data-text="tt('No limit')"
+                                        :max-date="scheduledEndDateLimit"
+                                        :error="scheduledDateRangeInvalid"
+                                        :error-messages="scheduledDateRangeInvalid ? tt('scheduled transaction start date is later than end time') : ''"
+                                        :no-data-text="tt('Select a date')"
                                         v-model="transaction.scheduledStartDate" />
                                 </v-col>
                                 <v-col cols="12" md="6" v-if="type === TransactionEditPageType.Template && transaction instanceof TransactionTemplate && transaction.templateType === TemplateType.Schedule.type">
@@ -315,6 +325,9 @@
                                         :disabled="loading || submitting || recognizing"
                                         :clearable="true"
                                         :label="tt('End Date')"
+                                        :min-date="scheduledStartDateLimit"
+                                        :error="scheduledDateRangeInvalid"
+                                        :error-messages="scheduledDateRangeInvalid ? tt('scheduled transaction start date is later than end time') : ''"
                                         :no-data-text="tt('No limit')"
                                         v-model="transaction.scheduledEndDate" />
                                 </v-col>
@@ -342,6 +355,7 @@
                                 </v-col>
                                 <v-col cols="12" md="12">
                                     <transaction-tag-auto-complete
+                                        class="transaction-edit-tags"
                                         :readonly="mode === TransactionEditPageMode.View"
                                         :disabled="loading || submitting || recognizing"
                                         :show-label="true"
@@ -557,7 +571,8 @@ import type { RecognizedTransactionResponse } from '@/models/large_language_mode
 import { isDefined } from '@/lib/common.ts';
 import {
     getTimezoneOffsetMinutes,
-    getCurrentUnixTime
+    getCurrentUnixTime,
+    getLocalDateFromYearDashMonthDashDay
 } from '@/lib/datetime.ts';
 import { formatCoordinate } from '@/lib/coordinate.ts';
 import { generateRandomUUID } from '@/lib/misc.ts';
@@ -593,7 +608,10 @@ import {
 
 export interface TransactionEditOptions extends SetTransactionOptions {
     id?: string;
+    name?: string;
     templateType?: number;
+    scheduledFrequencyType?: number;
+    scheduledFrequency?: string;
     template?: TransactionTemplate;
     currentTransaction?: Transaction;
     currentTemplate?: TransactionTemplate;
@@ -622,6 +640,7 @@ const props = defineProps<{
     type: TransactionEditPageType;
     persistent?: boolean;
     show?: boolean;
+    ledgerId?: string;
 }>();
 
 const { tt } = useI18n();
@@ -688,12 +707,46 @@ const transactionTagsStore = useTransactionTagsStore();
 const transactionsStore = useTransactionsStore();
 const transactionTemplatesStore = useTransactionTemplatesStore();
 
+const scheduledStartDateLimit = computed<Date | undefined>(() => {
+    if (!(transaction.value instanceof TransactionTemplate) || !transaction.value.scheduledStartDate) return undefined;
+    return getLocalDateFromYearDashMonthDashDay(transaction.value.scheduledStartDate) || undefined;
+});
+const scheduledEndDateLimit = computed<Date | undefined>(() => {
+    if (!(transaction.value instanceof TransactionTemplate) || !transaction.value.scheduledEndDate) return undefined;
+    return getLocalDateFromYearDashMonthDashDay(transaction.value.scheduledEndDate) || undefined;
+});
+const scheduledDateRangeInvalid = computed<boolean>(() =>
+    transaction.value instanceof TransactionTemplate &&
+    !!transaction.value.scheduledStartDate &&
+    !!transaction.value.scheduledEndDate &&
+    transaction.value.scheduledStartDate > transaction.value.scheduledEndDate
+);
+
 const map = useTemplateRef<MapViewType>('map');
 const confirmDialog = useTemplateRef<ConfirmDialogType>('confirmDialog');
 const snackbar = useTemplateRef<SnackBarType>('snackbar');
 const pictureInput = useTemplateRef<HTMLInputElement>('pictureInput');
 
 const showState = ref<boolean>(false);
+type TransferDirection = 'internal' | 'out' | 'in';
+const transferDirection = ref<TransferDirection>('internal');
+const transferDirectionOptions: Array<{ value: TransferDirection; label: string; help: string }> = [
+    { value: 'internal', label: '账户间转账', help: '我的两个账户之间' },
+    { value: 'out', label: '转出', help: '我转给其他人' },
+    { value: 'in', label: '转入', help: '其他人转给我' },
+];
+
+function setTransferDirection(direction: TransferDirection): void {
+    transferDirection.value = direction;
+    if (direction === 'out') {
+        transaction.value.destinationAccountId = '';
+        transaction.value.destinationAmount = 0;
+    } else if (direction === 'in') {
+        transaction.value.sourceAccountId = '';
+        if (!transaction.value.destinationAmount) transaction.value.destinationAmount = transaction.value.sourceAmount;
+        transaction.value.sourceAmount = 0;
+    }
+}
 const showPasteTextDialog = ref<boolean>(false);
 const activeTab = ref<string>('basicInfo');
 const originalTransactionEditable = ref<boolean>(false);
@@ -743,6 +796,7 @@ function open(options: TransactionEditOptions): Promise<TransactionEditResponse 
     originalTransactionEditable.value = false;
     noTransactionDraft.value = options.noTransactionDraft || false;
     lastRecognizedTransaction.value = null;
+    transferDirection.value = 'internal';
 
     initOptions.value = options;
 
@@ -750,8 +804,8 @@ function open(options: TransactionEditOptions): Promise<TransactionEditResponse 
     setTransactionModel(newTransaction, options, true);
 
     const promises: Promise<unknown>[] = [
-        accountsStore.loadAllAccounts({ force: false }),
-        transactionCategoriesStore.loadAllCategories({ force: false }),
+        accountsStore.loadAllAccounts({ force: false, ledgerId: props.ledgerId }),
+        transactionCategoriesStore.loadAllCategories({ force: false, ledgerId: props.ledgerId }),
         transactionTagsStore.loadAllTags({ force: false })
     ];
 
@@ -764,7 +818,7 @@ function open(options: TransactionEditOptions): Promise<TransactionEditResponse 
             mode.value = TransactionEditPageMode.View;
             editId.value = options.id;
 
-            promises.push(transactionsStore.getTransaction({ transactionId: editId.value }));
+            promises.push(transactionsStore.getTransaction({ transactionId: editId.value, ledgerId: props.ledgerId }));
         } else {
             mode.value = TransactionEditPageMode.Add;
             editId.value = null;
@@ -790,11 +844,15 @@ function open(options: TransactionEditOptions): Promise<TransactionEditResponse 
         }
 
         if (template.templateType === TemplateType.Schedule.type) {
-            template.scheduledFrequencyType = ScheduledTemplateFrequencyType.Disabled.type;
-            template.scheduledFrequency = '';
+            template.scheduledFrequencyType = options?.scheduledFrequencyType ?? ScheduledTemplateFrequencyType.Disabled.type;
+            template.scheduledFrequency = options?.scheduledFrequency ?? '';
         }
 
         transaction.value = template;
+
+        if (options?.name) {
+            template.name = options.name;
+        }
 
         if (options && options.id) {
             if (options.currentTemplate) {
@@ -906,7 +964,8 @@ function save(afterAction: AfterSaveAction): void {
                 transaction: transaction.value as Transaction,
                 defaultCurrency: defaultCurrency.value,
                 isEdit: mode.value === TransactionEditPageMode.Edit,
-                clientSessionId: clientSessionId.value
+                clientSessionId: clientSessionId.value,
+                ledgerId: props.ledgerId
             }).then(savedTransaction => {
                 submitting.value = false;
                 submitted.value = true;
@@ -1103,7 +1162,8 @@ function remove(): void {
 
         transactionsStore.deleteTransaction({
             transaction: transaction.value as Transaction,
-            defaultCurrency: defaultCurrency.value
+            defaultCurrency: defaultCurrency.value,
+            ledgerId: props.ledgerId
         }).then(() => {
             if (resolveFunc) {
                 resolveFunc();
@@ -1318,6 +1378,40 @@ defineExpose({
 </script>
 
 <style>
+.transfer-direction {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    padding: 5px;
+    border-radius: 14px;
+    background: rgb(var(--v-theme-surface-variant));
+}
+
+.transfer-direction button {
+    min-height: 52px;
+    padding: 7px 10px;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    color: rgb(var(--v-theme-on-surface));
+    background: transparent;
+}
+
+.transfer-direction button b,
+.transfer-direction button small {
+    display: block;
+}
+
+.transfer-direction button small {
+    margin-top: 2px;
+    opacity: 0.72;
+}
+
+.transfer-direction button.active {
+    border-color: rgba(var(--v-theme-primary), 0.35);
+    background: rgb(var(--v-theme-surface));
+    box-shadow: 0 2px 8px rgba(18, 20, 26, 0.08);
+}
+
 .transaction-edit-dialog .v-overlay__content {
     max-height: min(760px, calc(100dvh - 24px)) !important;
     margin: 12px;
