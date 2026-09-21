@@ -12,12 +12,18 @@
                     <router-link to="/statistics/transaction">报表</router-link>
                 </nav>
                 <div class="top-actions">
+                    <GlobalLedgerSwitcher
+                        :ledgers="ledgersStore.allLedgers"
+                        :selected-id="selectedLedgerId"
+                        :disabled="loadingOverview || ledgersStore.featureDisabled"
+                        @select="onGlobalLedgerSelect"
+                    />
                     <button class="ic" :class="{active:utilityPanel==='search'}" type="button" aria-label="搜索" :aria-expanded="utilityPanel==='search'" @click="toggleUtilityPanel('search')"><v-icon :icon="mdiMagnify" size="17"/></button>
                     <button class="ic" :class="{active:utilityPanel==='notifications'}" type="button" aria-label="通知" :aria-expanded="utilityPanel==='notifications'" @click="toggleUtilityPanel('notifications')"><v-icon :icon="mdiBellOutline" size="17"/><span v-if="attentionActivities.length" class="dot"></span></button>
                     <button class="ic" :class="{active:utilityPanel==='help'}" type="button" aria-label="帮助与信息" :aria-expanded="utilityPanel==='help'" @click="toggleUtilityPanel('help')"><v-icon :icon="mdiInformationOutline" size="17"/></button>
                     <button class="user" type="button" :aria-expanded="accountMenuOpen" @click="toggleAccountMenu">
                         <span class="avatar">{{ currentUserInitial }}</span>
-                        <span class="uinfo"><b>{{ currentUserName }}</b><small>个人账本</small></span>
+                        <span class="uinfo"><b>{{ currentUserName }}</b><small>{{ selectedLedgerName }}</small></span>
                         <v-icon :icon="mdiChevronDown" size="14"/>
                     </button>
                     <transition name="account-drop">
@@ -73,6 +79,8 @@
                         <router-link class="ric" to="/template/list" aria-label="交易模板" title="交易模板"><v-icon :icon="mdiFileDocumentOutline" size="18"/></router-link>
                         <router-link class="ric" to="/exchange_rates" aria-label="汇率数据" title="汇率数据"><v-icon :icon="mdiWeb" size="18"/></router-link>
                         <router-link class="ric" to="/product/assets" aria-label="产品资产" title="产品资产"><v-icon :icon="mdiPackageVariantClosed" size="18"/></router-link>
+                        <router-link class="ric" to="/savings/goals" aria-label="存钱计划" title="存钱计划"><v-icon :icon="mdiPiggyBankOutline" size="18"/></router-link>
+                        <router-link class="ric" to="/ledger/manage" aria-label="账本" title="账本"><v-icon :icon="mdiBookOpenOutline" size="18"/></router-link>
                     </div>
                     <div class="stack bottom">
                         <router-link class="ric" to="/app/settings" aria-label="应用设置" title="应用设置"><v-icon :icon="mdiCogOutline" size="18"/></router-link>
@@ -81,8 +89,18 @@
                 </aside>
 
                 <main>
-                    <h1>早上好，朋友</h1>
-                    <p class="sub">掌握任务进度，随时了解财务状态。</p>
+                    <h1>{{ homeGreeting }}，{{ currentUserName }}</h1>
+                    <p class="sub">这里是「{{ selectedLedgerName }}」的余额、收支、目标与待办。</p>
+
+                    <section class="ledger-context" aria-label="当前账本信息">
+                        <div class="ledger-context-mark"><v-icon :icon="mdiBookOpenVariant" size="18"/></div>
+                        <div class="ledger-context-copy">
+                            <small>当前账本</small>
+                            <strong>{{ selectedLedgerName }}</strong>
+                            <span>{{ selectedLedgerSummary }}</span>
+                        </div>
+                        <router-link to="/ledger/manage">管理账本<v-icon :icon="mdiChevronRight" size="15"/></router-link>
+                    </section>
 
                     <div class="grid">
                         <section class="card balance-card">
@@ -117,27 +135,27 @@
 
                         <section class="panel stats">
                             <div class="stat orange">
-                                <div class="shead"><span>总收益</span><i class="sic"><v-icon :icon="mdiWalletOutline" size="15"/></i></div>
-                                <strong>{{ thisMonthIncome }}</strong><div class="strend"><b>实时</b><span>本月</span></div>
+                                <div class="shead"><span>本月结余</span><i class="sic"><v-icon :icon="mdiWalletOutline" size="15"/></i></div>
+                                <strong>{{ thisMonthNet }}</strong><div class="strend"><b>收入减支出</b><span>本月</span></div>
                             </div>
                             <div class="stat">
-                                <div class="shead"><span>总支出</span><i class="sic"><v-icon :icon="mdiCreditCardOutline" size="15"/></i></div>
+                                <div class="shead"><span>本月支出</span><i class="sic"><v-icon :icon="mdiCreditCardOutline" size="15"/></i></div>
                                 <strong>{{ thisMonthExpense }}</strong><div class="strend down"><b>实时</b><span>本月</span></div>
                             </div>
                             <div class="stat">
-                                <div class="shead"><span>总收入</span><i class="sic"><v-icon :icon="mdiCashMultiple" size="15"/></i></div>
+                                <div class="shead"><span>本月收入</span><i class="sic"><v-icon :icon="mdiCashMultiple" size="15"/></i></div>
                                 <strong>{{ thisMonthIncome }}</strong><div class="strend up"><b>实时</b><span>本月</span></div>
                             </div>
                             <div class="stat">
-                                <div class="shead"><span>总营收</span><i class="sic"><v-icon :icon="mdiSackPercent" size="15"/></i></div>
-                                <strong>{{ totalAssets }}</strong><div class="strend up"><b>实时</b><span>当前</span></div>
+                                <div class="shead"><span>账户余额</span><i class="sic"><v-icon :icon="mdiSackPercent" size="15"/></i></div>
+                                <strong>{{ homeTotalAssets }}</strong><div class="strend up"><b>账本内</b><span>当前</span></div>
                             </div>
                         </section>
 
                         <section class="card chart-card">
-                            <h3>总收入</h3><p class="csub">查看指定时间段内的收入</p>
+                            <h3>近八个月收支</h3><p class="csub">收入与支出的月度变化</p>
                             <div class="plot-wrap">
-                                <div class="plot-head"><b>盈亏情况</b><span class="legend"><i class="b"></i>盈利<i class="k"></i>亏损</span></div>
+                                <div class="plot-head"><b>收支趋势</b><span class="legend"><i class="b"></i>收入<i class="k"></i>支出</span></div>
                                 <div class="plot">
                                     <div v-for="top in [0,20,40,60,80]" :key="top" class="gl" :style="{top: `${top}%`}"></div><div class="gl gl-bottom"></div>
                                     <span v-for="(label,index) in chartYAxisLabels" :key="`${label}-${index}`" class="ylab" :style="{top: `${index*20}%`}">{{ label }}</span><span class="ylab ylab-bottom">0</span>
@@ -147,16 +165,25 @@
                         </section>
 
                         <div class="col-left">
+                            <section v-if="featuredSavingsGoal" class="card savings-goal-card" role="button" tabindex="0" :aria-label="`查看存钱目标：${featuredSavingsGoal.name}`" @click="router.push('/savings/goals')" @keyup.enter="router.push('/savings/goals')">
+                                <div class="savings-goal-head">
+                                    <div><small>SAVINGS GOAL</small><h3>{{ featuredSavingsGoal.name }}</h3></div>
+                                    <span>{{ savingsGoalsStore.goals.length > 1 ? `${savingsGoalsStore.goals.length} 个目标` : featuredSavingsGoal.achieved ? '已达成' : '进行中' }}</span>
+                                </div>
+                                <div class="savings-goal-amount"><strong>{{ formatBudgetMoney(featuredSavingsGoal.savedAmount) }}</strong><span>/ {{ formatBudgetMoney(featuredSavingsGoal.targetAmount) }}</span></div>
+                                <div class="savings-goal-progress" role="img" :aria-label="`目标进度 ${featuredSavingsGoalProgress.toFixed(1)}%`"><i :style="{width:`${featuredSavingsGoalProgress}%`}"></i></div>
+                                <footer><span>已完成 {{ featuredSavingsGoalProgress.toFixed(0) }}%</span><button type="button" @click.stop="router.push('/savings/goals')">查看计划<v-icon :icon="mdiChevronRight" size="15"/></button></footer>
+                            </section>
                             <section class="card limit" @click="router.push('/schedule/list?panel=budget')">
                                 <h3>每月支出限额</h3>
                                 <div class="limitbar"><div class="used" :style="{width: `${Math.min(budgetPercentage,100)}%`}"></div><div class="rest"></div></div>
                                 <div class="limitmeta"><span><b>{{ formatBudgetMoney(currentMonthExpense) }}</b> 已支出</span><b>{{ monthlyBudget ? formatBudgetMoney(monthlyBudget.amount) : '未设置限额' }}</b></div>
                             </section>
                             <section class="card finance-tasks">
-                                <div class="mhead"><div><h3><v-icon :icon="mdiFileDocumentOutline" size="17"/>财务待办</h3><p>只汇总需要处理的事项，不重复展示钱包账户</p></div><button class="add" @click="router.push('/transaction/list')">查看流水</button></div>
+                                <div class="mhead"><div><h3><v-icon :icon="mdiFileDocumentOutline" size="17"/>需要你处理</h3><p>核对识别结果与周期计划后再入账</p></div><button class="add" @click="router.push('/transaction/list')">全部流水</button></div>
                                 <div class="task-list">
                                     <button type="button" :class="{done:pendingReviewCount===0}" @click="router.push({path:'/transaction/list',query:{search:'待确认'}})"><i class="task-icon pending">待</i><span><b>{{ pendingReviewCount ? '待确认记录' : '待确认队列已清空' }}</b><small>{{ pendingReviewCount ? '核对识别内容，完成入账或忽略' : '新识别出的异常记录会显示在这里' }}</small></span><strong>{{ pendingReviewCount ? `${pendingReviewCount} 笔` : '已完成' }}</strong><v-icon :icon="mdiChevronRight" size="17"/></button>
-                                    <button type="button" @click="router.push('/schedule/list')"><i class="task-icon plan">计</i><span><b>周期计划</b><small>查看即将执行的固定收支</small></span><strong>查看</strong><v-icon :icon="mdiChevronRight" size="17"/></button>
+                                    <button type="button" @click="router.push('/schedule/list')"><i class="task-icon plan">计</i><span><b>周期计划</b><small>到期后确认入账，不会自动改变余额</small></span><strong>查看</strong><v-icon :icon="mdiChevronRight" size="17"/></button>
                                 </div>
                             </section>
                         </div>
@@ -194,6 +221,7 @@
 
 <script setup lang="ts">
 import SnackBar from '@/components/desktop/SnackBar.vue';
+import GlobalLedgerSwitcher from '@/components/desktop/GlobalLedgerSwitcher.vue';
 import TransactionEditDialog from '@/views/desktop/transactions/list/dialogs/EditDialog.vue';
 import AccountEditDialog from '@/views/desktop/accounts/list/dialogs/EditDialog.vue';
 import { TransactionEditPageType } from '@/views/base/transactions/TransactionEditPageBase.ts';
@@ -212,6 +240,9 @@ import { useTransactionsStore } from '@/stores/transaction.ts';
 import { useAIReviewItemsStore } from '@/stores/aiReviewItem.ts';
 import { useRootStore } from '@/stores/index.ts';
 import { useUserStore } from '@/stores/user.ts';
+import { useLedgersStore } from '@/stores/ledger.ts';
+import { useSavingsGoalsStore } from '@/stores/savingsGoal.ts';
+import { DefaultLedgerId } from '@/models/ledger.ts';
 import { AccountCategory } from '@/core/account.ts';
 import type { Account } from '@/models/account.ts';
 import { isUserLogined, isUserUnlocked } from '@/lib/userstate.ts';
@@ -231,6 +262,8 @@ import {
     mdiTagOutline,
     mdiWeb,
     mdiPackageVariantClosed,
+    mdiPiggyBankOutline,
+    mdiBookOpenOutline,
     mdiCogOutline,
     mdiHelpCircleOutline,
     mdiSwapHorizontal,
@@ -246,7 +279,8 @@ import {
     mdiRefresh,
     mdiMinusCircleOutline,
     mdiPlusCircleOutline,
-    mdiPencilOutline
+    mdiPencilOutline,
+    mdiBookOpenVariant
 } from '@mdi/js';
 
 type SnackBarType = InstanceType<typeof SnackBar>;
@@ -275,9 +309,7 @@ const {
     showAmountInHomePage,
     netAssets,
     totalAssets,
-    transactionOverview,
-    getDisplayIncomeAmount,
-    getDisplayExpenseAmount
+    transactionOverview
 } = useHomePageBase();
 
 const accountsStore = useAccountsStore();
@@ -288,6 +320,8 @@ const transactionsStore = useTransactionsStore();
 const aiReviewItemsStore = useAIReviewItemsStore();
 const rootStore = useRootStore();
 const userStore = useUserStore();
+const ledgersStore = useLedgersStore();
+const savingsGoalsStore = useSavingsGoalsStore();
 
 const snackbar = useTemplateRef<SnackBarType>('snackbar');
 const transactionEditDialog = useTemplateRef<TransactionDialogType>('transactionEditDialog');
@@ -303,8 +337,30 @@ const utilityPanel = ref<'search' | 'notifications' | 'help' | null>(null);
 const globalSearchQuery = ref<string>('');
 const currentUserName = computed<string>(() => userStore.currentUserNickname || '当前用户');
 const currentUserInitial = computed<string>(() => currentUserName.value.trim().slice(0, 1).toUpperCase() || '用');
+const homeGreeting = computed<string>(() => {
+    const hour = new Date().getHours();
+    if (hour < 6) return '夜深了';
+    if (hour < 12) return '早上好';
+    if (hour < 18) return '下午好';
+    return '晚上好';
+});
+const selectedLedgerId = computed<string>(() => ledgersStore.selectedLedgerId);
+const selectedLedgerName = computed<string>(() => ledgersStore.selectedLedger.name);
+const familyLedgerSelected = computed<boolean>(() => selectedLedgerId.value !== DefaultLedgerId);
+const currentLedgerMember = computed(() => ledgersStore.members.find(member => member.isCurrentUser && member.status === 1));
+const ledgerRoleLabel = computed<string>(() => {
+    const labels: Record<number, string> = { 1: '所有者', 2: '管理员', 3: '可记账成员', 4: '只读成员' };
+    return labels[currentLedgerMember.value?.role ?? 0] ?? '成员';
+});
+const selectedLedgerSummary = computed<string>(() => {
+    if (!familyLedgerSelected.value) return '仅自己可见 · 个人空间';
+    const activeMembers = ledgersStore.members.filter(member => member.status === 1).length;
+    return activeMembers > 0 ? `${ledgerRoleLabel.value} · ${activeMembers} 位成员` : '共享账本';
+});
 const walletAccounts = computed<Account[]>(() => accountsStore.allVisiblePlainAccounts.slice(0, 5));
-const pendingReviewCount = computed<number>(() => aiReviewItemsStore.items.length);
+const pendingReviewCount = computed<number>(() => familyLedgerSelected.value ? 0 : aiReviewItemsStore.items.length);
+const featuredSavingsGoal = computed(() => savingsGoalsStore.goals.find(goal => !goal.achieved) ?? savingsGoalsStore.goals[0] ?? null);
+const featuredSavingsGoalProgress = computed(() => Math.min(100, Math.max(0, featuredSavingsGoal.value?.progressPercent ?? 0)));
 
 const defaultCurrency = computed<string>(() => userStore.currentUserDefaultCurrency || 'CNY');
 const displayAccountCount = computed<string>(() => formatNumberToLocalizedNumerals(walletAccounts.value.length));
@@ -315,7 +371,9 @@ const balanceDisplayAmount = computed<string>(() => {
     }
 
     if (balanceCurrency.value === defaultCurrency.value) {
-        return netAssets.value;
+        return familyLedgerSelected.value
+            ? formatAmountToLocalizedNumeralsWithCurrency(walletAccounts.value.reduce((sum, account) => sum + account.balance, 0), defaultCurrency.value)
+            : netAssets.value;
     }
 
     const currencyBalance = walletAccounts.value.filter(account => account.currency === balanceCurrency.value).reduce((total, account) => total + account.balance, 0);
@@ -330,10 +388,17 @@ const currentYearMonth = computed<number>(() => {
     return now.getFullYear() * 100 + now.getMonth() + 1;
 });
 const monthlyBudget = computed<MonthlyBudgetInfoResponse | null>(() => monthlyBudgetStore.budgets[currentYearMonth.value] ?? null);
-const currentMonthExpense = computed<number>(() => transactionOverview.value.thisMonth?.expenseAmount ?? 0);
+const monthlyTransactions = ref<Transaction[]>([]);
+const currentMonthIncome = computed<number>(() => monthlyTransactions.value.filter(transaction => transaction.type === TransactionType.Income).reduce((sum, transaction) => sum + transaction.sourceAmount, 0));
+const currentMonthExpense = computed<number>(() => monthlyTransactions.value.filter(transaction => transaction.type === TransactionType.Expense).reduce((sum, transaction) => sum + transaction.sourceAmount, 0));
+const currentMonthNet = computed<number>(() => currentMonthIncome.value - currentMonthExpense.value);
 const budgetPercentage = computed<number>(() => monthlyBudget.value ? currentMonthExpense.value * 100 / monthlyBudget.value.amount : 0);
-const thisMonthIncome = computed<string>(() => transactionOverview.value.thisMonth ? getDisplayIncomeAmount(transactionOverview.value.thisMonth) : '¥0.00');
-const thisMonthExpense = computed<string>(() => transactionOverview.value.thisMonth ? getDisplayExpenseAmount(transactionOverview.value.thisMonth) : '¥0.00');
+const thisMonthNet = computed<string>(() => formatAmountToLocalizedNumeralsWithCurrency(currentMonthNet.value, defaultCurrency.value));
+const thisMonthIncome = computed<string>(() => formatAmountToLocalizedNumeralsWithCurrency(currentMonthIncome.value, defaultCurrency.value));
+const thisMonthExpense = computed<string>(() => formatAmountToLocalizedNumeralsWithCurrency(currentMonthExpense.value, defaultCurrency.value));
+const homeTotalAssets = computed<string>(() => familyLedgerSelected.value
+    ? formatAmountToLocalizedNumeralsWithCurrency(walletAccounts.value.reduce((sum, account) => sum + account.balance, 0), defaultCurrency.value)
+    : totalAssets.value);
 
 const overviewMonthKeys = [
     'monthBeforeLast6Months',
@@ -348,7 +413,7 @@ const overviewMonthKeys = [
 const chartAmounts = computed(() => overviewMonthKeys.map((key, index) => {
     const date = new Date();
     date.setMonth(date.getMonth() - (overviewMonthKeys.length - 1 - index));
-    const item = transactionOverview.value[key];
+    const item = familyLedgerSelected.value ? undefined : transactionOverview.value[key];
     return {
         month: `${date.getMonth() + 1}月`,
         incomeAmount: item?.incomeAmount ?? 0,
@@ -427,6 +492,10 @@ function refreshBalance(): void {
 }
 
 function openQuickTransaction(type: number, account?: Account | null): void {
+    if (familyLedgerSelected.value) {
+        snackbar.value?.showMessage('共享账本记账能力正在接入，请先在账本页查看数据与成员');
+        return;
+    }
     balanceCurrencyMenuOpen.value = false;
     selectedWallet.value = null;
     transactionEditDialog.value?.open({ type, accountId: account?.id, noTransactionDraft: true }).then(() => reload(true, false)).catch(error => {
@@ -444,6 +513,10 @@ function closeWalletDetails(): void {
 }
 
 function openAccountEditor(account?: Account | null): void {
+    if (familyLedgerSelected.value) {
+        snackbar.value?.showMessage('共享账本账户编辑能力正在接入，请先在账本页管理成员');
+        return;
+    }
     balanceCurrencyMenuOpen.value = false;
     selectedWallet.value = null;
     accountEditDialog.value?.open(account ? { id: account.id, currentAccount: account } : undefined).then(() => reload(false)).catch(error => {
@@ -490,6 +563,10 @@ function resetActivityFilters(): void {
 }
 
 function openActivity(row: ActivityRow): void {
+    if (familyLedgerSelected.value) {
+        viewActivityInList(row);
+        return;
+    }
     activityMenuId.value = null;
     transactionEditDialog.value?.open({ id: row.transactionId, currentTransaction: row.raw }).then(() => reload(true, false)).catch(error => {
         if (error && !error.processed) snackbar.value?.showError(error);
@@ -567,35 +644,53 @@ function logoutAccount(): void {
     });
 }
 
-function reload(force: boolean, showRefreshMessage = force): void {
+async function reload(force: boolean, showRefreshMessage = force): Promise<void> {
     loadingOverview.value = true;
     const now = new Date();
-
-    const promises = [
-        accountsStore.loadAllAccounts({ force: false }),
-        transactionCategoriesStore.loadAllCategories({ force: false }),
-        overviewStore.loadTransactionOverview({ force: force, loadLast11Months: true }),
-        monthlyBudgetStore.load(currentYearMonth.value, force),
-        aiReviewItemsStore.load(),
-        transactionsStore.loadMonthlyAllTransactions({ year: now.getFullYear(), month: now.getMonth() + 1, autoExpand: true, defaultCurrency: userStore.currentUserDefaultCurrency }).then(result => {
-            activityRows.value = result.items.slice(0, 5).map(transactionToActivity);
-            activityMenuId.value = null;
-        })
-    ];
-
-    Promise.all(promises).then(() => {
+    try {
+        await ledgersStore.load();
+        const ledgerId = selectedLedgerId.value;
+        const explicitLedgerId = ledgerId === DefaultLedgerId ? undefined : ledgerId;
+        const promises: Array<Promise<unknown>> = [
+            ledgersStore.loadAccess(ledgerId),
+            accountsStore.loadAllAccounts({ force, ledgerId }),
+            savingsGoalsStore.load(ledgerId),
+            transactionCategoriesStore.loadAllCategories({ force: false }),
+            transactionsStore.loadMonthlyAllTransactions({ ledgerId: explicitLedgerId, year: now.getFullYear(), month: now.getMonth() + 1, autoExpand: true, defaultCurrency: userStore.currentUserDefaultCurrency }).then(result => {
+                monthlyTransactions.value = result.items;
+                activityRows.value = result.items.slice(0, 5).map(transactionToActivity);
+                activityMenuId.value = null;
+            })
+        ];
+        if (!familyLedgerSelected.value) {
+            promises.push(overviewStore.loadTransactionOverview({ force, loadLast11Months: true }));
+            promises.push(monthlyBudgetStore.load(currentYearMonth.value, force));
+            promises.push(aiReviewItemsStore.load());
+        }
+        await Promise.all(promises);
         loadingOverview.value = false;
-
         if (showRefreshMessage) {
             snackbar.value?.showMessage('余额数据已更新');
         }
-    }).catch(error => {
+    } catch (error) {
         loadingOverview.value = false;
-
-        if (!error.processed) {
-            snackbar.value?.showError(error);
+        if (!(error as { processed?: boolean }).processed) {
+            snackbar.value?.showError(error as Error);
         }
-    });
+    }
+}
+
+function onGlobalLedgerSelect(ledgerId: string): void {
+    try {
+        ledgersStore.select(ledgerId);
+        monthlyTransactions.value = [];
+        activityRows.value = [];
+        selectedWallet.value = null;
+        balanceCurrency.value = defaultCurrency.value;
+        void reload(true, false).then(() => snackbar.value?.showMessage(`已切换到「${selectedLedgerName.value}」`));
+    } catch (error) {
+        snackbar.value?.showError(error as Error);
+    }
 }
 
 if (isUserLogined() && isUserUnlocked()) {
@@ -654,7 +749,8 @@ if (isUserLogined() && isUserUnlocked()) {
 .stack{display:flex;flex-direction:column;align-items:center;gap:4px;background:var(--panel);border-radius:18px;padding:8px 0}.stack.bottom{margin-top:auto}
 .ric{display:grid!important;place-items:center;width:40px;height:40px;border-radius:50%;color:#4A4F5A}.ric:hover{background:#EDEFF3}.ric.active{background:var(--ink);color:#fff}
 main{flex:1;min-width:0}h1{font-size:36px;font-weight:800;letter-spacing:-.03em;line-height:1.2;margin:0}.sub{margin-top:6px;font-size:13.5px;color:var(--muted)}
-.grid{display:grid;grid-template-columns:1.04fr .94fr 1.02fr;gap:18px;margin-top:24px}.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);padding:22px}.panel{background:var(--panel);border-radius:var(--r-lg)}.col-left{display:grid;gap:18px;align-content:start}.activities{grid-column:2/4}
+.ledger-context{display:flex;align-items:center;gap:11px;min-height:58px;margin-top:18px;padding:9px 10px 9px 12px;border:1px solid var(--line);border-radius:18px;background:linear-gradient(135deg,#fff 0%,#F8F9FB 100%)}.ledger-context-mark{display:grid;width:36px;height:36px;flex:none;place-items:center;border-radius:12px;background:#17191E;color:#fff}.ledger-context-copy{display:grid;min-width:0;grid-template-columns:auto 1fr;align-items:baseline;column-gap:9px}.ledger-context-copy small{grid-column:1/-1;color:var(--faint);font-size:9px;font-weight:800;letter-spacing:.08em}.ledger-context-copy strong{overflow:hidden;font-size:13px;text-overflow:ellipsis;white-space:nowrap}.ledger-context-copy span{color:var(--muted);font-size:11px}.ledger-context>a{display:flex;min-height:40px;margin-left:auto;align-items:center;gap:3px;padding:0 11px;border-radius:12px;background:#fff;color:var(--ink);font-size:11px;font-weight:750;box-shadow:inset 0 0 0 1px var(--line)}.ledger-context>a:hover{background:#F2F3F6}
+.grid{display:grid;grid-template-columns:1.04fr .94fr 1.02fr;gap:18px;margin-top:18px}.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);padding:22px}.panel{background:var(--panel);border-radius:var(--r-lg)}.col-left{display:grid;gap:18px;align-content:start}.activities{grid-column:2/4}
 .balance-card{position:relative}.bhead{display:flex;align-items:center;justify-content:space-between}.bhead>span{font-size:13px;color:var(--muted);font-weight:500}.currency-switch{position:relative}.cur{display:flex;align-items:center;gap:6px;border:1px solid var(--line)!important;border-radius:9px;padding:5px 10px!important;font-size:12px;font-weight:600}.cur:hover,.cur.active{background:var(--panel)!important}.cur .flag{width:15px;height:15px}
 .balance-menu{position:absolute;z-index:45;top:38px;right:0;width:250px;padding:9px;border:1px solid var(--line);border-radius:15px;background:#fff;box-shadow:0 16px 38px rgba(18,20,26,.15)}.balance-menu>small{display:block;padding:4px 7px 7px;color:var(--muted);font-size:11.5px;font-weight:650}.balance-menu>button{display:grid;width:100%;grid-template-columns:22px 1fr 18px;align-items:center;gap:8px;padding:8px!important;border-radius:10px!important;text-align:left}.balance-menu>button:hover,.balance-menu>button.active{background:var(--panel)!important}.balance-menu>button>span:nth-child(2){display:grid;gap:2px}.balance-menu b{font-size:12.5px}.balance-menu button small{color:var(--muted);font-size:11px}.balance-menu-actions{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:6px;padding-top:7px;border-top:1px solid var(--line)}.balance-menu-actions button{display:flex;align-items:center;justify-content:center;gap:5px;padding:8px 5px!important;border-radius:9px!important;background:var(--panel)!important;font-size:11px;font-weight:650}.balance-menu-actions button:hover{color:var(--orange)}
 .amount{margin-top:10px;font-size:31px;font-weight:800;letter-spacing:-.03em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.trend{display:flex;align-items:center;gap:7px;margin-top:6px;font-size:12px}.trend b{color:var(--green);font-weight:700}.trend span{color:var(--faint)}
@@ -668,6 +764,7 @@ main{flex:1;min-width:0}h1{font-size:36px;font-weight:800;letter-spacing:-.03em;
 .stats{display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:1fr;gap:10px;padding:10px}.stat{background:#fff;border-radius:var(--r-md);padding:16px;min-width:0}.shead{display:flex;align-items:center;justify-content:space-between}.shead span{font-size:13px;font-weight:600;color:#3A3F4A}.sic{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:#F3F4F6;color:#3A3F4A;font-size:13px;font-style:normal}.stat strong{display:block;margin-top:12px;font-size:26px;font-weight:800;letter-spacing:-.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.strend{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:11.5px}.strend b{font-weight:700}.strend span{color:var(--faint)}.strend.up b{color:var(--green)}.strend.down b{color:var(--red)}.stat.orange{background:linear-gradient(135deg,#F36447,var(--orange-2));color:#fff}.stat.orange .shead span{color:rgba(255,255,255,.92)}.stat.orange .sic{background:rgba(255,255,255,.16);color:#fff}.stat.orange .strend b{color:#fff}.stat.orange .strend span{color:rgba(255,255,255,.72)}
 .chart-card h3{font-size:16px;font-weight:800;letter-spacing:-.01em;margin:0}.csub{margin-top:4px;font-size:11.5px;color:var(--faint)}.plot-wrap{margin-top:14px;background:var(--panel);border-radius:var(--r-md);padding:16px 16px 8px}.plot-head{display:flex;align-items:center;justify-content:space-between;font-size:12.5px;font-weight:700}.legend{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:500;color:var(--muted)}.legend i{display:inline-block;width:9px;height:9px;border-radius:2.5px;margin:0 2px 0 12px}.legend .b{background:var(--blue)}.legend .k{background:var(--ink)}
 .plot{position:relative;height:196px;margin-top:12px;padding-left:30px}.gl{position:absolute;left:30px;right:0;border-top:1.5px dashed #E6E8ED}.gl-bottom{top:calc(100% - 24px)}.ylab{position:absolute;left:0;transform:translateY(-50%);font-size:10px;color:var(--faint);font-weight:500}.ylab-bottom{top:calc(100% - 24px)}.bars{position:absolute;inset:0 0 24px 30px;display:flex;align-items:flex-end;justify-content:space-around}.grp{position:relative;display:flex;align-items:flex-end;gap:4px;height:100%}.grp i{width:15px;border-radius:5px 5px 0 0}.grp .p{background:repeating-linear-gradient(-45deg,rgba(255,255,255,.42) 0 3px,transparent 3px 9px),linear-gradient(180deg,#F36447,var(--orange-2))}.grp .l{background:var(--ink)}.grp span{position:absolute;left:50%;transform:translateX(-50%);bottom:-20px;font-size:10.5px;color:var(--faint);white-space:nowrap}
+.savings-goal-card{cursor:pointer}.savings-goal-card:focus-visible{outline:3px solid rgba(240,85,55,.28);outline-offset:2px}.savings-goal-head,.savings-goal-card footer{display:flex;align-items:center;justify-content:space-between;gap:12px}.savings-goal-head small{color:var(--orange);font-size:9px;font-weight:800;letter-spacing:.08em}.savings-goal-head h3{margin-top:4px;font-size:16px}.savings-goal-head>span{padding:5px 9px;border-radius:999px;background:#FFF0EC;color:#B93820;font-size:10.5px;font-weight:700}.savings-goal-amount{display:flex;align-items:baseline;gap:6px;margin-top:16px}.savings-goal-amount strong{font-size:22px}.savings-goal-amount span{color:var(--muted);font-size:12px}.savings-goal-progress{height:9px;margin-top:12px;overflow:hidden;border-radius:999px;background:#ECEEF2}.savings-goal-progress i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#F36447,var(--orange-2))}.savings-goal-card footer{margin-top:10px;color:var(--muted);font-size:11.5px}.savings-goal-card footer button{display:flex;min-height:44px;align-items:center;gap:4px;color:var(--ink);font-weight:700}
 .limit{cursor:pointer}.limit h3,.mycards h3{font-size:15px;font-weight:800;display:flex;align-items:center;gap:8px;margin:0}.limitbar{display:flex;height:10px;border-radius:999px;overflow:hidden;margin-top:18px}.limitbar .used{background:linear-gradient(90deg,#F36447,var(--orange-2));width:0;border-radius:999px 0 0 999px}.limitbar .rest{flex:1;background:repeating-linear-gradient(-45deg,#E9EAEF 0 4px,#F4F5F8 4px 9px)}.limitmeta{display:flex;justify-content:space-between;margin-top:10px;font-size:12px}.limitmeta span{color:var(--faint)}.limitmeta b{font-weight:700;color:var(--ink)}
 .mycards .add{margin-left:auto;background:#F3F4F6!important;border-radius:999px;padding:8px 14px!important;font-size:11.5px;font-weight:700}.mycards .add:hover{background:#E9EBEE!important}.mhead{display:flex;align-items:center}.cards{display:flex;gap:12px;margin-top:16px}.cc{position:relative;flex:1;height:158px;border-radius:18px;padding:14px;color:#fff;overflow:hidden}.cc.black{background:linear-gradient(140deg,#262932,#101216)}.cc.black:after{content:"";position:absolute;right:-46px;top:-46px;width:150px;height:150px;border:26px solid rgba(255,255,255,.045);border-radius:50%}.cc.orange{background:linear-gradient(140deg,#F4674B,var(--orange-2))}.cc .spark{position:absolute;color:rgba(255,255,255,.75);font-size:15px}.cc .s1{right:18px;top:38px}.cc .s2{right:36px;top:66px;font-size:10px}.cc .s3{right:16px;top:84px;font-size:9px}.cc .nfc{position:absolute;left:14px;top:14px;opacity:.85}.cc .active-pill{position:absolute;left:44px;top:13px;display:flex;align-items:center;gap:5px;background:#fff;color:var(--ink);border-radius:999px;padding:4px 10px;font-size:9.5px;font-weight:800}.cc .active-pill:before{content:"";width:5px;height:5px;border-radius:50%;background:var(--green)}.mc{position:absolute;right:14px;top:14px;display:flex}.mc i{width:22px;height:22px;border-radius:50%}.mc i:first-child{background:#EB001B;margin-right:-9px}.mc i:last-child{background:#F79E1B;opacity:.92}.cc .cnum{position:absolute;left:14px;bottom:14px;right:10px;display:flex;gap:10px;align-items:flex-end}.cc .cnum>div{flex:none;min-width:0}.cc label{display:block;font-size:7.5px;color:rgba(255,255,255,.55);text-transform:uppercase;letter-spacing:.03em;white-space:nowrap}.cc .cnum b{display:block;margin-top:3px;font-size:10.5px;font-weight:700;letter-spacing:.03em;white-space:nowrap}
 .activities{display:flex;flex-direction:column}.ahead{display:flex;align-items:center;gap:12px}.ahead h3{font-size:16px;font-weight:800;letter-spacing:-.01em;margin:0}.searchbox{margin-left:auto;display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:11px;padding:0 12px;height:38px;width:212px;color:var(--faint)}.searchbox input{border:0;outline:0;background:none;font-size:12.5px;width:100%;color:var(--ink)}.searchbox input::placeholder{color:var(--faint)}.filter{display:flex;align-items:center;gap:8px;border:1px solid var(--line)!important;border-radius:11px;height:38px;padding:0 15px!important;font-size:12.5px;font-weight:600}.filter:hover{background:var(--panel)}

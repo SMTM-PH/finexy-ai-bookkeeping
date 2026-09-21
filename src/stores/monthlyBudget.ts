@@ -30,9 +30,9 @@ export const useMonthlyBudgetStore = defineStore('monthlyBudget', () => {
         }
     }
 
-    async function save(yearMonth: number, amount: number): Promise<MonthlyBudgetInfoResponse> {
+    async function save(yearMonth: number, amount: number, categoryAmounts: Record<string, number> = {}): Promise<MonthlyBudgetInfoResponse> {
         try {
-            const response = await services.setMonthlyBudget({ yearMonth, amount });
+            const response = await services.setMonthlyBudget({ yearMonth, amount, categoryAmounts });
             if (!response.data?.success || !response.data.result) throw { message: 'Unable to save monthly budget' };
             budgets.value[yearMonth] = response.data.result;
             return response.data.result;

@@ -41,7 +41,8 @@ import {
     getTimezoneOffsetMinutes,
     getSameDateTimeWithCurrentTimezone,
     parseDateTimeFromUnixTimeWithBrowserTimezone,
-    getCurrentUnixTime
+    getCurrentUnixTime,
+    getGregorianCalendarYearAndMonthFromLocalDate
 } from '@/lib/datetime.ts';
 
 import {
@@ -244,8 +245,10 @@ export function useTransactionEditPageBase(type: TransactionEditPageType, initMo
     });
 
     const sourceAccountTitle = computed<string>(() => {
-        if (transaction.value.type === TransactionType.Expense || transaction.value.type === TransactionType.Income) {
-            return 'Account';
+        if (transaction.value.type === TransactionType.Expense) {
+            return 'Source Account';
+        } else if (transaction.value.type === TransactionType.Income) {
+            return 'Destination Account';
         } else if (transaction.value.type === TransactionType.Transfer) {
             return 'Source Account';
         } else {
@@ -358,25 +361,35 @@ export function useTransactionEditPageBase(type: TransactionEditPageType, initMo
             }
 
             if (!transaction.value.sourceAccountId || transaction.value.sourceAccountId === '') {
-                return 'Transaction account cannot be blank';
+                return 'Destination account cannot be blank';
             }
         } else if (transaction.value.type === TransactionType.Transfer) {
             if (!transaction.value.transferCategoryId || transaction.value.transferCategoryId === '') {
                 return 'Transaction category cannot be blank';
             }
 
-            if (!transaction.value.sourceAccountId || transaction.value.sourceAccountId === '') {
-                return 'Source account cannot be blank';
-            }
-
-            if (!transaction.value.destinationAccountId || transaction.value.destinationAccountId === '') {
-                return 'Destination account cannot be blank';
+            if ((!transaction.value.sourceAccountId || transaction.value.sourceAccountId === '') &&
+                (!transaction.value.destinationAccountId || transaction.value.destinationAccountId === '')) {
+                return 'Transaction account cannot be blank';
             }
         }
 
         if (type === TransactionEditPageType.Template && transaction.value instanceof TransactionTemplate) {
             if (!transaction.value.name) {
                 return 'Template name cannot be blank';
+            }
+
+            if (transaction.value.templateType === TemplateType.Schedule.type &&
+                transaction.value.scheduledFrequencyType !== undefined &&
+                transaction.value.scheduledFrequencyType !== 0) {
+                if (!transaction.value.scheduledStartDate) {
+                    return 'scheduled transaction start date is required';
+                }
+
+                if (transaction.value.scheduledEndDate &&
+                    transaction.value.scheduledStartDate > transaction.value.scheduledEndDate) {
+                    return 'scheduled transaction start date is later than end time';
+                }
             }
         }
 
@@ -407,6 +420,10 @@ export function useTransactionEditPageBase(type: TransactionEditPageType, initMo
 
         if (type === TransactionEditPageType.Template) {
             newTransaction = TransactionTemplate.createNewTransactionTemplate(newTransaction);
+
+            if (newTransaction instanceof TransactionTemplate) {
+                newTransaction.scheduledStartDate = getGregorianCalendarYearAndMonthFromLocalDate(new Date()) || undefined;
+            }
         }
 
         return newTransaction;

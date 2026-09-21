@@ -49,7 +49,12 @@ func (a *TransactionCategoriesApi) CategoryListHandler(c *core.WebContext) (any,
 	}
 
 	uid := c.GetCurrentUid()
-	categories, err := a.categories.GetAllCategoriesByUid(c, uid, categoryListReq.Type, categoryListReq.ParentId)
+	var categories []*models.TransactionCategory
+	if categoryListReq.LedgerId > 0 {
+		categories, err = a.categories.GetAllCategoriesInLedger(c, uid, categoryListReq.LedgerId, categoryListReq.Type, categoryListReq.ParentId)
+	} else {
+		categories, err = a.categories.GetAllCategoriesByUid(c, uid, categoryListReq.Type, categoryListReq.ParentId)
+	}
 
 	if err != nil {
 		log.Errorf(c, "[transaction_categories.CategoryListHandler] failed to get categories for user \"uid:%d\", because %s", uid, err.Error())

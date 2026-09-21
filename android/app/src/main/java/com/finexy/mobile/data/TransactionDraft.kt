@@ -14,7 +14,8 @@ data class TransactionDraft(
     val comment: String,
     val tagIdsJson: String,
     val destinationAccountId: Long? = null,
-    val destinationAmountMinor: Long = 0
+    val destinationAmountMinor: Long = 0,
+    val reviewItemId: Long? = null
 )
 
 internal fun stringIds(raw: String): JSONArray {

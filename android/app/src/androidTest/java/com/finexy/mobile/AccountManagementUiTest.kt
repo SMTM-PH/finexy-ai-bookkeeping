@@ -69,4 +69,13 @@ class AccountManagementUiTest {
         assertEquals(0L, children.last().id)
         assertEquals("英镑子账户", children.last().name)
     }
+
+    @Test fun accountLedgerMigrationExplainsScopeAndReturnsTarget() {
+        rule.onAllNodesWithText("迁移").onFirst().performScrollTo().performClick()
+        rule.onNodeWithText("迁移 日常账户").assertIsDisplayed()
+        rule.onNodeWithText("子账户和兼容历史流水会一并迁移", substring = true).assertIsDisplayed()
+        rule.onNodeWithText("温暖小家").assertIsDisplayed()
+        rule.onNodeWithText("确认迁移").performClick()
+        assertEquals(10L to 90L, rule.activity.movedLedger)
+    }
 }

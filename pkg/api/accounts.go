@@ -50,7 +50,7 @@ func (a *AccountsApi) AccountListHandler(c *core.WebContext) (any, *errs.Error) 
 	}
 
 	uid := c.GetCurrentUid()
-	accounts, err := a.accounts.GetAllAccountsByUid(c, uid)
+	accounts, err := a.accounts.GetAccountsInLedger(c, uid, accountListReq.LedgerId)
 
 	if err != nil {
 		log.Errorf(c, "[accounts.AccountListHandler] failed to get all accounts for user \"uid:%d\", because %s", uid, err.Error())
@@ -234,6 +234,16 @@ func (a *AccountsApi) AccountCreateHandler(c *core.WebContext) (any, *errs.Error
 	}
 
 	uid := c.GetCurrentUid()
+
+	// An account may only be assigned to a ledger the user may manage; the
+	// assignment is immutable in this delivery stage.
+	if accountCreateReq.LedgerId > 0 {
+		if _, _, err := services.Ledgers.GetLedgerWithAccess(c, uid, accountCreateReq.LedgerId, models.FamilyMemberRole.CanManage); err != nil {
+			log.Warnf(c, "[accounts.AccountCreateHandler] ledger access denied for user \"uid:%d\"", uid)
+			return nil, errs.Or(err, errs.ErrLedgerAccessDenied)
+		}
+	}
+
 	maxOrderId, err := a.accounts.GetMaxDisplayOrder(c, uid, accountCreateReq.Category)
 
 	if err != nil {
@@ -243,6 +253,9 @@ func (a *AccountsApi) AccountCreateHandler(c *core.WebContext) (any, *errs.Error
 
 	mainAccount := a.createNewAccountModel(uid, &accountCreateReq, false, maxOrderId+1)
 	childrenAccounts, childrenAccountBalanceTimes := a.createSubAccountModels(uid, &accountCreateReq)
+	for i := 0; i < len(childrenAccounts); i++ {
+		childrenAccounts[i].LedgerId = mainAccount.LedgerId
+	}
 
 	if a.CurrentConfig().EnableDuplicateSubmissionsCheck && accountCreateReq.ClientSessionId != "" {
 		found, remark := a.GetSubmissionRemark(duplicatechecker.DUPLICATE_CHECKER_TYPE_NEW_ACCOUNT, uid, accountCreateReq.ClientSessionId)
@@ -769,6 +782,28 @@ func (a *AccountsApi) AccountDeleteHandler(c *core.WebContext) (any, *errs.Error
 	return true, nil
 }
 
+// AccountMoveLedgerHandler moves a complete account group and its compatible
+// transaction history into another ledger.
+func (a *AccountsApi) AccountMoveLedgerHandler(c *core.WebContext) (any, *errs.Error) {
+	var request models.AccountMoveLedgerRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		log.Warnf(c, "[accounts.AccountMoveLedgerHandler] parse request failed, because %s", err.Error())
+		return nil, errs.NewIncompleteOrIncorrectSubmissionError(err)
+	}
+
+	accounts, err := a.accounts.MoveAccountToLedger(c, c.GetCurrentUid(), request.Id, *request.TargetLedgerId)
+	if err != nil {
+		log.Errorf(c, "[accounts.AccountMoveLedgerHandler] failed to move account \"id:%d\" to ledger \"id:%d\", because %s", request.Id, *request.TargetLedgerId, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	responses := make(models.AccountInfoResponseSlice, len(accounts))
+	for i, account := range accounts {
+		responses[i] = account.ToAccountInfoResponse()
+	}
+	return responses, nil
+}
+
 // SubAccountDeleteHandler deletes an existed sub-account by request parameters for current user
 func (a *AccountsApi) SubAccountDeleteHandler(c *core.WebContext) (any, *errs.Error) {
 	var accountDeleteReq models.AccountDeleteRequest
@@ -800,6 +835,7 @@ func (a *AccountsApi) createNewAccountModel(uid int64, accountCreateReq *models.
 
 	return &models.Account{
 		Uid:          uid,
+		LedgerId:     accountCreateReq.LedgerId,
 		Name:         accountCreateReq.Name,
 		DisplayOrder: order,
 		Category:     accountCreateReq.Category,

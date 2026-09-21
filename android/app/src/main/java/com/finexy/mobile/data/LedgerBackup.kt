@@ -11,11 +11,16 @@ import org.json.JSONObject
 /** Versioned full local-ledger backup. No credentials, PINs or keystore material. */
 class LedgerBackup(private val db: FinexyDatabase, private val scope: String) {
     private val legacyTables = listOf("accounts", "categories", "category_mappings", "tags", "transaction_templates", "transactions", "sync_conflicts")
-    private val tables = listOf("accounts", "categories", "category_mappings", "account_mappings", "tags", "transaction_templates", "transactions", "sync_conflicts", "scheduled_occurrences")
-    private fun tablesFor(schema: Int): List<String> = when (schema) { 8 -> legacyTables; 9 -> tables.dropLast(1); else -> tables }
+    private val schemaTenTables = listOf("accounts", "categories", "category_mappings", "account_mappings", "tags", "transaction_templates", "transactions", "sync_conflicts", "scheduled_occurrences")
+    private val schemaElevenTables = schemaTenTables + "ai_review_items"
+    private val schemaTwelveTables = schemaElevenTables + "product_assets"
+    private val schemaThirteenTables = schemaTwelveTables + "exchange_rates"
+    private val schemaFourteenTables = schemaThirteenTables + listOf("family_groups", "family_members", "ledgers", "savings_goals")
+    private val tables = schemaFourteenTables
+    private fun tablesFor(schema: Int): List<String> = when (schema) { 8 -> legacyTables; 9 -> schemaTenTables.dropLast(1); 10 -> schemaTenTables; 11 -> schemaElevenTables; 12 -> schemaTwelveTables; 13 -> schemaThirteenTables; else -> tables }
     suspend fun export(password: String): String = withContext(Dispatchers.IO) {
         val document = db.withTransaction {
-            val root = JSONObject().put("schema", 10).put("scope", scope).put("createdAt", System.currentTimeMillis())
+            val root = JSONObject().put("schema", 14).put("scope", scope).put("createdAt", System.currentTimeMillis())
             val data = JSONObject()
             for (table in tables) {
                 val rows = JSONArray()
@@ -48,7 +53,7 @@ class LedgerBackup(private val db: FinexyDatabase, private val scope: String) {
 
     private fun validate(document: JSONObject) {
         val schema = document.getInt("schema")
-        require(schema in 8..10 && document.getString("scope") == scope) { "此备份属于其他账号/服务器或不支持的数据库版本" }
+        require(schema in 8..14 && document.getString("scope") == scope) { "此备份属于其他账号/服务器或不支持的数据库版本" }
         val expectedTables = tablesFor(schema)
         val data = document.getJSONObject("tables")
         require(data.keys().asSequence().toSet() == expectedTables.toSet()) { "备份缺少数据表" }
@@ -57,6 +62,7 @@ class LedgerBackup(private val db: FinexyDatabase, private val scope: String) {
             db.openHelper.readableDatabase.query("PRAGMA table_info($table)").use { c ->
                 while (c.moveToNext()) columns[c.getString(c.getColumnIndexOrThrow("name"))] = c.getString(c.getColumnIndexOrThrow("type")) to (c.getInt(c.getColumnIndexOrThrow("notnull")) == 1)
             }
+            if (schema < 11 && table == "transactions") columns.remove("reviewItemId")
             val rows = data.getJSONArray(table)
             require(rows.length() <= 50_000) { "备份行数超限" }
             for (i in 0 until rows.length()) {

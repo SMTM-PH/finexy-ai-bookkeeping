@@ -376,7 +376,7 @@ import { AccountType } from '@/core/account.ts';
 import { TransactionType } from '@/core/transaction.ts';
 import { DEFAULT_RECONCILIATION_STATEMENT_DATE_RANGE_IN_MOBILE } from '@/core/statistics.ts';
 import { TRANSACTION_MIN_AMOUNT, TRANSACTION_MAX_AMOUNT } from '@/consts/transaction.ts';
-import { type TransactionReconciliationStatementResponseItemWithInfo } from '@/models/transaction.ts';
+import { type TransactionReconciliationStatementResponse, type TransactionReconciliationStatementResponseItemWithInfo } from '@/models/transaction.ts';
 
 import { isDefined, isEquals, findDisplayNameByType } from '@/lib/common.ts';
 import {
@@ -616,7 +616,7 @@ function reload(force: boolean): void {
         endTime: endTime.value
     }).then(result => {
         if (force) {
-            if (isEquals(reconciliationStatements.value, result)) {
+            if (isEquals<TransactionReconciliationStatementResponse | undefined>(reconciliationStatements.value, result)) {
                 showToast('Data is up to date');
             } else {
                 showToast('Data has been updated');

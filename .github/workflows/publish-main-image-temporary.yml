@@ -1,11 +1,24 @@
-name: Publish main image temporary
+name: Publish main Docker image
 
 on:
+  workflow_dispatch:
   push:
     branches: [codex/family-web-prototype]
     paths:
       - .github/workflows/publish-main-image-temporary.yml
       - .dockerignore
+      - Dockerfile
+      - go.mod
+      - go.sum
+      - package.json
+      - package-lock.json
+      - cmd/**
+      - conf/**
+      - docker/**
+      - pkg/**
+      - public/**
+      - src/**
+      - templates/**
 
 permissions:
   contents: read
@@ -43,7 +56,7 @@ jobs:
           curl --fail --silent http://127.0.0.1:18089/healthz.json >/dev/null
           docker exec finexy-main-image-test test -f /ezbookkeeping/public/prototypes/family-web/index.html
           curl --fail --silent http://127.0.0.1:18089/prototypes/family-web/index.html | grep -F "家庭账本设计原型"
-      - name: Publish existing main repository tag
+      - name: Publish latest AMD64 image
         shell: bash
         run: |
           docker tag ph97/finexy-bookkeeping:family-preview-test ph97/finexy-bookkeeping:latest-amd64

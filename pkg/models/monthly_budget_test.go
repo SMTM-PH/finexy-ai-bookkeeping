@@ -15,3 +15,16 @@ func TestMonthlyBudgetWarningLevel(t *testing.T) {
 	assert.Equal(t, MONTHLY_BUDGET_WARNING_LEVEL_EXCEEDED, budget.WarningLevel(100000))
 	assert.Equal(t, MONTHLY_BUDGET_WARNING_LEVEL_EXCEEDED, budget.WarningLevel(120000))
 }
+
+func TestMonthlyBudgetCategoryAmountsResponse(t *testing.T) {
+	budget := &MonthlyBudget{
+		MonthlyBudgetId:     8,
+		YearMonth:           202609,
+		Amount:              500000,
+		CategoryAmountsJson: `{"101":120000,"102":80000}`,
+	}
+
+	response := budget.ToMonthlyBudgetInfoResponse()
+	assert.Equal(t, int64(120000), response.CategoryAmounts["101"])
+	assert.Equal(t, int64(80000), response.CategoryAmounts["102"])
+}

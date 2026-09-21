@@ -16,16 +16,16 @@ async page => {
   assert(await page.locator('#account-field').isHidden(), 'Advance hides private account field');
   await click('#entry-form button[type=submit]');
   assert((await data()).expense===498050 && (await data()).advance===71650, 'Add updates expense and reimbursement');
-  assert((await data()).wallet===2573600, 'Advance does not change shared balance');
+  assert((await data()).wallet===1293600, 'Advance does not change shared balance');
   assert(await page.locator('.detail').innerText().then(t=>t.includes('陈远')&&t.includes('林悦')), 'Payer and author both shown');
   await click('[data-settle]');
   await click('[data-action=settle-confirm]');
-  assert((await data()).expense===498050 && (await data()).advance===59600 && (await data()).wallet===2561550, 'Reimbursement reduces balance, not expense');
+  assert((await data()).expense===498050 && (await data()).advance===59600 && (await data()).wallet===1281550, 'Reimbursement reduces balance, not expense');
   assert(await page.locator('[data-edit]').isDisabled(), 'Settled expense cannot be edited inconsistently');
   await click('[data-go=overview]');
   await click('[data-action=plan]');
   await click('[data-action=plan-confirm]');
-  assert((await data()).expense===499850 && (await data()).wallet===2559750, 'Schedule confirmation enters expense once');
+  assert((await data()).expense===499850 && (await data()).wallet===1279750, 'Schedule confirmation enters expense once');
   assert(await page.locator('[data-action=plan]').count()===0, 'Confirmed schedule no longer actionable');
   await click('[data-go=ledger]');
   await page.locator('#search').fill('不匹配的记录');
@@ -38,6 +38,8 @@ async page => {
   await click('[data-book=personal]');
   assert((await data()).count===1 && (await data()).expense===2800, 'Personal ledger isolated');
   assert(!await page.locator('#main').innerText().then(t=>t.includes('测试家庭食材')), 'Family record absent in personal ledger');
+  await click('[data-go=goals]');
+  assert(await page.locator('#main').innerText().then(t=>t.includes('个人笔记本升级')&&!t.includes('全家旅行基金')), 'Personal goals isolated from family');
   await click('[data-action=switch]');
   await click('[data-book=family]');
   assert((await data()).count===9, 'Family records retained after switching');
@@ -46,6 +48,34 @@ async page => {
   await page.locator('[name=amount]').fill('12000');
   await click('#budget-form button.primary');
   assert((await data()).budget===1200000, 'Budget edits update shared state');
+  await click('[data-go=goals]');
+  const goals = () => page.evaluate(() => ({count:book().goals.length, saved:book().goals.reduce((s,g)=>s+goalSaved(g),0), wallet:balance('wallet'), expense:totals().expense}));
+  assert((await goals()).saved===1330000 && (await goals()).wallet===1279750 && (await goals()).expense===499850, 'Seeded goals funded from book accounts');
+  assert(await page.getByText('已达成',{exact:true}).isVisible(), 'Completed goal marked achieved');
+  await click('[data-action=newgoal]');
+  await page.locator('#goal-form [name=name]').fill('教育金');
+  await page.locator('#goal-form [name=target]').fill('5000');
+  await page.locator('#goal-form [name=deadline]').fill('2026-12-31');
+  await click('#goal-form button[type=submit]');
+  assert((await goals()).count===4 && (await goals()).saved===1330000, 'Creating a goal moves no money');
+  await click('[data-deposit]');
+  await page.locator('#deposit-form [name=amount]').fill('300');
+  await page.locator('#deposit-form [name=account]').selectOption('wallet');
+  await click('#deposit-form button[type=submit]');
+  assert((await goals()).saved===1360000 && (await goals()).wallet===1249750 && (await goals()).expense===499850, 'Deposit moves funds into goal, not expense');
+  await click('[data-withdraw]');
+  await page.locator('#withdraw-form [name=amount]').fill('100');
+  await click('#withdraw-form button[type=submit]');
+  assert((await goals()).saved===1350000 && (await goals()).wallet===1259750, 'Withdraw returns funds to account');
+  await click('[data-withdraw]');
+  await page.locator('#withdraw-form [name=amount]').fill('999999');
+  await click('#withdraw-form button[type=submit]');
+  assert(await page.locator('#withdraw-error').innerText().then(t=>t.includes('超出')), 'Over-withdraw rejected');
+  assert((await goals()).saved===1350000, 'Rejected withdraw leaves goal untouched');
+  await click('.modal-footer [data-action=close]');
+  await page.locator('[data-delgoal]:not([disabled])').click();
+  await click('[data-action=delgoal-confirm]');
+  assert((await goals()).count===3 && (await goals()).saved===1350000, 'Empty goal deleted, funded goals kept');
   await click('[data-go=members]');
   await click('[data-action=invite]');
   await page.locator('[name=name]').fill('测试家人');
@@ -59,6 +89,10 @@ async page => {
   assert(await page.locator('[data-action=invite]').first().isDisabled(), 'Viewer cannot invite');
   await click('[data-go=ledger]');
   assert(await page.locator('[data-action=add]').isDisabled(), 'Viewer cannot create transactions');
+  await click('[data-go=goals]');
+  assert(await page.locator('[data-action=newgoal]').isDisabled(), 'Viewer cannot create goals');
+  assert(await page.locator('[data-deposit]').first().isDisabled(), 'Viewer cannot deposit into goals');
+  await click('[data-go=ledger]');
   await page.locator('#persona').selectOption('member');
   await page.locator('#search').fill('洗护');
   assert(await page.locator('[data-edit]').isDisabled(), 'Member cannot edit others records');
@@ -68,6 +102,14 @@ async page => {
   await page.locator('[name=amount]').fill('280');
   await click('#entry-form button[type=submit]');
   assert(await page.locator('.detail').innerText().then(t=>t.includes('修改：')), 'Edit retains audit trail');
+  await click('[data-go=goals]');
+  assert(await page.locator('[data-deposit]').first().isEnabled(), 'Member can deposit into family goals');
+  assert(await page.locator('[data-action=newgoal]').isDisabled(), 'Member cannot create goals');
+  assert(await page.locator('[data-editgoal]').first().isDisabled(), 'Member cannot edit goals');
+  await click('[data-deposit]');
+  await page.locator('#deposit-form [name=amount]').fill('50');
+  await click('#deposit-form button[type=submit]');
+  assert((await goals()).saved===1355000, 'Member deposit recorded');
   await page.locator('#persona').selectOption('owner');
   await click('[data-go=members]');
   await click('[data-member=member]');
@@ -79,7 +121,7 @@ async page => {
   await page.reload();
   for (const width of [375,768,1024,1440]) {
     await page.setViewportSize({width,height:1050});
-    for (const section of ['overview','ledger','accounts','budget','members']) {
+    for (const section of ['overview','ledger','accounts','budget','goals','members']) {
       await click('[data-go='+section+']');
       assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth), `${width}px ${section}: no page overflow`);
     }

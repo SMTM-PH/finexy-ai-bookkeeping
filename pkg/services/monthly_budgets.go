@@ -1,6 +1,8 @@
 package services
 
 import (
+	"encoding/json"
+	"strconv"
 	"time"
 
 	"xorm.io/xorm"
@@ -45,7 +47,7 @@ func (s *MonthlyBudgetService) GetMonthlyBudget(c core.Context, uid int64, yearM
 }
 
 // SetMonthlyBudget creates or replaces the budget for one month.
-func (s *MonthlyBudgetService) SetMonthlyBudget(c core.Context, uid int64, yearMonth int32, amount int64) (*models.MonthlyBudget, error) {
+func (s *MonthlyBudgetService) SetMonthlyBudget(c core.Context, uid int64, yearMonth int32, amount int64, categoryAmounts map[string]int64) (*models.MonthlyBudget, error) {
 	if uid <= 0 {
 		return nil, errs.ErrUserIdInvalid
 	}
@@ -55,10 +57,23 @@ func (s *MonthlyBudgetService) SetMonthlyBudget(c core.Context, uid int64, yearM
 	if amount <= 0 {
 		return nil, errs.ErrMonthlyBudgetAmountInvalid
 	}
+	if categoryAmounts == nil {
+		categoryAmounts = map[string]int64{}
+	}
+	for categoryId, categoryAmount := range categoryAmounts {
+		parsedId, err := strconv.ParseInt(categoryId, 10, 64)
+		if err != nil || parsedId <= 0 || categoryAmount <= 0 || categoryAmount > 9999999999999 {
+			return nil, errs.ErrMonthlyBudgetAmountInvalid
+		}
+	}
+	categoryAmountsJson, err := json.Marshal(categoryAmounts)
+	if err != nil {
+		return nil, err
+	}
 
 	now := time.Now().Unix()
 	budget := &models.MonthlyBudget{}
-	err := s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
+	err = s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
 		has, err := sess.Where("uid=? AND deleted=? AND year_month=?", uid, false, yearMonth).Get(budget)
 		if err != nil {
 			return err
@@ -66,14 +81,15 @@ func (s *MonthlyBudgetService) SetMonthlyBudget(c core.Context, uid int64, yearM
 
 		if has {
 			budget.Amount = amount
+			budget.CategoryAmountsJson = string(categoryAmountsJson)
 			budget.UpdatedUnixTime = now
-			_, err = sess.ID(budget.MonthlyBudgetId).Cols("amount", "updated_unix_time").Where("uid=? AND deleted=?", uid, false).Update(budget)
+			_, err = sess.ID(budget.MonthlyBudgetId).Cols("amount", "category_amounts_json", "updated_unix_time").Where("uid=? AND deleted=?", uid, false).Update(budget)
 			return err
 		}
 
 		budget = &models.MonthlyBudget{
 			MonthlyBudgetId: s.GenerateUuid(uuid.UUID_TYPE_MONTHLY_BUDGET),
-			Uid:             uid, YearMonth: yearMonth, Amount: amount,
+			Uid:             uid, YearMonth: yearMonth, Amount: amount, CategoryAmountsJson: string(categoryAmountsJson),
 			CreatedUnixTime: now, UpdatedUnixTime: now,
 		}
 		if budget.MonthlyBudgetId < 1 {

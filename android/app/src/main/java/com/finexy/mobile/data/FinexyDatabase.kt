@@ -37,7 +37,8 @@ data class TransactionEntity(
     @ColumnInfo(defaultValue = "''") val syncedSnapshotJson: String = "",
     @ColumnInfo(defaultValue = "'[]'") val pictureIdsJson: String = "[]",
     @ColumnInfo(defaultValue = "''") val geoLocationJson: String = "",
-    @ColumnInfo(defaultValue = "0") val hideAmount: Boolean = false
+    @ColumnInfo(defaultValue = "0") val hideAmount: Boolean = false,
+    val reviewItemId: Long? = null
 ) {
     companion object {
         const val LOCAL_ACCOUNT_ID = -1L
@@ -171,6 +172,201 @@ data class ScheduledOccurrenceEntity(
     }
 }
 
+/**
+ * AI/OCR draft waiting for explicit user confirmation. Source images are
+ * deliberately never persisted; only extracted text and structured fields
+ * returned by the server are cached for offline review.
+ */
+@Entity(tableName = "ai_review_items")
+data class AIReviewItemEntity(
+    @PrimaryKey val id: Long,
+    val sourceType: Int,
+    val status: Int,
+    val sourceText: String,
+    val recognizedDataJson: String = "",
+    val failureReason: String = "",
+    val createdUnixTime: Long
+) {
+    companion object {
+        const val SOURCE_TEXT = 1
+        const val SOURCE_IMAGE = 2
+        const val SOURCE_IMPORT = 3
+        const val STATUS_PENDING = 1
+        const val STATUS_RESOLVED = 2
+        const val STATUS_DISMISSED = 3
+    }
+}
+
+/** Server-backed durable product with a cached valuation snapshot. */
+@Entity(tableName = "product_assets")
+data class ProductAssetEntity(
+    @PrimaryKey val id: Long,
+    val sourceTransactionId: Long = 0,
+    val saleTransactionId: Long = 0,
+    val category: Int,
+    val status: Int,
+    val name: String,
+    val brand: String = "",
+    val model: String = "",
+    val purchaseAmountMinor: Long,
+    val purchaseTime: Long,
+    val utcOffset: Int,
+    val usefulLifeDays: Int,
+    val residualAmountMinor: Long,
+    val manualMarketValueMinor: Long? = null,
+    val manualMarketValueTime: Long? = null,
+    val soldAmountMinor: Long = 0,
+    val soldTime: Long? = null,
+    val comment: String = "",
+    val heldDays: Int = 0,
+    val accumulatedDepreciationMinor: Long = 0,
+    val bookValueMinor: Long,
+    val updatedAt: Long = System.currentTimeMillis()
+) {
+    companion object {
+        const val STATUS_ACTIVE = 1
+        const val STATUS_SOLD = 2
+        const val STATUS_DISPOSED = 3
+    }
+}
+
+/** One quote in the latest server exchange-rate snapshot. Rates stay decimal strings to avoid binary rounding. */
+@Entity(tableName = "exchange_rates")
+data class ExchangeRateEntity(
+    @PrimaryKey val currency: String,
+    val rate: String,
+    val baseCurrency: String,
+    val dataSource: String,
+    val referenceUrl: String = "",
+    /** Unix seconds reported by the server-side provider. */
+    val serverUpdateTime: Long,
+    /** Device wall-clock milliseconds when this complete snapshot was fetched. */
+    val fetchedAt: Long
+)
+
+// --- 家庭、账本与存钱目标（Room v18） ----------------------------------
+
+/** Cached family group. Family rows live in the owner's server-side shard; this is a read-only cache. */
+@Entity(tableName = "family_groups")
+data class FamilyGroupEntity(
+    @PrimaryKey val id: Long,
+    val ownerUid: Long,
+    val name: String,
+    val comment: String = "",
+    val memberCount: Int = 0,
+    val createdTime: Long = 0,
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
+/** Cached membership rows of every family the user actively belongs to. */
+@Entity(tableName = "family_members")
+data class FamilyMemberEntity(
+    @PrimaryKey val id: Long,
+    val familyId: Long,
+    val uid: Long,
+    val role: Int,
+    val status: Int,
+    val nickname: String = "",
+    val joinedTime: Long = 0,
+    val updatedAt: Long = System.currentTimeMillis()
+) {
+    companion object {
+        const val ROLE_OWNER = 1
+        const val ROLE_ADMIN = 2
+        const val ROLE_MEMBER = 3
+        const val ROLE_VIEWER = 4
+        const val STATUS_ACTIVE = 1
+        const val STATUS_LEFT = 2
+        const val STATUS_REMOVED = 3
+    }
+}
+
+/** Cached ledger. Id zero is the implicit default personal ledger and never has a row. */
+@Entity(tableName = "ledgers")
+data class LedgerEntity(
+    @PrimaryKey val id: Long,
+    val ownerUid: Long,
+    val type: Int,
+    val familyId: Long = 0,
+    val name: String,
+    val comment: String = "",
+    val createdTime: Long = 0,
+    val updatedAt: Long = System.currentTimeMillis()
+) {
+    companion object {
+        const val TYPE_PERSONAL = 1
+        const val TYPE_FAMILY = 2
+        const val DEFAULT_LEDGER_ID = 0L
+    }
+}
+
+/** Cached savings goal of one ledger. savedAmount is derived server-side from immutable fund movements. */
+@Entity(tableName = "savings_goals")
+data class SavingsGoalEntity(
+    @PrimaryKey val id: Long,
+    val uid: Long,
+    val ledgerId: Long,
+    val name: String,
+    val targetAmountMinor: Long,
+    val savedAmountMinor: Long,
+    val achieved: Boolean,
+    val deadlineTime: Long = 0,
+    val comment: String = "",
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
+/** Read-only cache for accounts in an explicit server ledger. */
+@Entity(tableName = "ledger_account_cache", primaryKeys = ["ledgerId", "id"])
+data class LedgerAccountCacheEntity(
+    val id: Long,
+    val ledgerId: Long,
+    val name: String,
+    val currency: String,
+    val balanceMinor: Long,
+    val hidden: Boolean,
+    val parentId: Long,
+    val category: Int,
+    val type: Int,
+    val icon: Long,
+    val color: String,
+    val comment: String,
+    val displayOrder: Int,
+    val creditCardStatementDate: Int
+) {
+    fun toAccountEntity() = AccountEntity(id, name, currency, balanceMinor, hidden, parentId = parentId,
+        category = category, type = type, icon = icon, color = color, comment = comment,
+        displayOrder = displayOrder, creditCardStatementDate = creditCardStatementDate)
+}
+
+/** Read-only cache for transactions in an explicit server ledger. */
+@Entity(tableName = "ledger_transaction_cache", primaryKeys = ["ledgerId", "id"])
+data class LedgerTransactionCacheEntity(
+    val id: Long,
+    val ledgerId: Long,
+    val type: Int,
+    val sourceAccountId: Long,
+    val destinationAccountId: Long?,
+    val categoryId: Long?,
+    val categoryName: String,
+    val sourceAmountMinor: Long,
+    val destinationAmountMinor: Long,
+    val currency: String,
+    val comment: String,
+    val time: Long,
+    val utcOffset: Int,
+    val tagIdsJson: String,
+    val hideAmount: Boolean
+) {
+    fun toTransactionEntity() = TransactionEntity(
+        localId = "ledger-$ledgerId-$id", serverId = id, type = type,
+        sourceAccountId = sourceAccountId, destinationAccountId = destinationAccountId,
+        categoryId = categoryId, categoryName = categoryName, sourceAmountMinor = sourceAmountMinor,
+        destinationAmountMinor = destinationAmountMinor, currency = currency, comment = comment,
+        time = time, utcOffset = utcOffset, tagIdsJson = tagIdsJson, hideAmount = hideAmount,
+        syncState = SyncState.SYNCED
+    )
+}
+
 @Entity(tableName = "sync_status")
 data class SyncStatusEntity(
     @PrimaryKey val id: Int = 1,
@@ -268,6 +464,155 @@ interface FinexyDao {
     @Query("SELECT * FROM scheduled_occurrences ORDER BY scheduledUnixTime, templateId")
     fun observeOccurrences(): Flow<List<ScheduledOccurrenceEntity>>
 
+    @Query("SELECT * FROM ai_review_items WHERE status = 1 AND id NOT IN (SELECT reviewItemId FROM transactions WHERE reviewItemId IS NOT NULL AND deleted = 0) ORDER BY createdUnixTime DESC, id DESC")
+    fun observeAIReviewItems(): Flow<List<AIReviewItemEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAIReviewItems(items: List<AIReviewItemEntity>)
+
+    @Query("SELECT * FROM ai_review_items WHERE id = :id LIMIT 1")
+    suspend fun findAIReviewItem(id: Long): AIReviewItemEntity?
+
+    @Query("DELETE FROM ai_review_items WHERE id NOT IN (:ids)")
+    suspend fun deleteAIReviewItemsNotIn(ids: List<Long>)
+
+    @Query("DELETE FROM ai_review_items WHERE id = :id")
+    suspend fun deleteAIReviewItem(id: Long)
+
+    @Query("SELECT * FROM product_assets ORDER BY status, purchaseTime DESC, id DESC")
+    fun observeProductAssets(): Flow<List<ProductAssetEntity>>
+
+    @Query("SELECT * FROM product_assets ORDER BY status, purchaseTime DESC, id DESC")
+    suspend fun allProductAssets(): List<ProductAssetEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertProductAssets(items: List<ProductAssetEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertProductAsset(item: ProductAssetEntity)
+
+    @Query("DELETE FROM product_assets WHERE id NOT IN (:ids)")
+    suspend fun deleteProductAssetsNotIn(ids: List<Long>)
+
+    @Query("DELETE FROM product_assets")
+    suspend fun deleteAllProductAssets()
+
+    @Query("DELETE FROM product_assets WHERE id = :id")
+    suspend fun deleteProductAsset(id: Long)
+
+    // --- 家庭、账本与存钱目标 ------------------------------------------
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertFamilyGroups(items: List<FamilyGroupEntity>)
+
+    @Query("DELETE FROM family_groups")
+    suspend fun deleteAllFamilyGroups()
+
+    @Query("DELETE FROM family_groups WHERE id NOT IN (:ids)")
+    suspend fun deleteFamilyGroupsNotIn(ids: List<Long>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertFamilyMembers(items: List<FamilyMemberEntity>)
+
+    @Query("DELETE FROM family_members")
+    suspend fun deleteAllFamilyMembers()
+
+    @Query("DELETE FROM family_members WHERE familyId = :familyId AND id NOT IN (:ids)")
+    suspend fun deleteFamilyMembersNotIn(familyId: Long, ids: List<Long>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertLedgers(items: List<LedgerEntity>)
+
+    @Query("DELETE FROM ledgers")
+    suspend fun deleteAllLedgers()
+
+    @Query("DELETE FROM ledgers WHERE id NOT IN (:ids)")
+    suspend fun deleteLedgersNotIn(ids: List<Long>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertSavingsGoals(items: List<SavingsGoalEntity>)
+
+    @Query("DELETE FROM savings_goals")
+    suspend fun deleteAllSavingsGoals()
+
+    @Query("DELETE FROM savings_goals WHERE id NOT IN (:ids)")
+    suspend fun deleteSavingsGoalsNotIn(ids: List<Long>)
+
+    @Query("DELETE FROM savings_goals WHERE id = :id")
+    suspend fun deleteSavingsGoal(id: Long)
+
+    @Query("SELECT * FROM family_groups ORDER BY createdTime, id")
+    fun observeFamilyGroups(): Flow<List<FamilyGroupEntity>>
+
+    @Query("SELECT * FROM family_members WHERE status = 1 ORDER BY joinedTime, id")
+    fun observeFamilyMembers(): Flow<List<FamilyMemberEntity>>
+
+    @Query("SELECT * FROM family_groups ORDER BY id")
+    suspend fun allFamilyGroups(): List<FamilyGroupEntity>
+
+    @Query("SELECT * FROM family_members ORDER BY joinedTime, id")
+    suspend fun allFamilyMembers(): List<FamilyMemberEntity>
+
+    @Query("SELECT * FROM ledgers WHERE id != 0 ORDER BY createdTime, id")
+    fun observeLedgers(): Flow<List<LedgerEntity>>
+
+    @Query("SELECT * FROM ledgers ORDER BY id")
+    suspend fun allLedgers(): List<LedgerEntity>
+
+    @Query("SELECT * FROM savings_goals WHERE ledgerId = :ledgerId ORDER BY updatedAt DESC, id DESC")
+    fun observeSavingsGoals(ledgerId: Long): Flow<List<SavingsGoalEntity>>
+
+    @Query("SELECT * FROM savings_goals ORDER BY id")
+    suspend fun allSavingsGoals(): List<SavingsGoalEntity>
+
+    @Query("SELECT * FROM ledger_account_cache WHERE ledgerId = :ledgerId ORDER BY hidden, displayOrder, name")
+    fun observeLedgerAccounts(ledgerId: Long): Flow<List<LedgerAccountCacheEntity>>
+
+    @Query("SELECT * FROM ledger_transaction_cache WHERE ledgerId = :ledgerId ORDER BY time DESC, id DESC")
+    fun observeLedgerTransactions(ledgerId: Long): Flow<List<LedgerTransactionCacheEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertLedgerAccounts(items: List<LedgerAccountCacheEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertLedgerTransactions(items: List<LedgerTransactionCacheEntity>)
+
+    @Query("DELETE FROM ledger_account_cache WHERE ledgerId = :ledgerId")
+    suspend fun deleteLedgerAccounts(ledgerId: Long)
+
+    @Query("DELETE FROM ledger_transaction_cache WHERE ledgerId = :ledgerId")
+    suspend fun deleteLedgerTransactions(ledgerId: Long)
+
+    @Query("DELETE FROM ledger_account_cache WHERE ledgerId NOT IN (:ledgerIds)")
+    suspend fun deleteLedgerAccountsOutside(ledgerIds: List<Long>)
+
+    @Query("DELETE FROM ledger_transaction_cache WHERE ledgerId NOT IN (:ledgerIds)")
+    suspend fun deleteLedgerTransactionsOutside(ledgerIds: List<Long>)
+
+    @Query("SELECT * FROM exchange_rates ORDER BY currency")
+    fun observeExchangeRates(): Flow<List<ExchangeRateEntity>>
+
+    @Query("SELECT * FROM exchange_rates ORDER BY currency")
+    suspend fun allExchangeRates(): List<ExchangeRateEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertExchangeRates(items: List<ExchangeRateEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertExchangeRate(item: ExchangeRateEntity)
+
+    @Query("DELETE FROM exchange_rates WHERE currency NOT IN (:currencies)")
+    suspend fun deleteExchangeRatesNotIn(currencies: List<String>)
+
+    @Query("DELETE FROM exchange_rates")
+    suspend fun deleteAllExchangeRates()
+
+    @Query("DELETE FROM exchange_rates WHERE currency = :currency")
+    suspend fun deleteExchangeRate(currency: String)
+
+    @Query("UPDATE transactions SET reviewItemId = NULL WHERE localId = :localId")
+    suspend fun clearTransactionReviewItem(localId: String)
+
     @Query("SELECT * FROM scheduled_occurrences")
     suspend fun allOccurrences(): List<ScheduledOccurrenceEntity>
 
@@ -344,7 +689,7 @@ interface FinexyDao {
     suspend fun upsertSyncStatus(status: SyncStatusEntity)
 }
 
-@Database(entities = [TransactionEntity::class, AccountEntity::class, CategoryEntity::class, CategoryMappingEntity::class, AccountMappingEntity::class, TagEntity::class, TemplateEntity::class, SyncConflictEntity::class, SyncStatusEntity::class, ScheduledOccurrenceEntity::class], version = 14, exportSchema = false)
+@Database(entities = [TransactionEntity::class, AccountEntity::class, CategoryEntity::class, CategoryMappingEntity::class, AccountMappingEntity::class, TagEntity::class, TemplateEntity::class, SyncConflictEntity::class, SyncStatusEntity::class, ScheduledOccurrenceEntity::class, AIReviewItemEntity::class, ProductAssetEntity::class, ExchangeRateEntity::class, FamilyGroupEntity::class, FamilyMemberEntity::class, LedgerEntity::class, SavingsGoalEntity::class, LedgerAccountCacheEntity::class, LedgerTransactionCacheEntity::class], version = 19, exportSchema = false)
 abstract class FinexyDatabase : androidx.room.RoomDatabase() {
     abstract fun dao(): FinexyDao
 
@@ -366,6 +711,11 @@ abstract class FinexyDatabase : androidx.room.RoomDatabase() {
                 .addMigrations(MIGRATION_11_12)
                 .addMigrations(MIGRATION_12_13)
                 .addMigrations(MIGRATION_13_14)
+                .addMigrations(MIGRATION_14_15)
+                .addMigrations(MIGRATION_15_16)
+                .addMigrations(MIGRATION_16_17)
+                .addMigrations(MIGRATION_17_18)
+                .addMigrations(MIGRATION_18_19)
                 .build() }
         }
 
@@ -448,13 +798,14 @@ abstract class FinexyDatabase : androidx.room.RoomDatabase() {
             override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL("""
                     CREATE TABLE IF NOT EXISTS sync_status (
-                        id INTEGER NOT NULL PRIMARY KEY,
+                        id INTEGER NOT NULL,
                         state TEXT NOT NULL,
                         message TEXT NOT NULL,
                         attemptCount INTEGER NOT NULL,
                         nextRetryAt INTEGER NOT NULL,
                         lastStartedAt INTEGER NOT NULL,
-                        lastFinishedAt INTEGER NOT NULL
+                        lastFinishedAt INTEGER NOT NULL,
+                        PRIMARY KEY(id)
                     )
                 """.trimIndent())
             }
@@ -558,6 +909,173 @@ abstract class FinexyDatabase : androidx.room.RoomDatabase() {
                 }
                 if ("pausedFromFrequencyType" !in existing) database.execSQL("ALTER TABLE transaction_templates ADD COLUMN pausedFromFrequencyType INTEGER")
                 if ("pausedFromFrequency" !in existing) database.execSQL("ALTER TABLE transaction_templates ADD COLUMN pausedFromFrequency TEXT")
+            }
+        }
+
+        val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS ai_review_items (
+                        id INTEGER NOT NULL,
+                        sourceType INTEGER NOT NULL,
+                        status INTEGER NOT NULL,
+                        sourceText TEXT NOT NULL,
+                        recognizedDataJson TEXT NOT NULL DEFAULT '',
+                        failureReason TEXT NOT NULL DEFAULT '',
+                        createdUnixTime INTEGER NOT NULL,
+                        PRIMARY KEY(id)
+                    )
+                """.trimIndent())
+                val transactionColumns = mutableSetOf<String>()
+                database.query("PRAGMA table_info(transactions)").use { cursor ->
+                    val nameIndex = cursor.getColumnIndex("name")
+                    while (cursor.moveToNext()) transactionColumns += cursor.getString(nameIndex)
+                }
+                if ("reviewItemId" !in transactionColumns) database.execSQL("ALTER TABLE transactions ADD COLUMN reviewItemId INTEGER")
+            }
+        }
+
+        val MIGRATION_15_16 = object : Migration(15, 16) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS product_assets (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        sourceTransactionId INTEGER NOT NULL DEFAULT 0,
+                        saleTransactionId INTEGER NOT NULL DEFAULT 0,
+                        category INTEGER NOT NULL,
+                        status INTEGER NOT NULL,
+                        name TEXT NOT NULL,
+                        brand TEXT NOT NULL DEFAULT '',
+                        model TEXT NOT NULL DEFAULT '',
+                        purchaseAmountMinor INTEGER NOT NULL,
+                        purchaseTime INTEGER NOT NULL,
+                        utcOffset INTEGER NOT NULL,
+                        usefulLifeDays INTEGER NOT NULL,
+                        residualAmountMinor INTEGER NOT NULL,
+                        manualMarketValueMinor INTEGER,
+                        manualMarketValueTime INTEGER,
+                        soldAmountMinor INTEGER NOT NULL DEFAULT 0,
+                        soldTime INTEGER,
+                        comment TEXT NOT NULL DEFAULT '',
+                        heldDays INTEGER NOT NULL DEFAULT 0,
+                        accumulatedDepreciationMinor INTEGER NOT NULL DEFAULT 0,
+                        bookValueMinor INTEGER NOT NULL,
+                        updatedAt INTEGER NOT NULL
+                    )
+                """.trimIndent())
+            }
+        }
+
+        val MIGRATION_16_17 = object : Migration(16, 17) {            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS exchange_rates (
+                        currency TEXT NOT NULL PRIMARY KEY,
+                        rate TEXT NOT NULL,
+                        baseCurrency TEXT NOT NULL,
+                        dataSource TEXT NOT NULL,
+                        referenceUrl TEXT NOT NULL DEFAULT '',
+                        serverUpdateTime INTEGER NOT NULL,
+                        fetchedAt INTEGER NOT NULL
+                    )
+                """.trimIndent())
+            }
+        }
+
+        val MIGRATION_17_18 = object : Migration(17, 18) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS family_groups (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        ownerUid INTEGER NOT NULL,
+                        name TEXT NOT NULL,
+                        comment TEXT NOT NULL DEFAULT '',
+                        memberCount INTEGER NOT NULL DEFAULT 0,
+                        createdTime INTEGER NOT NULL DEFAULT 0,
+                        updatedAt INTEGER NOT NULL
+                    )
+                """.trimIndent())
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS family_members (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        familyId INTEGER NOT NULL,
+                        uid INTEGER NOT NULL,
+                        role INTEGER NOT NULL,
+                        status INTEGER NOT NULL,
+                        nickname TEXT NOT NULL DEFAULT '',
+                        joinedTime INTEGER NOT NULL DEFAULT 0,
+                        updatedAt INTEGER NOT NULL
+                    )
+                """.trimIndent())
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS ledgers (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        ownerUid INTEGER NOT NULL,
+                        type INTEGER NOT NULL,
+                        familyId INTEGER NOT NULL DEFAULT 0,
+                        name TEXT NOT NULL,
+                        comment TEXT NOT NULL DEFAULT '',
+                        createdTime INTEGER NOT NULL DEFAULT 0,
+                        updatedAt INTEGER NOT NULL
+                    )
+                """.trimIndent())
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS savings_goals (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        uid INTEGER NOT NULL,
+                        ledgerId INTEGER NOT NULL,
+                        name TEXT NOT NULL,
+                        targetAmountMinor INTEGER NOT NULL,
+                        savedAmountMinor INTEGER NOT NULL,
+                        achieved INTEGER NOT NULL,
+                        deadlineTime INTEGER NOT NULL DEFAULT 0,
+                        comment TEXT NOT NULL DEFAULT '',
+                        updatedAt INTEGER NOT NULL
+                    )
+                """.trimIndent())
+            }
+        }
+
+        val MIGRATION_18_19 = object : Migration(18, 19) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS ledger_account_cache (
+                        id INTEGER NOT NULL,
+                        ledgerId INTEGER NOT NULL,
+                        name TEXT NOT NULL,
+                        currency TEXT NOT NULL,
+                        balanceMinor INTEGER NOT NULL,
+                        hidden INTEGER NOT NULL,
+                        parentId INTEGER NOT NULL,
+                        category INTEGER NOT NULL,
+                        type INTEGER NOT NULL,
+                        icon INTEGER NOT NULL,
+                        color TEXT NOT NULL,
+                        comment TEXT NOT NULL,
+                        displayOrder INTEGER NOT NULL,
+                        creditCardStatementDate INTEGER NOT NULL,
+                        PRIMARY KEY(ledgerId, id)
+                    )
+                """.trimIndent())
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS ledger_transaction_cache (
+                        id INTEGER NOT NULL,
+                        ledgerId INTEGER NOT NULL,
+                        type INTEGER NOT NULL,
+                        sourceAccountId INTEGER NOT NULL,
+                        destinationAccountId INTEGER,
+                        categoryId INTEGER,
+                        categoryName TEXT NOT NULL,
+                        sourceAmountMinor INTEGER NOT NULL,
+                        destinationAmountMinor INTEGER NOT NULL,
+                        currency TEXT NOT NULL,
+                        comment TEXT NOT NULL,
+                        time INTEGER NOT NULL,
+                        utcOffset INTEGER NOT NULL,
+                        tagIdsJson TEXT NOT NULL,
+                        hideAmount INTEGER NOT NULL,
+                        PRIMARY KEY(ledgerId, id)
+                    )
+                """.trimIndent())
             }
         }
     }

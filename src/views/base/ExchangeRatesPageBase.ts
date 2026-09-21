@@ -1,4 +1,4 @@
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 
 import { useI18n } from '@/locales/helpers.ts';
 
@@ -22,7 +22,10 @@ export function useExchangeRatesPageBase() {
     const userStore = useUserStore();
     const exchangeRatesStore = useExchangeRatesStore();
 
-    const baseCurrency = ref<string>(userStore.currentUserDefaultCurrency);
+    // The exchange-rate page is presented against RMB by product definition.
+    // Fall back to the user's default currency only when the provider does not
+    // expose CNY (for example, a restricted custom-rate set).
+    const baseCurrency = ref<string>('CNY');
     const baseAmount = ref<number>(100);
 
     const defaultCurrency = computed<string>(() => userStore.currentUserDefaultCurrency);
@@ -41,6 +44,17 @@ export function useExchangeRatesPageBase() {
     const availableExchangeRates = computed<LocalizedLatestExchangeRate[]>(() => {
         return getAllDisplayExchangeRates(exchangeRatesData.value);
     });
+
+    watch(exchangeRatesData, data => {
+        if (!data?.exchangeRates?.length) {
+            return;
+        }
+
+        const hasCny = data.exchangeRates.some(item => item.currency === 'CNY');
+        if (!hasCny && !data.exchangeRates.some(item => item.currency === baseCurrency.value)) {
+            baseCurrency.value = userStore.currentUserDefaultCurrency;
+        }
+    }, { immediate: true });
 
     function getConvertedAmount(baseAmount: number | '', fromExchangeRate?: LatestExchangeRate | LocalizedLatestExchangeRate, toExchangeRate?: LatestExchangeRate | LocalizedLatestExchangeRate): number | '' | null {
         if (!fromExchangeRate || !toExchangeRate) {

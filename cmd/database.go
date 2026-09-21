@@ -205,5 +205,29 @@ func updateAllDatabaseTablesStructure(c *core.CliContext) error {
 
 	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] AI review item table maintained successfully")
 
+	err = datastore.Container.UserDataStore.SyncStructs(new(models.FamilyGroup), new(models.FamilyMember), new(models.FamilyInvitation))
+
+	if err != nil {
+		return err
+	}
+
+	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] family tables maintained successfully")
+
+	err = datastore.Container.UserDataStore.SyncStructs(new(models.Ledger), new(models.LedgerMember), new(models.LedgerInvitation))
+
+	if err != nil {
+		return err
+	}
+
+	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] ledger table maintained successfully")
+
+	err = datastore.Container.UserDataStore.SyncStructs(new(models.SavingsGoal), new(models.SavingsGoalFund))
+
+	if err != nil {
+		return err
+	}
+
+	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] savings goal tables maintained successfully")
+
 	return nil
 }

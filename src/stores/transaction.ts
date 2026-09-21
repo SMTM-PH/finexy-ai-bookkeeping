@@ -845,7 +845,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
         };
     }
 
-    function loadTransactions({ reload, count, page, mustHavePictures, withCount, withPictures, autoExpand, defaultCurrency }: { reload?: boolean, count?: number, page?: number, mustHavePictures?: boolean, withCount?: boolean, withPictures?: boolean, autoExpand: boolean, defaultCurrency: string }): Promise<TransactionPageWrapper> {
+    function loadTransactions({ reload, count, page, mustHavePictures, withCount, withPictures, autoExpand, defaultCurrency, ledgerId }: { reload?: boolean, count?: number, page?: number, mustHavePictures?: boolean, withCount?: boolean, withPictures?: boolean, autoExpand: boolean, defaultCurrency: string, ledgerId?: string }): Promise<TransactionPageWrapper> {
         let actualMaxTime = transactionsNextTimeId.value;
 
         if (reload && transactionsFilter.value.maxTime > 0) {
@@ -856,6 +856,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
 
         return new Promise((resolve, reject) => {
             services.getTransactions({
+                ledgerId,
                 maxTime: actualMaxTime,
                 minTime: transactionsFilter.value.minTime * 1000,
                 count: count || 50,
@@ -938,9 +939,10 @@ export const useTransactionsStore = defineStore('transactions', () => {
         });
     }
 
-    function loadMonthlyAllTransactions({ year, month, mustHavePictures, withPictures, autoExpand, defaultCurrency }: { year: number, month: number, mustHavePictures?: boolean, withPictures?: boolean, autoExpand: boolean, defaultCurrency: string }): Promise<TransactionPageWrapper> {
+    function loadMonthlyAllTransactions({ year, month, mustHavePictures, withPictures, autoExpand, defaultCurrency, ledgerId }: { year: number, month: number, mustHavePictures?: boolean, withPictures?: boolean, autoExpand: boolean, defaultCurrency: string, ledgerId?: string }): Promise<TransactionPageWrapper> {
         return new Promise((resolve, reject) => {
             services.getAllTransactionsByMonth({
+                ledgerId,
                 year: year,
                 month: month,
                 type: transactionsFilter.value.type,
@@ -1054,7 +1056,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
         });
     }
 
-    function getTransaction({ transactionId, withPictures }: { transactionId: string, withPictures?: boolean }): Promise<Transaction> {
+    function getTransaction({ transactionId, withPictures, ledgerId }: { transactionId: string, withPictures?: boolean, ledgerId?: string }): Promise<Transaction> {
         return new Promise((resolve, reject) => {
             if (!isDefined(withPictures)) {
                 withPictures = true;
@@ -1062,7 +1064,8 @@ export const useTransactionsStore = defineStore('transactions', () => {
 
             services.getTransaction({
                 id: transactionId,
-                withPictures: withPictures
+                withPictures: withPictures,
+                ledgerId
             }).then(response => {
                 const data = response.data;
 
@@ -1088,7 +1091,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
         });
     }
 
-    function saveTransaction({ transaction, defaultCurrency, isEdit, clientSessionId }: { transaction: Transaction, defaultCurrency: string, isEdit: boolean, clientSessionId: string }): Promise<Transaction> {
+    function saveTransaction({ transaction, defaultCurrency, isEdit, clientSessionId, ledgerId }: { transaction: Transaction, defaultCurrency: string, isEdit: boolean, clientSessionId: string, ledgerId?: string }): Promise<Transaction> {
         return new Promise((resolve, reject) => {
             let promise: ApiResponsePromise<TransactionInfoResponse>;
 
@@ -1104,9 +1107,9 @@ export const useTransactionsStore = defineStore('transactions', () => {
             }
 
             if (!isEdit) {
-                promise = services.addTransaction(transaction.toCreateRequest(clientSessionId));
+                promise = services.addTransaction(transaction.toCreateRequest(clientSessionId, ledgerId));
             } else {
-                promise = services.modifyTransaction(transaction.toModifyRequest());
+                promise = services.modifyTransaction(transaction.toModifyRequest(ledgerId));
             }
 
             promise.then(response => {
@@ -1354,10 +1357,11 @@ export const useTransactionsStore = defineStore('transactions', () => {
         });
     }
 
-    function deleteTransaction({ transaction, defaultCurrency, beforeResolve }: { transaction: TransactionInfoResponse, defaultCurrency: string, beforeResolve?: BeforeResolveFunction }): Promise<boolean> {
+    function deleteTransaction({ transaction, defaultCurrency, beforeResolve, ledgerId }: { transaction: TransactionInfoResponse, defaultCurrency: string, beforeResolve?: BeforeResolveFunction, ledgerId?: string }): Promise<boolean> {
         return new Promise((resolve, reject) => {
             services.deleteTransaction({
-                id: transaction.id
+                id: transaction.id,
+                ledgerId
             }).then(response => {
                 const data = response.data;
 

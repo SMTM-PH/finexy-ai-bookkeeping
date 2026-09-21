@@ -14,5 +14,9 @@
         <activity android:name=".TemplateManagementQaActivity" android:exported="false" android:theme="@style/Theme.Finexy" />
         <activity android:name=".ActivityFilterQaActivity" android:exported="false" android:theme="@style/Theme.Finexy" />
         <activity android:name=".ScheduleQaActivity" android:exported="false" android:theme="@style/Theme.Finexy" />
+        <activity android:name=".ProductAssetQaActivity" android:exported="false" android:theme="@style/Theme.Finexy" />
+        <activity android:name=".ExchangeRateQaActivity" android:exported="false" android:theme="@style/Theme.Finexy" />
+        <activity android:name=".UserPreferencesQaActivity" android:exported="false" android:theme="@style/Theme.Finexy" />
+        <activity android:name=".AIRecognitionQaActivity" android:exported="false" android:theme="@style/Theme.Finexy" />
     </application>
 </manifest>

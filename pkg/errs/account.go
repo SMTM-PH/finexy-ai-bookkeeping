@@ -28,4 +28,7 @@ var (
 	ErrNotSupportedChangeBalanceTime            = NewNormalError(NormalSubcategoryAccount, 22, http.StatusBadRequest, "not supported to modify account balance time")
 	ErrParentAccountCannotSetLastReconciledTime = NewNormalError(NormalSubcategoryAccount, 23, http.StatusBadRequest, "parent account cannot set last reconciled time")
 	ErrCannotSetLastReconciledTimeBeforeCurrent = NewNormalError(NormalSubcategoryAccount, 24, http.StatusBadRequest, "cannot set last reconciled time before current value")
+	ErrAccountAlreadyInLedger                   = NewNormalError(NormalSubcategoryAccount, 25, http.StatusBadRequest, "account already belongs to target ledger")
+	ErrAccountLedgerMigrationBlocked            = NewNormalError(NormalSubcategoryAccount, 26, http.StatusBadRequest, "account has cross-account or ledger-bound references and cannot be moved")
+	ErrAccountLedgerMigrationAcrossDataStore    = NewNormalError(NormalSubcategoryAccount, 27, http.StatusBadRequest, "moving an account across data stores is not supported")
 )

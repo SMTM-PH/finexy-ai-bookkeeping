@@ -1,6 +1,7 @@
 package settings
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -480,6 +481,102 @@ type Config struct {
 	ExchangeRatesRequestTimeoutExceedDefaultValue bool
 	ExchangeRatesProxy                            string
 	ExchangeRatesSkipTLSVerify                    bool
+}
+
+// WebAIConfiguration is the persistent, server-side AI override managed by the
+// owner account. Secrets in this structure are never returned by the API.
+type WebAIConfiguration struct {
+	OwnerUid       int64            `json:"ownerUid,string"`
+	Enabled        bool             `json:"enabled"`
+	ImageEnabled   bool             `json:"imageEnabled"`
+	BaseURL        string           `json:"baseUrl"`
+	APIKey         string           `json:"apiKey"`
+	ModelID        string           `json:"modelId"`
+	EnableThinking LLMThinkingLevel `json:"enableThinking"`
+	RequestTimeout uint32           `json:"requestTimeout"`
+}
+
+const webAIConfigurationPath = "data/ai-configuration.json"
+
+// LoadWebAIConfiguration loads the optional AI override from the persistent
+// data directory. A missing file means the regular ini/environment settings win.
+func LoadWebAIConfiguration(config *Config) (*WebAIConfiguration, error) {
+	path := filepath.Join(config.WorkingPath, filepath.FromSlash(webAIConfigurationPath))
+	content, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var result WebAIConfiguration
+	if err = json.Unmarshal(content, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ApplyWebAIConfiguration applies a persisted override to a loaded config.
+func ApplyWebAIConfiguration(config *Config, override *WebAIConfiguration) {
+	if override == nil {
+		return
+	}
+	apiKey := override.APIKey
+	if apiKey == "" && config.TextRecognitionLLMConfig != nil {
+		apiKey = config.TextRecognitionLLMConfig.OpenAICompatibleAPIKey
+	}
+	config.TransactionFromAITextRecognition = override.Enabled
+	sharedConfig := &LLMConfig{
+		LLMProvider:                         OpenAICompatibleLLMProvider,
+		EnableThinking:                      override.EnableThinking,
+		OpenAICompatibleBaseURL:             strings.TrimRight(override.BaseURL, "/"),
+		OpenAICompatibleAPIKey:              apiKey,
+		OpenAICompatibleModelID:             override.ModelID,
+		LargeLanguageModelAPIRequestTimeout: override.RequestTimeout,
+		LargeLanguageModelAPIProxy:          "system",
+	}
+	config.TextRecognitionLLMConfig = sharedConfig
+	config.TransactionFromAIImageRecognition = override.ImageEnabled
+	if override.ImageEnabled {
+		imageConfig := *sharedConfig
+		config.ReceiptImageRecognitionLLMConfig = &imageConfig
+	}
+}
+
+// SaveWebAIConfiguration atomically stores an AI override in the persistent
+// data directory with owner-only permissions where the platform supports them.
+func SaveWebAIConfiguration(config *Config, override *WebAIConfiguration) error {
+	path := filepath.Join(config.WorkingPath, filepath.FromSlash(webAIConfigurationPath))
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
+	content, err := json.MarshalIndent(override, "", "  ")
+	if err != nil {
+		return err
+	}
+	temporary, err := os.CreateTemp(filepath.Dir(path), ".ai-configuration-*")
+	if err != nil {
+		return err
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	if err = temporary.Chmod(0600); err == nil {
+		_, err = temporary.Write(content)
+	}
+	if closeErr := temporary.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	if err = os.Rename(temporaryPath, path); err == nil {
+		return nil
+	}
+	// Windows does not replace an existing destination with os.Rename.
+	if removeErr := os.Remove(path); removeErr != nil && !os.IsNotExist(removeErr) {
+		return err
+	}
+	return os.Rename(temporaryPath, path)
 }
 
 // LoadConfiguration loads setting config from given config file path

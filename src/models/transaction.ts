@@ -226,13 +226,14 @@ export class Transaction implements TransactionInfoResponse {
         this._displayDayOfWeek = displayDayOfWeek;
     }
 
-    public toCreateRequest(clientSessionId: string): TransactionCreateRequest {
+    public toCreateRequest(clientSessionId: string, ledgerId?: string): TransactionCreateRequest {
         return {
+            ledgerId,
             type: this.type,
             categoryId: this.getCategoryId(),
             time: this.time,
             utcOffset: this.utcOffset,
-            sourceAccountId: this.sourceAccountId,
+            sourceAccountId: this.type === TransactionType.Transfer ? (this.sourceAccountId || '0') : this.sourceAccountId,
             destinationAccountId: this.type === TransactionType.Transfer ? this.destinationAccountId : '0',
             sourceAmount: this.sourceAmount,
             destinationAmount: this.type === TransactionType.Transfer ? this.destinationAmount : 0,
@@ -245,7 +246,7 @@ export class Transaction implements TransactionInfoResponse {
         };
     }
 
-    public toModifyRequest(): TransactionModifyRequest {
+    public toModifyRequest(ledgerId?: string): TransactionModifyRequest {
         let categoryId = this.getCategoryId();
 
         if (this.type === TransactionType.ModifyBalance) {
@@ -253,12 +254,13 @@ export class Transaction implements TransactionInfoResponse {
         }
 
         return {
+            ledgerId,
             id: this.id,
             type: this.type,
             categoryId: categoryId,
             time: this.time,
             utcOffset: this.utcOffset,
-            sourceAccountId: this.sourceAccountId,
+            sourceAccountId: this.type === TransactionType.Transfer ? (this.sourceAccountId || '0') : this.sourceAccountId,
             destinationAccountId: this.type === TransactionType.Transfer ? this.destinationAccountId : '0',
             sourceAmount: this.sourceAmount,
             destinationAmount: this.type === TransactionType.Transfer ? this.destinationAmount : 0,
@@ -527,6 +529,7 @@ export interface TransactionGeoLocationRequest {
 }
 
 export interface TransactionCreateRequest {
+	readonly ledgerId?: string;
     readonly type: number;
     readonly categoryId: string;
     readonly time: number;
@@ -544,6 +547,7 @@ export interface TransactionCreateRequest {
 }
 
 export interface TransactionModifyRequest {
+	readonly ledgerId?: string;
     readonly id: string;
     readonly type: number;
     readonly categoryId: string;
@@ -591,6 +595,7 @@ export interface TransactionMoveBetweenAccountsRequest {
 }
 
 export interface TransactionDeleteRequest {
+	readonly ledgerId?: string;
     readonly id: string;
 }
 
@@ -605,6 +610,7 @@ export interface TransactionImportRequest {
 }
 
 export interface TransactionListByMaxTimeRequest {
+	readonly ledgerId?: string;
     readonly maxTime: number;
     readonly minTime: number;
     readonly count: number;
@@ -622,6 +628,7 @@ export interface TransactionListByMaxTimeRequest {
 }
 
 export interface TransactionListInMonthByPageRequest {
+	readonly ledgerId?: string;
     readonly year: number;
     readonly month: number; // 1-based (1 = January, 12 = December)
     readonly type: number;
@@ -651,6 +658,10 @@ export type TransactionGeoLocationResponse = Coordinate;
 
 export interface TransactionInfoResponse {
     readonly id: string;
+	readonly ledgerId?: string;
+	readonly recorderUid?: string;
+	readonly payerUid?: string;
+	readonly savingsGoalFundId?: string;
     readonly timeSequenceId: string;
     readonly type: number;
     readonly categoryId: string;
@@ -673,6 +684,7 @@ export interface TransactionInfoResponse {
 }
 
 export interface TransactionStatisticRequest {
+	readonly ledgerId?: string;
     readonly startTime: number;
     readonly endTime: number;
     readonly tagFilter: string;
@@ -687,6 +699,7 @@ export interface YearMonthRangeRequest {
 }
 
 export interface TransactionStatisticTrendsRequest extends YearMonthRangeRequest {
+	readonly ledgerId?: string;
     readonly tagFilter: string;
     readonly keyword: string;
     readonly matchMode: number;

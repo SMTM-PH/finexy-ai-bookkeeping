@@ -50,6 +50,9 @@ const (
 	NormalSubcategoryAIReviewItem           = 22
 	NormalSubcategoryAIReport               = 23
 	NormalSubcategoryFullBackup             = 24
+	NormalSubcategoryFamily                 = 25
+	NormalSubcategoryLedger                 = 26
+	NormalSubcategorySavingsGoal            = 27
 )
 
 // Error represents the specific error returned to user

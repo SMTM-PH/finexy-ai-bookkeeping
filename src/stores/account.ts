@@ -32,6 +32,7 @@ export const useAccountsStore = defineStore('accounts', () => {
     const allAccountsMap = ref<Record<string, Account>>({});
     const allCategorizedAccountsMap = ref<Record<number, CategorizedAccount>>({});
     const accountListStateInvalid = ref<boolean>(true);
+    const accountListLedgerId = ref<string>('0');
 
     const allPlainAccounts = computed<Account[]>(() => {
         const allAccountsList: Account[] = [];
@@ -355,6 +356,7 @@ export const useAccountsStore = defineStore('accounts', () => {
         allAccountsMap.value = {};
         allCategorizedAccountsMap.value = {};
         accountListStateInvalid.value = true;
+        accountListLedgerId.value = '0';
     }
 
     function getFirstShowingIds(showHidden: boolean): AccountShowingIds {
@@ -770,8 +772,8 @@ export const useAccountsStore = defineStore('accounts', () => {
         return false;
     }
 
-    function loadAllAccounts({ force }: { force: boolean }): Promise<Account[]> {
-        if (!force && !accountListStateInvalid.value) {
+    function loadAllAccounts({ force, ledgerId = '0' }: { force: boolean, ledgerId?: string }): Promise<Account[]> {
+        if (!force && !accountListStateInvalid.value && accountListLedgerId.value === ledgerId) {
             return new Promise((resolve) => {
                 resolve(allAccounts.value);
             });
@@ -779,7 +781,8 @@ export const useAccountsStore = defineStore('accounts', () => {
 
         return new Promise((resolve, reject) => {
             services.getAllAccounts({
-                visibleOnly: false
+                visibleOnly: false,
+                ledgerId
             }).then(response => {
                 const data = response.data;
 
@@ -793,13 +796,15 @@ export const useAccountsStore = defineStore('accounts', () => {
                 }
 
                 const accounts = Account.sortAccounts(Account.ofMulti(data.result), settingsStore.accountCategoryDisplayOrders);
+                const sameLedger = accountListLedgerId.value === ledgerId;
 
-                if (force && data.result && isEquals(allAccounts.value, accounts)) {
+                if (force && sameLedger && data.result && isEquals(allAccounts.value, accounts)) {
                     reject({ message: 'Account list is up to date', isUpToDate: true });
                     return;
                 }
 
                 loadAccountList(accounts);
+                accountListLedgerId.value = ledgerId;
 
                 resolve(accounts);
             }).catch(error => {
@@ -1044,6 +1049,27 @@ export const useAccountsStore = defineStore('accounts', () => {
         });
     }
 
+    function moveAccountToLedger({ account, targetLedgerId }: { account: Account, targetLedgerId: string }): Promise<Account[]> {
+        return new Promise((resolve, reject) => {
+            services.moveAccountToLedger({ id: account.id, targetLedgerId }).then(response => {
+                const data = response.data;
+                if (!data || !data.success || !data.result) {
+                    reject({ message: 'Unable to move this account to another ledger' });
+                    return;
+                }
+                const moved = Account.ofMulti(data.result);
+                removeAccountFromAccountList(account);
+                accountListStateInvalid.value = true;
+                resolve(moved);
+            }).catch(error => {
+                logger.error('failed to move account to another ledger', error);
+                if (error.response?.data?.errorMessage) reject({ error: error.response.data });
+                else if (!error.processed) reject({ message: 'Unable to move this account to another ledger' });
+                else reject(error);
+            });
+        });
+    }
+
     function deleteAccount({ account, beforeResolve }: { account: Account, beforeResolve?: BeforeResolveFunction }): Promise<boolean> {
         return new Promise((resolve, reject) => {
             services.deleteAccount({
@@ -1120,6 +1146,7 @@ export const useAccountsStore = defineStore('accounts', () => {
         allAccountsMap,
         allCategorizedAccountsMap,
         accountListStateInvalid,
+        accountListLedgerId,
         // computed states
         allPlainAccounts,
         allMixedPlainAccounts,
@@ -1148,6 +1175,7 @@ export const useAccountsStore = defineStore('accounts', () => {
         changeAccountDisplayOrder,
         updateAccountDisplayOrders,
         hideAccount,
+        moveAccountToLedger,
         deleteAccount,
         deleteSubAccount
     }

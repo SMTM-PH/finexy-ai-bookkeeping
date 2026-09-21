@@ -30,6 +30,7 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
     const allTransactionCategories = ref<Record<number, TransactionCategory[]>>({});
     const allTransactionCategoriesMap = ref<Record<string, TransactionCategory>>({});
     const transactionCategoryListStateInvalid = ref<boolean>(true);
+    const loadedLedgerId = ref<string>('0');
     let defaultCategoriesBackfillPromise: Promise<Record<number, TransactionCategory[]>> | null = null;
 
     const allAvailablePrimaryCategoriesCount = computed<number>(() => {
@@ -211,6 +212,7 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
         allTransactionCategories.value = {};
         allTransactionCategoriesMap.value = {};
         transactionCategoryListStateInvalid.value = true;
+        loadedLedgerId.value = '0';
         defaultCategoriesBackfillPromise = null;
     }
 
@@ -244,7 +246,9 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
         return defaultCategoriesBackfillPromise;
     }
 
-    function loadAllCategories({ force }: { force?: boolean }): Promise<Record<number, TransactionCategory[]>> {
+    function loadAllCategories({ force, ledgerId }: { force?: boolean, ledgerId?: string }): Promise<Record<number, TransactionCategory[]>> {
+        const requestedLedgerId = ledgerId || '0';
+        if (loadedLedgerId.value !== requestedLedgerId) force = true;
         if (defaultCategoriesBackfillPromise) {
             return defaultCategoriesBackfillPromise;
         }
@@ -256,7 +260,7 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
         }
 
         return new Promise((resolve, reject) => {
-            services.getAllTransactionCategories().then(response => {
+            services.getAllTransactionCategories(ledgerId).then(response => {
                 const data = response.data;
 
                 if (!data || !data.success || !data.result) {
@@ -287,7 +291,9 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
                     return;
                 }
 
-                const categoryTypesWithoutSelectableCategories = getCategoryTypesWithoutSelectableCategories(transactionCategories);
+                const categoryTypesWithoutSelectableCategories = requestedLedgerId === '0'
+                    ? getCategoryTypesWithoutSelectableCategories(transactionCategories)
+                    : [];
 
                 if (categoryTypesWithoutSelectableCategories.length > 0) {
                     backfillDefaultCategories(categoryTypesWithoutSelectableCategories).then(createdCategories => {
@@ -299,6 +305,7 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
                         }
 
                         loadTransactionCategoryList(transactionCategories);
+                        loadedLedgerId.value = requestedLedgerId;
                         resolve(transactionCategories);
                     }).catch(error => {
                         updateTransactionCategoryListInvalidState(true);
@@ -308,6 +315,7 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
                 }
 
                 loadTransactionCategoryList(transactionCategories);
+                loadedLedgerId.value = requestedLedgerId;
                 resolve(transactionCategories);
             }).catch(error => {
                 if (force) {

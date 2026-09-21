@@ -122,9 +122,22 @@ const (
 
 // Transaction represents transaction data stored in database
 type Transaction struct {
-	TransactionId        int64             `xorm:"PK"`
-	Uid                  int64             `xorm:"UNIQUE(UQE_transaction_uid_time) INDEX(IDX_transaction_uid_deleted_time) INDEX(IDX_transaction_uid_deleted_type_time) INDEX(IDX_transaction_uid_deleted_type_account_id_time) INDEX(IDX_transaction_uid_deleted_category_id_time) INDEX(IDX_transaction_uid_deleted_account_id_time) INDEX(IDX_transaction_uid_deleted_time_longitude_latitude) NOT NULL"`
-	Deleted              bool              `xorm:"INDEX(IDX_transaction_uid_deleted_time) INDEX(IDX_transaction_uid_deleted_type_time) INDEX(IDX_transaction_uid_deleted_type_account_id_time) INDEX(IDX_transaction_uid_deleted_category_id_time) INDEX(IDX_transaction_uid_deleted_account_id_time) INDEX(IDX_transaction_uid_deleted_time_longitude_latitude) NOT NULL"`
+	TransactionId int64 `xorm:"PK"`
+	Uid           int64 `xorm:"UNIQUE(UQE_transaction_uid_time) INDEX(IDX_transaction_uid_deleted_time) INDEX(IDX_transaction_uid_deleted_type_time) INDEX(IDX_transaction_uid_deleted_type_account_id_time) INDEX(IDX_transaction_uid_deleted_category_id_time) INDEX(IDX_transaction_uid_deleted_account_id_time) INDEX(IDX_transaction_uid_deleted_time_longitude_latitude) NOT NULL"`
+	Deleted       bool  `xorm:"INDEX(IDX_transaction_uid_deleted_time) INDEX(IDX_transaction_uid_deleted_type_time) INDEX(IDX_transaction_uid_deleted_type_account_id_time) INDEX(IDX_transaction_uid_deleted_category_id_time) INDEX(IDX_transaction_uid_deleted_account_id_time) INDEX(IDX_transaction_uid_deleted_time_longitude_latitude) NOT NULL"`
+	// LedgerId scopes the transaction to one ledger; zero means the user's
+	// default personal ledger. Family-ledger transactions carry the ledger id
+	// and use the family owner's uid as their Uid so every member observes the
+	// same shared rows through the ledger_id filter.
+	LedgerId int64 `xorm:"INDEX(IDX_transaction_ledger_id) NOT NULL DEFAULT 0"`
+	// RecorderUid is the member who recorded a family-ledger transaction;
+	// zero means the row's Uid itself (personal transactions).
+	RecorderUid int64 `xorm:"NOT NULL DEFAULT 0"`
+	// PayerUid is the member who actually paid; zero means the recorder.
+	PayerUid int64 `xorm:"NOT NULL DEFAULT 0"`
+	// SavingsGoalFundId links an immutable transfer to the fund movement that
+	// created it. Zero denotes an ordinary transaction.
+	SavingsGoalFundId    int64             `xorm:"INDEX(IDX_transaction_savings_goal_fund_id) NOT NULL DEFAULT 0"`
 	Type                 TransactionDbType `xorm:"INDEX(IDX_transaction_uid_deleted_type_time) INDEX(IDX_transaction_uid_deleted_type_account_id_time) NOT NULL"`
 	CategoryId           int64             `xorm:"INDEX(IDX_transaction_uid_deleted_category_id_time) NOT NULL"`
 	AccountId            int64             `xorm:"INDEX(IDX_transaction_uid_deleted_account_id_time) INDEX(IDX_transaction_uid_deleted_type_account_id_time) NOT NULL"`
@@ -160,11 +173,12 @@ type TransactionGeoLocationRequest struct {
 
 // TransactionCreateRequest represents all parameters of transaction creation request
 type TransactionCreateRequest struct {
+	LedgerId             int64                          `json:"ledgerId,string" binding:"omitempty,min=1"`
 	Type                 TransactionType                `json:"type" binding:"required"`
 	CategoryId           int64                          `json:"categoryId,string"`
 	Time                 int64                          `json:"time" binding:"required,min=1"`
 	UtcOffset            int16                          `json:"utcOffset" binding:"min=-720,max=840"`
-	SourceAccountId      int64                          `json:"sourceAccountId,string" binding:"required,min=1"`
+	SourceAccountId      int64                          `json:"sourceAccountId,string" binding:"min=0"`
 	DestinationAccountId int64                          `json:"destinationAccountId,string" binding:"min=0"`
 	SourceAmount         int64                          `json:"sourceAmount" binding:"min=-9999999999999,max=9999999999999"`
 	DestinationAmount    int64                          `json:"destinationAmount" binding:"min=-9999999999999,max=9999999999999"`
@@ -178,6 +192,7 @@ type TransactionCreateRequest struct {
 
 // TransactionModifyRequest represents all parameters of transaction modification request
 type TransactionModifyRequest struct {
+	LedgerId             int64                          `json:"ledgerId,string" binding:"omitempty,min=1"`
 	Id                   int64                          `json:"id,string" binding:"required,min=1"`
 	Type                 TransactionType                `json:"type" binding:"required"`
 	CategoryId           int64                          `json:"categoryId,string"`
@@ -212,6 +227,7 @@ type TransactionTagFilter struct {
 
 // TransactionCountRequest represents transaction count request
 type TransactionCountRequest struct {
+	LedgerId         int64           `form:"ledgerId,string" binding:"omitempty,min=1"`
 	Type             TransactionType `form:"type" binding:"min=0,max=4"`
 	CategoryIds      string          `form:"category_ids"`
 	AccountIds       string          `form:"account_ids"`
@@ -226,6 +242,7 @@ type TransactionCountRequest struct {
 
 // TransactionListByMaxTimeRequest represents all parameters of transaction listing by max time request
 type TransactionListByMaxTimeRequest struct {
+	LedgerId         int64           `form:"ledgerId,string" binding:"omitempty,min=1"`
 	Type             TransactionType `form:"type" binding:"min=0,max=4"`
 	CategoryIds      string          `form:"category_ids"`
 	AccountIds       string          `form:"account_ids"`
@@ -247,6 +264,7 @@ type TransactionListByMaxTimeRequest struct {
 
 // TransactionListInMonthByPageRequest represents all parameters of transaction listing by month request
 type TransactionListInMonthByPageRequest struct {
+	LedgerId         int64           `form:"ledgerId,string" binding:"omitempty,min=1"`
 	Year             int32           `form:"year" binding:"required,min=1"`
 	Month            int32           `form:"month" binding:"required,min=1"`
 	Type             TransactionType `form:"type" binding:"min=0,max=4"`
@@ -290,6 +308,7 @@ type TransactionReconciliationStatementRequest struct {
 
 // TransactionStatisticRequest represents all parameters of transaction statistic request
 type TransactionStatisticRequest struct {
+	LedgerId               int64          `form:"ledgerId,string" binding:"omitempty,min=1"`
 	StartTime              int64          `form:"start_time" binding:"min=0"`
 	EndTime                int64          `form:"end_time" binding:"min=0"`
 	TagFilter              string         `form:"tag_filter" binding:"validTagFilter"`
@@ -301,6 +320,7 @@ type TransactionStatisticRequest struct {
 // TransactionStatisticTrendsRequest represents all parameters of transaction statistic trends request
 type TransactionStatisticTrendsRequest struct {
 	YearMonthRangeRequest
+	LedgerId               int64          `form:"ledgerId,string" binding:"omitempty,min=1"`
 	TagFilter              string         `form:"tag_filter" binding:"validTagFilter"`
 	Keyword                string         `form:"keyword"`
 	MatchMode              core.MatchMode `form:"match_mode" binding:"min=0,max=1"`
@@ -330,6 +350,7 @@ type TransactionAmountsRequestItem struct {
 
 // TransactionGetRequest represents all parameters of transaction getting request
 type TransactionGetRequest struct {
+	LedgerId     int64 `form:"ledgerId,string" binding:"omitempty,min=1"`
 	Id           int64 `form:"id,string" binding:"required,min=1"`
 	WithPictures bool  `form:"with_pictures"`
 	TrimAccount  bool  `form:"trim_account"`
@@ -375,7 +396,8 @@ type TransactionMoveBetweenAccountsRequest struct {
 
 // TransactionDeleteRequest represents all parameters of transaction deleting request
 type TransactionDeleteRequest struct {
-	Id int64 `json:"id,string" binding:"required,min=1"`
+	LedgerId int64 `json:"ledgerId,string" binding:"omitempty,min=1"`
+	Id       int64 `json:"id,string" binding:"required,min=1"`
 }
 
 // TransactionBatchDeleteRequest represents all parameters of transaction batch deleting request
@@ -399,6 +421,10 @@ type TransactionGeoLocationResponse struct {
 // TransactionInfoResponse represents a view-object of transaction
 type TransactionInfoResponse struct {
 	Id                   int64                                    `json:"id,string"`
+	LedgerId             int64                                    `json:"ledgerId,string"`
+	RecorderUid          int64                                    `json:"recorderUid,string,omitempty"`
+	PayerUid             int64                                    `json:"payerUid,string,omitempty"`
+	SavingsGoalFundId    int64                                    `json:"savingsGoalFundId,string,omitempty"`
 	TimeSequenceId       int64                                    `json:"timeSequenceId,string"`
 	Type                 TransactionType                          `json:"type"`
 	CategoryId           int64                                    `json:"categoryId,string"`
@@ -565,10 +591,13 @@ func (t *Transaction) IsEditable(currentUser *User, clientTimezone *time.Locatio
 		return false
 	}
 
-	if t.Type == TRANSACTION_DB_TYPE_TRANSFER_OUT {
+	if t.Type == TRANSACTION_DB_TYPE_TRANSFER_OUT && t.RelatedAccountId > 0 {
 		if relatedAccount == nil || relatedAccount.Hidden {
 			return false
 		}
+	}
+	if (t.Type == TRANSACTION_DB_TYPE_TRANSFER_OUT || t.Type == TRANSACTION_DB_TYPE_TRANSFER_IN) && t.RelatedAccountId == 0 {
+		return false
 	}
 
 	if currentUser == nil || !currentUser.CanEditTransactionByTransactionTime(t.TransactionTime, clientTimezone, account, relatedAccount) {
@@ -614,6 +643,10 @@ func (t *Transaction) ToTransactionInfoResponse(tagIds []int64, editable bool) *
 
 	return &TransactionInfoResponse{
 		Id:                   t.TransactionId,
+		LedgerId:             t.LedgerId,
+		RecorderUid:          t.RecorderUid,
+		PayerUid:             t.PayerUid,
+		SavingsGoalFundId:    t.SavingsGoalFundId,
 		TimeSequenceId:       t.TransactionTime,
 		Type:                 transactionType,
 		CategoryId:           t.CategoryId,

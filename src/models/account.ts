@@ -20,6 +20,7 @@ export class Account implements AccountInfoResponse {
     public creditCardStatementDate?: number;
     public displayOrder: number;
     public visible: boolean;
+    public ledgerId: string = '0';
     public subAccounts?: Account[];
 
     private readonly _isAsset?: boolean;
@@ -135,6 +136,7 @@ export class Account implements AccountInfoResponse {
         this.comment = other.comment;
         this.creditCardStatementDate = other.creditCardStatementDate;
         this.visible = other.visible;
+        this.ledgerId = other.ledgerId;
     }
 
     public setSuitableIcon(oldCategory: number, newCategory: number): void {
@@ -376,7 +378,7 @@ export class Account implements AccountInfoResponse {
     }
 
     public clone(): Account {
-        return new Account(
+        const account = new Account(
             this.id,
             this.name,
             this.parentId,
@@ -395,6 +397,8 @@ export class Account implements AccountInfoResponse {
             this.isAsset,
             this.isLiability,
             typeof(this.subAccounts) !== 'undefined' ? Account.cloneAccounts(this.subAccounts) : undefined);
+        account.ledgerId = this.ledgerId;
+        return account;
     }
 
     public createNewSubAccount(currency: string, balanceTime: number): Account {
@@ -438,7 +442,7 @@ export class Account implements AccountInfoResponse {
     }
 
     public static of(accountResponse: AccountInfoResponse): Account {
-        return new Account(
+        const account = new Account(
             accountResponse.id,
             accountResponse.name,
             accountResponse.parentId,
@@ -458,6 +462,8 @@ export class Account implements AccountInfoResponse {
             accountResponse.isLiability,
             accountResponse.subAccounts ? Account.ofMulti(accountResponse.subAccounts) : undefined
         );
+        account.ledgerId = accountResponse.ledgerId || '0';
+        return account;
     }
 
     public static ofMulti(accountResponses: AccountInfoResponse[]): Account[] {
@@ -575,6 +581,7 @@ export class AccountWithDisplayBalance extends Account {
         );
 
         this.displayBalance = displayBalance;
+        this.ledgerId = account.ledgerId;
     }
 
     public static fromAccount(account: Account, displayBalance: string): AccountWithDisplayBalance {
@@ -636,6 +643,7 @@ export interface AccountInfoResponse {
     readonly isAsset?: boolean;
     readonly isLiability?: boolean;
     readonly hidden: boolean;
+    readonly ledgerId?: string;
     readonly subAccounts?: AccountInfoResponse[];
 }
 
@@ -655,6 +663,11 @@ export interface AccountNewDisplayOrderRequest {
 
 export interface AccountDeleteRequest {
     readonly id: string;
+}
+
+export interface AccountMoveLedgerRequest {
+    readonly id: string;
+    readonly targetLedgerId: string;
 }
 
 export interface AccountBalance {

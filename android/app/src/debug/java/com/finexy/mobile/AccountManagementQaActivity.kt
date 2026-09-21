@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateListOf
 import com.finexy.mobile.data.AccountDraft
 import com.finexy.mobile.data.AccountEntity
 import com.finexy.mobile.data.SecureStore
+import com.finexy.mobile.data.LedgerEntity
 
 class AccountManagementQaActivity : PrivacyActivity() {
     val accounts = mutableStateListOf(
@@ -22,6 +23,7 @@ class AccountManagementQaActivity : PrivacyActivity() {
     var hiddenChange: Pair<Long, Boolean>? = null
     var deletedId: Long? = null
     var movedIds: List<Long> = emptyList()
+    var movedLedger: Pair<Long, Long>? = null
 
     override fun privacyStore() = SecureStore(applicationContext, "account-management-ui-fixture")
 
@@ -29,11 +31,14 @@ class AccountManagementQaActivity : PrivacyActivity() {
         super.onCreate(savedInstanceState)
         setContent { FinexyTheme(true) { Scaffold(containerColor = CanvasBlack) { padding ->
             AccountsScreen(padding, emptyList(), accounts = accounts, accountActionsEnabled = true,
+                ledgers = listOf(LedgerEntity(90, 1, LedgerEntity.TYPE_FAMILY, 80, "温暖小家")),
+                ledgerMigrationEnabled = true,
                 onCreate = { created = it },
                 onModify = { account, draft -> modified = Triple(account.id, draft.name, draft.comment); modifiedDraft = draft },
                 onHide = { account, hidden -> hiddenChange = account.id to hidden },
                 onDelete = { deletedId = it.id },
-                onMove = { movedIds = it.map(AccountEntity::id) })
+                onMove = { movedIds = it.map(AccountEntity::id) },
+                onMoveLedger = { account, ledgerId -> movedLedger = account.id to ledgerId })
         } } }
     }
 

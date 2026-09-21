@@ -154,6 +154,22 @@ const router = createRouter({
                     meta: { finexy: true }
                 },
                 {
+                    path: '/savings/goals',
+                    component: FinexyWorkspacePage,
+                    beforeEnter: checkLogin,
+                    meta: { finexy: true }
+                },
+                {
+                    path: '/ledger/manage',
+                    component: FinexyWorkspacePage,
+                    beforeEnter: checkLogin,
+                    meta: { finexy: true }
+                },
+                {
+                    path: '/family/manage',
+                    redirect: '/ledger/manage'
+                },
+                {
                     path: '/category/list',
                     component: FinexyWorkspacePage,
                     beforeEnter: checkLogin,
