@@ -3,7 +3,7 @@ name: Publish main Docker image
 on:
   workflow_dispatch:
   push:
-    branches: [codex/family-web-prototype]
+    branches: [main]
     paths:
       - .github/workflows/publish-main-image-temporary.yml
       - .dockerignore
@@ -40,7 +40,9 @@ jobs:
           context: .
           load: true
           platforms: linux/amd64
-          tags: ph97/finexy-bookkeeping:family-preview-test
+          tags: |
+            ph97/finexy-bookkeeping:family-preview-test
+            ph97/finexy-bookkeeping:1.9.0-amd64
           build-args: |
             RELEASE_BUILD=true
             SKIP_TESTS=true
@@ -60,4 +62,5 @@ jobs:
         shell: bash
         run: |
           docker tag ph97/finexy-bookkeeping:family-preview-test ph97/finexy-bookkeeping:latest-amd64
+          docker push ph97/finexy-bookkeeping:1.9.0-amd64
           docker push ph97/finexy-bookkeeping:latest-amd64
