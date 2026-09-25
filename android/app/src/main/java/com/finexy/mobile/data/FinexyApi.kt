@@ -541,6 +541,17 @@ class FinexyApi(private val store: SecureStore) {
         return RecognizedTransaction.from(JSONObject(raw).getJSONObject("result"))
     }
 
+    /** The image is sent directly to the configured vision-capable model and is never retained. */
+    suspend fun recognizeReceiptImage(image: ByteArray, fileName: String, contentType: String): RecognizedTransaction {
+        require(image.isNotEmpty()) { "票据图片不能为空" }
+        require(contentType.startsWith("image/")) { "请选择支持的图片文件" }
+        val body = MultipartBody.Builder().setType(MultipartBody.FORM)
+            .addFormDataPart("image", fileName, image.toRequestBody(contentType.toMediaType()))
+            .build()
+        val raw = requestMultipart("v1/llm/transactions/recognize_receipt_image.json", body)
+        return RecognizedTransaction.from(JSONObject(raw).getJSONObject("result"))
+    }
+
     /** The image is forwarded to the LAN OCR sidecar and is never retained. */
     suspend fun recognizeLocalOCR(image: ByteArray, fileName: String, contentType: String): LocalOCRResult {
         require(image.isNotEmpty()) { "票据图片不能为空" }
@@ -889,7 +900,7 @@ class FinexyApi(private val store: SecureStore) {
                 if (!response.isSuccessful) throw ApiException(response.code, when (response.code) {
                     401 -> "会话已失效，请重新登录"
                     403 -> "服务器未允许识别，请检查功能配置"
-                    404 -> "服务器未开放本地 OCR 功能"
+                    404 -> "服务器未开放图片识别功能"
                     else -> "识别请求失败（HTTP ${response.code}）"
                 }, serverCode)
                 val envelope = JSONObject(raw)

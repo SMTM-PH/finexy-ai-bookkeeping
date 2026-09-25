@@ -22,7 +22,7 @@ class ReceiptImageEditorTest {
 
     @Test fun encodedReceiptIsAValidJpeg() {
         val source = Bitmap.createBitmap(120, 160, Bitmap.Config.ARGB_8888)
-        val bytes = encodeReceiptForOCR(source, ReceiptCrop.Default)
+        val bytes = encodeReceiptForRecognition(source, ReceiptCrop.Default)
         assertTrue(bytes.size > 100)
         assertEquals(0xff, bytes[0].toInt() and 0xff)
         assertEquals(0xd8, bytes[1].toInt() and 0xff)

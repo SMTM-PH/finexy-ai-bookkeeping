@@ -42,7 +42,7 @@ jobs:
           platforms: linux/amd64
           tags: |
             ph97/finexy-bookkeeping:family-preview-test
-            ph97/finexy-bookkeeping:1.9.0-amd64
+            ph97/finexy-bookkeeping:1.9.1-amd64
           build-args: |
             RELEASE_BUILD=true
             SKIP_TESTS=true
@@ -62,5 +62,5 @@ jobs:
         shell: bash
         run: |
           docker tag ph97/finexy-bookkeeping:family-preview-test ph97/finexy-bookkeeping:latest-amd64
-          docker push ph97/finexy-bookkeeping:1.9.0-amd64
+          docker push ph97/finexy-bookkeeping:1.9.1-amd64
           docker push ph97/finexy-bookkeeping:latest-amd64

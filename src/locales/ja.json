@@ -2017,6 +2017,7 @@
     "Transaction": "取引",
     "Transactions": "取引",
     "Transaction Pictures": "取引の写真",
+    "Pictures here are transaction attachments and do not trigger AI recognition.": "ここに追加した画像は取引の添付ファイルとして保存され、AI認識は実行されません。",
     "Pictures": "写真",
     "Add Transaction": "取引の追加",
     "Edit Transaction": "取引の編集",

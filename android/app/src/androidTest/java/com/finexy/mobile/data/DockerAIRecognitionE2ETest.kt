@@ -22,7 +22,7 @@ import java.util.UUID
 
 @RunWith(AndroidJUnit4::class)
 class DockerAIRecognitionE2ETest {
-    @Test fun ocrDeepSeekReviewTransactionAndResolutionLifecycle() = runBlocking {
+    @Test fun visionModelReviewTransactionAndResolutionLifecycle() = runBlocking {
         val url = InstrumentationRegistry.getArguments().getString("finexy.e2e.url")
         assumeTrue("Use only an isolated disposable Docker server", !url.isNullOrBlank())
         val context = InstrumentationRegistry.getInstrumentation().targetContext
@@ -38,26 +38,24 @@ class DockerAIRecognitionE2ETest {
             val api = FinexyApi(store)
             val repository = TransactionRepository(context, database, importLegacy = false)
 
-            val ocr = api.recognizeLocalOCR(syntheticReceipt(), "finexy-receipt.png", "image/png")
-            val normalizedOCR = ocr.text.uppercase().replace(" ", "")
-            assertTrue(normalizedOCR.contains("FINEXY"))
-            assertTrue(normalizedOCR.contains("36.50") || normalizedOCR.contains("3650"))
-            assertTrue(ocr.confidence >= 0.5)
-
             val account = api.createAccount(AccountDraft("AI Test Wallet", 1, "CNY", 0)).single()
             SyncEngine(api, repository, autoUpdateExchangeRates = false).sync()
             val expenseCategory = repository.observeCategories().first().first {
                 it.type == 2 && it.parentId > 0 && !it.hidden
             }
 
-            val source = "2026-09-08 支出 36.50 元；账户 AI Test Wallet；分类 ${expenseCategory.name}；备注 D5 E2E 午餐"
-            val recognized = api.recognizeTransactionText(source)
+            val source = "FINEXY TEST RECEIPT · LUNCH · CNY 36.50"
+            val recognized = api.recognizeReceiptImage(
+                syntheticReceipt(account.name, expenseCategory.name),
+                "finexy-receipt.png",
+                "image/png"
+            )
             assertEquals(TransactionRepository.TYPE_EXPENSE, recognized.type)
             assertEquals(3650L, recognized.sourceAmountMinor)
             assertEquals(account.id, recognized.sourceAccountId)
             assertEquals(expenseCategory.id, recognized.categoryId)
 
-            val remoteReview = api.createAIReviewItem(AIReviewItemEntity.SOURCE_TEXT, source, recognized)
+            val remoteReview = api.createAIReviewItem(AIReviewItemEntity.SOURCE_IMAGE, source, recognized)
             assertEquals(remoteReview.id, api.listAIReviewItems().single().id)
             repository.cacheAIReviewItem(remoteReview)
             assertEquals(remoteReview.id, repository.observeAIReviewItems().first().single().id)
@@ -94,7 +92,7 @@ class DockerAIRecognitionE2ETest {
         }
     }
 
-    private fun syntheticReceipt(): ByteArray {
+    private fun syntheticReceipt(accountName: String, categoryName: String): ByteArray {
         val bitmap = Bitmap.createBitmap(1400, 900, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         canvas.drawColor(Color.WHITE)
@@ -103,7 +101,13 @@ class DockerAIRecognitionE2ETest {
             textSize = 76f
             typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
         }
-        listOf("FINEXY TEST RECEIPT", "LUNCH", "DATE 2026-09-08", "TOTAL CNY 36.50").forEachIndexed { index, line ->
+        listOf(
+            "FINEXY TEST RECEIPT",
+            "DATE 2026-09-08",
+            "TOTAL CNY 36.50",
+            "ACCOUNT $accountName",
+            "CATEGORY $categoryName"
+        ).forEachIndexed { index, line ->
             canvas.drawText(line, 90f, 170f + index * 170f, paint)
         }
         return ByteArrayOutputStream().use { output ->

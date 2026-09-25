@@ -2017,6 +2017,7 @@
     "Transaction": "Transakcija",
     "Transactions": "Transakcije",
     "Transaction Pictures": "Slike transakcij",
+    "Pictures here are transaction attachments and do not trigger AI recognition.": "Slike tukaj so priloge transakcije in ne sprožijo prepoznavanja z UI.",
     "Pictures": "Slike",
     "Add Transaction": "Dodaj transakcijo",
     "Edit Transaction": "Uredi transakcijo",

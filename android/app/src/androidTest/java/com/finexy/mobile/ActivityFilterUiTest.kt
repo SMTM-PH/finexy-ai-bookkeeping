@@ -25,8 +25,8 @@ class ActivityFilterUiTest {
 
     @Test fun globalLedgerSwitcherExposesFamilyReadOnlyState() {
         rule.onNodeWithContentDescription("切换到账本：温暖小家").performClick()
-        rule.onNodeWithText("家庭账本 · 只读").assertIsDisplayed()
-        rule.onNodeWithText("家庭账本当前只读。").assertIsDisplayed()
+        rule.onNodeWithText("已切换账本").assertIsDisplayed()
+        rule.onNodeWithText("可新增流水；既有流水编辑正在接入。").assertIsDisplayed()
         rule.onNodeWithText("工作午餐").performScrollTo().performClick()
         rule.onNodeWithText("删除这笔流水？").assertDoesNotExist()
         chip("个人账本").performClick()

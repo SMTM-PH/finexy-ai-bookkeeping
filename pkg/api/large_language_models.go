@@ -149,10 +149,6 @@ func (a *LargeLanguageModelsApi) RecognizeTransactionTextHandler(c *core.WebCont
 
 // RecognizeReceiptImageHandler returns the recognized receipt image result
 func (a *LargeLanguageModelsApi) RecognizeReceiptImageHandler(c *core.WebContext) (any, *errs.Error) {
-	if a.CurrentConfig().ReceiptImageRecognitionLLMConfig == nil || a.CurrentConfig().ReceiptImageRecognitionLLMConfig.LLMProvider == "" || !a.CurrentConfig().TransactionFromAIImageRecognition {
-		return nil, errs.ErrLargeLanguageModelProviderNotEnabled
-	}
-
 	clientTimezone, err := c.GetClientTimezone()
 
 	if err != nil {
@@ -169,10 +165,6 @@ func (a *LargeLanguageModelsApi) RecognizeReceiptImageHandler(c *core.WebContext
 		}
 
 		return false, errs.ErrUserNotFound
-	}
-
-	if user.FeatureRestriction.Contains(core.USER_FEATURE_RESTRICTION_TYPE_CREATE_TRANSACTION_FROM_AI_IMAGE_RECOGNITION) {
-		return false, errs.ErrNotPermittedToPerformThisAction
 	}
 
 	form, err := c.MultipartForm()
@@ -223,64 +215,12 @@ func (a *LargeLanguageModelsApi) RecognizeReceiptImageHandler(c *core.WebContext
 		return nil, errs.ErrOperationFailed
 	}
 
-	accountNames, accountMap, incomeCategoryNames, expenseCategoryNames, transferCategoryNames, incomeCategoryMap, expenseCategoryMap, transferCategoryMap, tagNames, tagMap, err := a.getUserEssentialData(c, uid)
-
-	if err != nil {
-		return nil, errs.Or(err, errs.ErrOperationFailed)
+	response, _, recognizeErr := services.AIRecognition.RecognizeReceiptImage(c, user, a.CurrentConfig(), imageData, contentType, clientTimezone)
+	if recognizeErr != nil {
+		return nil, errs.Or(recognizeErr, errs.ErrOperationFailed)
 	}
 
-	systemPrompt, err := templates.GetTemplate(templates.SYSTEM_PROMPT_RECEIPT_IMAGE_RECOGNITION)
-
-	if err != nil {
-		log.Errorf(c, "[large_language_models.RecognizeReceiptImageHandler] failed to get system prompt template for user \"uid:%d\", because %s", uid, err.Error())
-		return nil, errs.Or(err, errs.ErrOperationFailed)
-	}
-
-	systemPromptParams := map[string]any{
-		"CurrentDateTime":          utils.FormatUnixTimeToLongDateTime(time.Now().Unix(), clientTimezone),
-		"AllExpenseCategoryNames":  strings.Join(expenseCategoryNames, "\n"),
-		"AllIncomeCategoryNames":   strings.Join(incomeCategoryNames, "\n"),
-		"AllTransferCategoryNames": strings.Join(transferCategoryNames, "\n"),
-		"AllAccountNames":          strings.Join(accountNames, "\n"),
-		"AllTagNames":              strings.Join(tagNames, "\n"),
-		"AdditionalNotes":          "",
-	}
-
-	var bodyBuffer bytes.Buffer
-	err = systemPrompt.Execute(&bodyBuffer, systemPromptParams)
-
-	if err != nil {
-		log.Errorf(c, "[large_language_models.RecognizeReceiptImageHandler] failed to get final system prompt from template for user \"uid:%d\", because %s", uid, err.Error())
-		return nil, errs.Or(err, errs.ErrOperationFailed)
-	}
-
-	llmRequest := &data.LargeLanguageModelRequest{
-		Stream:                false,
-		SystemPrompt:          strings.ReplaceAll(bodyBuffer.String(), "\r\n", "\n"),
-		UserPrompt:            imageData,
-		UserPromptType:        data.LARGE_LANGUAGE_MODEL_REQUEST_PROMPT_TYPE_IMAGE_URL,
-		UserPromptContentType: contentType,
-	}
-
-	llmResponse, err := llm.Container.GetJsonResponseByReceiptImageRecognitionModel(c, c.GetCurrentUid(), a.CurrentConfig(), llmRequest)
-
-	if err != nil {
-		log.Errorf(c, "[large_language_models.RecognizeReceiptImageHandler] failed to get llm response user \"uid:%d\", because %s", uid, err.Error())
-		return nil, errs.Or(err, errs.ErrOperationFailed)
-	}
-
-	if llmResponse == nil || len(llmResponse.Content) == 0 || strings.HasPrefix(llmResponse.Content, "{}") {
-		return nil, errs.ErrNoTransactionInformation
-	}
-
-	var result *models.RecognizedTransactionResult
-
-	if err := json.Unmarshal([]byte(llmResponse.Content), &result); err != nil {
-		log.Errorf(c, "[large_language_models.RecognizeReceiptImageHandler] failed to unmarshal recognized receipt image result from llm response \"%s\" for user \"uid:%d\", because %s", llmResponse.Content, uid, err.Error())
-		return nil, errs.Or(err, errs.ErrOperationFailed)
-	}
-
-	return a.parseRecognizedTransactionResponse(c, uid, clientTimezone, result, accountMap, expenseCategoryMap, incomeCategoryMap, transferCategoryMap, tagMap)
+	return response, nil
 }
 
 func (a *LargeLanguageModelsApi) getUserEssentialData(c *core.WebContext, uid int64) ([]string, map[string]*models.Account, []string, []string, []string, map[string]*models.TransactionCategory, map[string]*models.TransactionCategory, map[string]*models.TransactionCategory, []string, map[string]*models.TransactionTag, error) {

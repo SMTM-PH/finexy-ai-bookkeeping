@@ -265,7 +265,7 @@ internal fun cropReceiptBitmap(source: Bitmap, crop: ReceiptCrop): Bitmap {
     return Bitmap.createBitmap(source, left, top, right - left, bottom - top)
 }
 
-internal fun encodeReceiptForOCR(source: Bitmap, crop: ReceiptCrop): ByteArray {
+internal fun encodeReceiptForRecognition(source: Bitmap, crop: ReceiptCrop): ByteArray {
     val cropped = cropReceiptBitmap(source, crop)
     return ByteArrayOutputStream().use { output ->
         check(cropped.compress(Bitmap.CompressFormat.JPEG, 90, output)) { "无法生成识别图片" }

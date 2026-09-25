@@ -77,6 +77,7 @@ func InitializeMCPHandlers(config *settings.Config) error {
 	registerMCPTextContentToolHandler(container, MCPQueryAllTransactionCategoriesToolHandler)
 	registerMCPTextContentToolHandler(container, MCPQueryAllTransactionTagsToolHandler)
 	registerMCPTextContentToolHandler(container, MCPQueryLatestExchangeRatesToolHandler)
+	registerMCPTextContentToolHandler(container, MCPRecognizeReceiptImageToolHandler)
 
 	Container = container
 	return nil
