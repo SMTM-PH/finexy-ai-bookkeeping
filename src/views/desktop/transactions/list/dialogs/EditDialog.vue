@@ -4,13 +4,21 @@
               :persistent="isTransactionModified || recognizing" v-model="showState">
         <v-card class="transaction-edit-card pa-sm-1 pa-md-2">
             <template #title>
-                <div class="d-flex align-center justify-center">
+                <div class="transaction-edit-title d-flex align-center justify-center">
                     <div class="d-flex align-center">
                         <h4 class="text-h4">{{ tt(title) }}</h4>
                         <v-progress-circular indeterminate size="22" class="ms-2" v-if="loading"></v-progress-circular>
                     </div>
                     <v-spacer/>
                     <small class="ms-2 text-truncate" v-if="recognizing">{{ tt('AI can make mistakes. Check important info.') }}</small>
+                    <v-btn class="transaction-ai-image-action ms-2"
+                           color="primary" variant="tonal"
+                           :prepend-icon="mdiMagicStaff"
+                           :disabled="loading || submitting || recognizing"
+                           v-if="mode !== TransactionEditPageMode.View && type === TransactionEditPageType.Transaction && activeTab === 'basicInfo' && isTransactionFromAIImageRecognitionEnabled()"
+                           @click="recognizeFromImage">
+                        {{ tt('AI Image Recognition') }}
+                    </v-btn>
                     <v-btn density="comfortable" color="default" variant="text" class="ms-2" :icon="true"
                            :aria-label="tt('AI Clipboard Text Recognition')"
                            :disabled="loading || submitting || recognizing"
@@ -400,6 +408,15 @@
                     </v-window-item>
                     <v-window-item value="pictures">
                         <v-row class="transaction-pictures align-content-start" :class="{ 'readonly': submitting || uploadingPicture || removingPictureId }">
+                            <v-col cols="12">
+                                <div class="transaction-picture-note d-flex align-center ga-3">
+                                    <v-icon :icon="mdiImagePlusOutline" size="26" />
+                                    <div>
+                                        <div class="text-subtitle-1 font-weight-medium">{{ tt('Transaction Pictures') }}</div>
+                                        <div class="text-body-2 text-medium-emphasis">{{ tt('Pictures here are transaction attachments and do not trigger AI recognition.') }}</div>
+                                    </div>
+                                </div>
+                            </v-col>
                             <v-col :key="picIdx" cols="6" md="3" v-for="(pictureInfo, picIdx) in transaction.pictures">
                                 <v-avatar rounded="lg" variant="tonal" size="160"
                                           class="cursor-pointer transaction-picture"
@@ -424,14 +441,18 @@
                                 </v-avatar>
                             </v-col>
                             <v-col cols="6" md="3" v-if="canAddTransactionPicture">
-                                <v-avatar rounded="lg" variant="tonal" size="160"
-                                          class="transaction-picture transaction-picture-add"
-                                          :class="{ 'enabled': !submitting, 'cursor-pointer': !submitting }"
-                                          color="rgba(0,0,0,0)" @click="showOpenPictureDialog">
-                                    <v-tooltip activator="parent" v-if="!submitting">{{ tt('Add Picture') }}</v-tooltip>
-                                    <v-icon class="transaction-picture-add-icon" size="56" :icon="mdiImagePlusOutline" v-if="!uploadingPicture"/>
+                                <button type="button"
+                                        class="transaction-picture transaction-picture-add"
+                                        :disabled="submitting"
+                                        :aria-label="tt('Add Picture')"
+                                        @click="showOpenPictureDialog">
+                                    <div class="d-flex flex-column align-center ga-2" v-if="!uploadingPicture">
+                                        <v-icon class="transaction-picture-add-icon" size="44" :icon="mdiImagePlusOutline" />
+                                        <span class="text-body-1 font-weight-medium">{{ tt('Add Picture') }}</span>
+                                        <small class="text-medium-emphasis">{{ tt('Transaction Pictures') }}</small>
+                                    </div>
                                     <v-progress-circular color="grey-500" indeterminate size="48" v-if="uploadingPicture"></v-progress-circular>
-                                </v-avatar>
+                                </button>
                             </v-col>
                         </v-row>
                     </v-window-item>
@@ -525,6 +546,7 @@
         </v-card>
     </v-dialog>
 
+    <a-i-image-recognition-dialog ref="aiImageRecognitionDialog" />
     <confirm-dialog ref="confirmDialog"/>
     <snack-bar ref="snackbar" />
     <input ref="pictureInput" type="file" style="display: none" :accept="SUPPORTED_IMAGE_EXTENSIONS" @change="onUploadPicture($event)" />
@@ -534,6 +556,7 @@
 import MapView from '@/components/common/MapView.vue';
 import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
+import AIImageRecognitionDialog from '@/views/desktop/transactions/list/dialogs/AIImageRecognitionDialog.vue';
 
 import { ref, computed, useTemplateRef, watch, nextTick } from 'vue';
 
@@ -583,6 +606,7 @@ import {
 import { type SetTransactionOptions } from '@/lib/transaction.ts';
 import {
     isTransactionFromAITextRecognitionEnabled,
+    isTransactionFromAIImageRecognitionEnabled,
     isTransactionPicturesEnabled,
     getMapProvider
 } from '@/lib/server_settings.ts';
@@ -635,6 +659,7 @@ export interface TransactionEditFailure {
 type MapViewType = InstanceType<typeof MapView>;
 type ConfirmDialogType = InstanceType<typeof ConfirmDialog>;
 type SnackBarType = InstanceType<typeof SnackBar>;
+type AIImageRecognitionDialogType = InstanceType<typeof AIImageRecognitionDialog>;
 
 const props = defineProps<{
     type: TransactionEditPageType;
@@ -726,6 +751,7 @@ const map = useTemplateRef<MapViewType>('map');
 const confirmDialog = useTemplateRef<ConfirmDialogType>('confirmDialog');
 const snackbar = useTemplateRef<SnackBarType>('snackbar');
 const pictureInput = useTemplateRef<HTMLInputElement>('pictureInput');
+const aiImageRecognitionDialog = useTemplateRef<AIImageRecognitionDialogType>('aiImageRecognitionDialog');
 
 const showState = ref<boolean>(false);
 type TransferDirection = 'internal' | 'out' | 'in';
@@ -1118,6 +1144,23 @@ function recognizeFromClipboard(): void {
     });
 }
 
+function recognizeFromImage(): void {
+    if (recognizing.value || loading.value || submitting.value) {
+        return;
+    }
+
+    aiImageRecognitionDialog.value?.open().then(result => {
+        lastRecognizedTransaction.value = result.response;
+        updateTransactionModelFromRecognizedResponse(result.response);
+
+        if (settingsStore.appSettings.autoUploadTransactionPictureForAIRecognition && canAddTransactionPicture.value) {
+            uploadPicture(result.imageFile);
+        }
+    }).catch(() => {
+        // Closing the recognition dialog is an expected user action.
+    });
+}
+
 function duplicate(withTime?: boolean, withGeoLocation?: boolean): void {
     if (props.type !== TransactionEditPageType.Transaction || mode.value !== TransactionEditPageMode.View) {
         return;
@@ -1430,6 +1473,19 @@ defineExpose({
     border-bottom: 1px solid rgba(var(--v-border-color), .1);
 }
 
+.transaction-ai-image-action {
+    min-height: 44px;
+    white-space: nowrap;
+}
+
+.transaction-picture-note {
+    min-height: 64px;
+    padding: 12px 14px;
+    border: 1px solid rgba(var(--v-border-color), .14);
+    border-radius: 12px;
+    background: rgba(var(--v-theme-surface-variant), .42);
+}
+
 .transaction-edit-body {
     min-height: 0;
     padding-top: 14px !important;
@@ -1534,22 +1590,50 @@ defineExpose({
 }
 
 .transaction-picture-add {
+    display: inline-flex;
+    width: 160px;
+    height: 160px;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
     border: 2px dashed rgba(var(--v-theme-grey-500));
+    border-radius: 12px;
+    color: rgb(var(--v-theme-on-surface));
+    background: transparent;
+    cursor: pointer;
 
     .transaction-picture-add-icon {
         color: rgba(var(--v-theme-grey-500));
     }
 }
 
-.transaction-picture-add.enabled:hover {
+.transaction-picture-add:hover:not(:disabled),
+.transaction-picture-add:focus-visible {
     border: 2px dashed rgba(var(--v-theme-grey-700));
+    background: rgba(var(--v-theme-primary), .05);
+    outline: 3px solid rgba(var(--v-theme-primary), .18);
+    outline-offset: 2px;
 
     .transaction-picture-add-icon {
         color: rgba(var(--v-theme-grey-700));
     }
 }
 
+.transaction-picture-add:disabled {
+    cursor: default;
+    opacity: .55;
+}
+
 @media (max-width: 959px) {
+    .transaction-edit-title {
+        flex-wrap: wrap;
+        row-gap: 8px;
+    }
+
+    .transaction-ai-image-action {
+        order: 3;
+    }
+
     .transaction-edit-dialog .v-overlay__content,
     .transaction-edit-card {
         max-height: calc(100dvh - 16px) !important;

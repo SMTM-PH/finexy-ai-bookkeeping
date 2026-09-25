@@ -2017,6 +2017,7 @@
     "Transaction": "รายการ",
     "Transactions": "รายการ",
     "Transaction Pictures": "รูปภาพรายการ",
+    "Pictures here are transaction attachments and do not trigger AI recognition.": "รูปภาพที่นี่เป็นไฟล์แนบของรายการและจะไม่เริ่มการจดจำด้วย AI",
     "Pictures": "รูปภาพ",
     "Add Transaction": "เพิ่มรายการ",
     "Edit Transaction": "แก้ไขรายการ",

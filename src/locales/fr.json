@@ -2017,6 +2017,7 @@
     "Transaction": "Transaction",
     "Transactions": "Transactions",
     "Transaction Pictures": "Images de transaction",
+    "Pictures here are transaction attachments and do not trigger AI recognition.": "Les images ici sont des pièces jointes à la transaction et ne déclenchent pas la reconnaissance par IA.",
     "Pictures": "Images",
     "Add Transaction": "Ajouter une transaction",
     "Edit Transaction": "Modifier la transaction",

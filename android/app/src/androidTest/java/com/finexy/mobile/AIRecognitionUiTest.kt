@@ -25,7 +25,7 @@ class AIRecognitionUiTest {
         rule.onNodeWithText("生成待复核草稿").assertIsNotEnabled()
         rule.onNodeWithText("例如：今天午餐 36 元，微信支付").performTextInput("午餐 36 元")
         rule.onNodeWithText("生成待复核草稿").assertIsEnabled()
-        rule.onNodeWithText("图片只转发到你配置的自托管 OCR 服务", substring = true).assertExists()
+        rule.onNodeWithText("图片将直接发送到服务器配置的视觉大模型", substring = true).assertExists()
         rule.onNodeWithText("从相册选择票据").assertExists()
         rule.onNodeWithText("拍照识别").assertExists()
         rule.onNodeWithText("查看待复核队列").assertExists()

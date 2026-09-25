@@ -173,7 +173,7 @@ data class ScheduledOccurrenceEntity(
 }
 
 /**
- * AI/OCR draft waiting for explicit user confirmation. Source images are
+ * AI draft waiting for explicit user confirmation. Source images are
  * deliberately never persisted; only extracted text and structured fields
  * returned by the server are cached for offline review.
  */

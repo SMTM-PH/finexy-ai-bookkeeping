@@ -1,12 +1,15 @@
 <template>
-    <v-dialog width="800" :persistent="loading || recognizing || !!imageFile" v-model="showState" @paste="onPaste">
-        <v-card class="pa-sm-1 pa-md-2">
+    <v-dialog class="finexy-dialog finexy-subdialog finexy-ai-recognition-dialog"
+              width="800" max-width="calc(100vw - 24px)" max-height="calc(100dvh - 24px)"
+              :z-index="4700" scrollable
+              :persistent="loading || recognizing || !!imageFile" v-model="showState" @paste="onPaste">
+        <v-card class="ai-recognition-card pa-sm-1 pa-md-2">
             <template #title>
                 <h4 class="text-h4">{{ tt('AI Image Recognition') }}</h4>
             </template>
 
-            <v-card-text class="d-flex flex-column flex-md-row flex-grow-1 overflow-y-auto" style="height: 480px">
-                <div class="w-100 h-100 border position-relative"
+            <v-card-text class="ai-recognition-body d-flex flex-column flex-md-row flex-grow-1 overflow-y-auto">
+                <div class="ai-recognition-canvas w-100 h-100 position-relative"
                      @dragenter.prevent="onDragEnter"
                      @dragover.prevent
                      @dragleave.prevent="onDragLeave"
@@ -22,7 +25,12 @@
                         <h3 class="pa-2" v-else-if="recognizing">{{ tt('AI can make mistakes. Check important info.') }}</h3>
                     </div>
                     <v-img :class="{ 'cursor-pointer': !loading && !recognizing && !isDragOver, 'h-100': true }"
-                           :src="imageSrc" @click="showOpenImageDialog">
+                           :src="imageSrc"
+                           role="button" tabindex="0"
+                           :aria-label="tt('Click here to select a receipt or transaction image')"
+                           @click="showOpenImageDialog"
+                           @keydown.enter="showOpenImageDialog"
+                           @keydown.space.prevent="showOpenImageDialog">
                         <template #placeholder>
                             <div :class="{ 'w-100 h-100': true, 'bg-grey-200': !isDarkMode, 'bg-grey-100': isDarkMode }"></div>
                         </template>
@@ -30,9 +38,9 @@
                 </div>
             </v-card-text>
 
-            <v-card-text>
+            <v-card-text class="ai-recognition-actions">
                 <div class="w-100 d-flex justify-center flex-wrap mt-sm-1 mt-md-2 gap-4">
-                    <v-btn :disabled="loading || recognizing || !imageFile" @click="recognize">
+                    <v-btn color="primary" :disabled="loading || recognizing || !imageFile" @click="recognize">
                         {{ tt('Recognize') }}
                         <v-progress-circular indeterminate size="22" class="ms-2" v-if="recognizing"></v-progress-circular>
                     </v-btn>
@@ -261,13 +269,62 @@ defineExpose({
 </script>
 
 <style>
+.v-overlay.finexy-dialog.finexy-ai-recognition-dialog.v-overlay--active {
+    z-index: 4700 !important;
+}
+
+.v-overlay.finexy-dialog.finexy-ai-recognition-dialog .v-card-title::before {
+    content: "FINEXY / AI";
+}
+
+.ai-recognition-card {
+    max-height: min(680px, calc(100dvh - 24px));
+}
+
+.ai-recognition-body {
+    min-height: 360px;
+    height: min(480px, calc(100dvh - 190px));
+    padding-top: 18px !important;
+    padding-bottom: 18px !important;
+    background: linear-gradient(180deg, #fff 0, #fbfbfc 100%);
+}
+
+.ai-recognition-canvas {
+    min-height: 320px;
+    overflow: hidden;
+    border: 1px dashed var(--finexy-dialog-line);
+    border-radius: 16px;
+    background: var(--finexy-dialog-panel);
+}
+
+.ai-recognition-canvas:focus-within {
+    border-color: rgba(240, 85, 55, .72);
+    box-shadow: 0 0 0 3px rgba(240, 85, 55, .1);
+}
+
+.v-overlay.finexy-ai-recognition-dialog .ai-recognition-canvas .v-img__placeholder > div {
+    background: var(--finexy-dialog-panel) !important;
+}
+
+.v-overlay.finexy-ai-recognition-dialog .dropzone h3,
+.v-overlay.finexy-ai-recognition-dialog .dropzone span,
+.v-overlay.finexy-ai-recognition-dialog .dropzone.dropzone-dark h3,
+.v-overlay.finexy-ai-recognition-dialog .dropzone.dropzone-dark span {
+    color: var(--finexy-dialog-ink) !important;
+    text-shadow: none !important;
+}
+
+.ai-recognition-actions {
+    flex: 0 0 auto;
+}
+
 .dropzone {
     position: absolute;
     top: 0;
     left: 0;
     width: 100%;
     pointer-events: none;
-    border-radius: 8px;
+    border-radius: 16px;
     z-index: 10;
 
     h3, span {
@@ -290,6 +347,22 @@ defineExpose({
 }
 
 .dropzone-dragover {
-    border: 6px dashed rgba(var(--v-border-color),var(--v-border-opacity));
+    border: 3px dashed var(--finexy-dialog-accent);
+    background: rgba(240, 85, 55, .06);
+}
+
+@media (max-width: 700px) {
+    .ai-recognition-card {
+        max-height: calc(100dvh - 16px);
+    }
+
+    .ai-recognition-body {
+        min-height: 300px;
+        height: calc(100dvh - 180px);
+    }
+
+    .ai-recognition-canvas {
+        min-height: 260px;
+    }
 }
 </style>

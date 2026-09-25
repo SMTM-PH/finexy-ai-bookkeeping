@@ -2017,6 +2017,7 @@
     "Transaction": "பரிவர்த்தனை",
     "Transactions": "பரிவர்த்தனைகள்",
     "Transaction Pictures": "பரிவர்த்தனையின் படம்கள்",
+    "Pictures here are transaction attachments and do not trigger AI recognition.": "இங்குள்ள படங்கள் பரிவர்த்தனை இணைப்புகள் மட்டுமே; அவை AI அடையாளம் காணலைத் தொடங்காது.",
     "Pictures": "படம்கள்",
     "Add Transaction": "பரிவர்த்தனை சேர்",
     "Edit Transaction": "பரிவர்த்தனை திருத்து",

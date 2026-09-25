@@ -2017,6 +2017,7 @@
     "Transaction": "Transaction",
     "Transactions": "Transactions",
     "Transaction Pictures": "Transaction Pictures",
+    "Pictures here are transaction attachments and do not trigger AI recognition.": "Pictures here are transaction attachments and do not trigger AI recognition.",
     "Pictures": "Pictures",
     "Add Transaction": "Add Transaction",
     "Edit Transaction": "Edit Transaction",

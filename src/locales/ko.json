@@ -2017,6 +2017,7 @@
     "Transaction": "거래",
     "Transactions": "거래",
     "Transaction Pictures": "거래 사진",
+    "Pictures here are transaction attachments and do not trigger AI recognition.": "여기의 이미지는 거래 첨부 파일로 저장되며 AI 인식을 실행하지 않습니다.",
     "Pictures": "사진",
     "Add Transaction": "거래 추가",
     "Edit Transaction": "거래 편집",

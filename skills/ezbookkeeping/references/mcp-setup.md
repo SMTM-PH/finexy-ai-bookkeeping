@@ -28,6 +28,8 @@ tool_timeout_sec = 60
 
 Restart Codex, then use `/mcp` or the MCP settings page to verify the connection.
 
+The tool list should include `recognize_receipt_image` when the deployed Finexy version supports vision receipt recognition. The tool accepts base64 image data (`image/jpeg`, `image/png`, `image/gif`, or `image/webp`) and returns a draft without saving it.
+
 ## Other MCP clients
 
 Use a Streamable HTTP connection and send:
@@ -58,3 +60,5 @@ Generic configuration shape:
 - `401`: the token is missing, expired, revoked, or is not an MCP token.
 - Connection timeout: use the NAS LAN IP instead of `localhost` when the agent runs on another machine.
 - Tools connect but writes fail: query accounts and secondary categories first; tool inputs match names exactly.
+- `recognize_receipt_image` is missing: update/redeploy the Finexy server, then reconnect the MCP client so it refreshes `tools/list`.
+- Receipt recognition reports that the provider is disabled: enable AI image recognition and configure a vision-capable model in Finexy.

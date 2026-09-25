@@ -52,7 +52,6 @@ internal fun AIRecognitionPage(
     var text by rememberSaveable { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
-    var pendingOCR by remember { mutableStateOf<LocalOCRResult?>(null) }
     var pendingImage by remember { mutableStateOf<Bitmap?>(null) }
     var cameraCapture by remember { mutableStateOf<Pair<Uri, File>?>(null) }
 
@@ -98,36 +97,16 @@ internal fun AIRecognitionPage(
             busy = true
             message = null
             try {
-                val bytes = withContext(Dispatchers.Default) { encodeReceiptForOCR(bitmap, crop) }
-                pendingOCR = FinexyApi(store).recognizeLocalOCR(bytes, "receipt.jpg", "image/jpeg")
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                message = "票据识别失败：${error.message ?: "请检查图片清晰度后重试"}。"
-            } finally {
-                busy = false
-            }
-        }
-    }
-
-    fun structureOCR(ocr: LocalOCRResult) {
-        scope.launch {
-            busy = true
-            message = null
-            try {
+                val bytes = withContext(Dispatchers.Default) { encodeReceiptForRecognition(bitmap, crop) }
                 val api = FinexyApi(store)
-                val recognized = runCatching { api.recognizeTransactionText(ocr.text) }
-                val item = recognized.fold(
-                    onSuccess = { api.createAIReviewItem(AIReviewItemEntity.SOURCE_IMAGE, ocr.text, it) },
-                    onFailure = { api.createAIReviewItem(AIReviewItemEntity.SOURCE_IMAGE, ocr.text, null, "OCR 已完成，但结构化失败：${it.message ?: "未知错误"}") }
-                )
-                repository.cacheAIReviewItem(item)
-                pendingOCR = null
+                val recognized = api.recognizeReceiptImage(bytes, "receipt.jpg", "image/jpeg")
+                val sourceText = recognized.comment.trim().ifBlank { "票据图片识别" }
+                repository.cacheAIReviewItem(api.createAIReviewItem(AIReviewItemEntity.SOURCE_IMAGE, sourceText, recognized))
                 onOpenReviews()
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                message = "结构化失败：${error.message ?: "请稍后重试"}。OCR 文字仍保留，可再次提交。"
+                message = "票据识别失败：${error.message ?: "请检查图片清晰度后重试"}。"
             } finally {
                 busy = false
             }
@@ -164,8 +143,8 @@ internal fun AIRecognitionPage(
             ) { Text(if (busy) "正在识别…" else "生成待复核草稿") }
         }
         ReviewPanel {
-            Text("票据 OCR", fontWeight = FontWeight.SemiBold)
-            Text("图片只转发到你配置的自托管 OCR 服务；服务端不保存原图。识别出的文字可再交给已配置的模型结构化。", color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
+            Text("票据 AI 识别", fontWeight = FontWeight.SemiBold)
+            Text("图片将直接发送到服务器配置的视觉大模型进行识别；服务端不保存原图。AI 可能出错，请在入账前核对。", color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
             OutlinedButton(
                 onClick = { imagePicker.launch("image/*") },
                 enabled = !busy && !localMode,
@@ -185,14 +164,11 @@ internal fun AIRecognitionPage(
                 shape = CircleShape
             ) { Text("拍照识别") }
         }
-        if (localMode) StatusText("连接并登录服务器后才能使用 AI/OCR。", true)
+        if (localMode) StatusText("连接并登录服务器后才能使用 AI 识别。", true)
         message?.let { StatusText(it, true) }
         TextButton(onClick = onOpenReviews, enabled = !localMode, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("查看待复核队列") }
     }
 
-    pendingOCR?.let { ocr ->
-        OCRPreviewDialog(ocr, busy, onDismiss = { pendingOCR = null }, onSubmit = { structureOCR(ocr) })
-    }
     pendingImage?.let { bitmap ->
         ReceiptImageEditor(bitmap, onCancel = { pendingImage = null }, onConfirm = ::recognizeEditedImage)
     }
@@ -268,14 +244,14 @@ internal fun AIReviewPage(
             if (!loading && reviewItems.isEmpty()) item {
                 ReviewPanel {
                     Text("没有待复核草稿", fontWeight = FontWeight.SemiBold)
-                    Text("AI/OCR 识别的内容会先出现在这里，只有你确认后才会入账。", color = Muted, fontSize = 13.sp)
+                    Text("AI 识别的内容会先出现在这里，只有你确认后才会入账。", color = Muted, fontSize = 13.sp)
                 }
             }
             items(reviewItems, key = { it.id }) { item ->
                 val recognized = remember(item.recognizedDataJson) { item.recognizedDataJson.takeIf(String::isNotBlank)?.let { raw -> runCatching { RecognizedTransaction.from(JSONObject(raw)) }.getOrNull() } }
                 ReviewPanel {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(if (item.sourceType == AIReviewItemEntity.SOURCE_IMAGE) "票据 OCR" else "AI 文本", Modifier.background(PanelRaised, CircleShape).padding(horizontal = 10.dp, vertical = 5.dp), color = Muted, fontSize = 11.sp)
+                        Text(if (item.sourceType == AIReviewItemEntity.SOURCE_IMAGE) "票据 AI" else "AI 文本", Modifier.background(PanelRaised, CircleShape).padding(horizontal = 10.dp, vertical = 5.dp), color = Muted, fontSize = 11.sp)
                         Spacer(Modifier.weight(1f))
                         Text(DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(item.createdUnixTime * 1000)), color = Muted, fontSize = 11.sp)
                     }

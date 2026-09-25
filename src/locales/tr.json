@@ -2017,6 +2017,7 @@
     "Transaction": "İşlem",
     "Transactions": "İşlemler",
     "Transaction Pictures": "İşlem Resimleri",
+    "Pictures here are transaction attachments and do not trigger AI recognition.": "Buradaki resimler işlem ekidir ve yapay zekâ tanımayı başlatmaz.",
     "Pictures": "Resimler",
     "Add Transaction": "İşlem Ekle",
     "Edit Transaction": "İşlemi Düzenle",

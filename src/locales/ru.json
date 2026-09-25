@@ -2017,6 +2017,7 @@
     "Transaction": "Транзакция",
     "Transactions": "Транзакции",
     "Transaction Pictures": "Изображения транзакций",
+    "Pictures here are transaction attachments and do not trigger AI recognition.": "Изображения здесь являются вложениями к транзакции и не запускают распознавание ИИ.",
     "Pictures": "Изображения",
     "Add Transaction": "Добавить транзакцию",
     "Edit Transaction": "Редактировать транзакцию",
