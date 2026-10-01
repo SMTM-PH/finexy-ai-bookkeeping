@@ -11,6 +11,12 @@ class ActivityFilterUiTest {
     @get:Rule val rule = createAndroidComposeRule<ActivityFilterQaActivity>()
     private fun chip(text: String) = rule.onNode(hasText(text) and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Checkbox))
 
+    @Test fun statementImportEntryFollowsWriteAccess() {
+        rule.onNodeWithText("导入支付宝 / 微信账单").assertIsDisplayed()
+        rule.onNodeWithContentDescription("切换到账本：只读账本").performClick()
+        rule.onNodeWithText("导入支付宝 / 微信账单").assertDoesNotExist()
+    }
+
     @Test fun dateTypeAccountCategoryAndTagFiltersComposeTogether() {
         chip("近 30 天").performScrollTo().performClick()
         chip("支出").performScrollTo().performClick()
@@ -23,12 +29,19 @@ class ActivityFilterUiTest {
         rule.onNodeWithText("历史工作午餐").assertDoesNotExist()
     }
 
-    @Test fun globalLedgerSwitcherExposesFamilyReadOnlyState() {
+    @Test fun sharedLedgerOnlyExposesActionsForServerEditableRows() {
         rule.onNodeWithContentDescription("切换到账本：温暖小家").performClick()
         rule.onNodeWithText("已切换账本").assertIsDisplayed()
-        rule.onNodeWithText("可新增流水；既有流水编辑正在接入。").assertIsDisplayed()
-        rule.onNodeWithText("工作午餐").performScrollTo().performClick()
-        rule.onNodeWithText("删除这笔流水？").assertDoesNotExist()
+        rule.onNodeWithContentDescription("删除工作午餐").performScrollTo().assertIsDisplayed().performClick()
+        rule.onNodeWithText("删除这笔流水？").assertIsDisplayed()
+        rule.onNodeWithText("取消").performClick()
+        rule.onNodeWithContentDescription("删除私人午餐").assertDoesNotExist()
+    }
+
+    @Test fun viewerLedgerDoesNotExposeTransactionActions() {
+        rule.onNodeWithContentDescription("切换到账本：只读账本").performClick()
+        rule.onNodeWithText("你在此账本中为只读成员。").assertIsDisplayed()
+        rule.onNodeWithContentDescription("删除工作午餐").assertDoesNotExist()
         chip("个人账本").performClick()
         rule.onNodeWithText("每一笔，都清楚。").assertIsDisplayed()
     }

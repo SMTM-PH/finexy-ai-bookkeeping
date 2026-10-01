@@ -16,11 +16,12 @@ class LedgerBackup(private val db: FinexyDatabase, private val scope: String) {
     private val schemaTwelveTables = schemaElevenTables + "product_assets"
     private val schemaThirteenTables = schemaTwelveTables + "exchange_rates"
     private val schemaFourteenTables = schemaThirteenTables + listOf("family_groups", "family_members", "ledgers", "savings_goals")
-    private val tables = schemaFourteenTables
-    private fun tablesFor(schema: Int): List<String> = when (schema) { 8 -> legacyTables; 9 -> schemaTenTables.dropLast(1); 10 -> schemaTenTables; 11 -> schemaElevenTables; 12 -> schemaTwelveTables; 13 -> schemaThirteenTables; else -> tables }
+    private val schemaFifteenTables = schemaThirteenTables + listOf("ledgers", "savings_goals")
+    private val tables = schemaFifteenTables
+    private fun tablesFor(schema: Int): List<String> = when (schema) { 8 -> legacyTables; 9 -> schemaTenTables.dropLast(1); 10 -> schemaTenTables; 11 -> schemaElevenTables; 12 -> schemaTwelveTables; 13 -> schemaThirteenTables; 14 -> schemaFourteenTables; else -> tables }
     suspend fun export(password: String): String = withContext(Dispatchers.IO) {
         val document = db.withTransaction {
-            val root = JSONObject().put("schema", 14).put("scope", scope).put("createdAt", System.currentTimeMillis())
+            val root = JSONObject().put("schema", 15).put("scope", scope).put("createdAt", System.currentTimeMillis())
             val data = JSONObject()
             for (table in tables) {
                 val rows = JSONArray()
@@ -53,14 +54,15 @@ class LedgerBackup(private val db: FinexyDatabase, private val scope: String) {
 
     private fun validate(document: JSONObject) {
         val schema = document.getInt("schema")
-        require(schema in 8..14 && document.getString("scope") == scope) { "此备份属于其他账号/服务器或不支持的数据库版本" }
+        require(schema in 8..15 && document.getString("scope") == scope) { "此备份属于其他账号/服务器或不支持的数据库版本" }
         val expectedTables = tablesFor(schema)
         val data = document.getJSONObject("tables")
         require(data.keys().asSequence().toSet() == expectedTables.toSet()) { "备份缺少数据表" }
         for (table in expectedTables) {
-            val columns = mutableMapOf<String, Pair<String, Boolean>>()
-            db.openHelper.readableDatabase.query("PRAGMA table_info($table)").use { c ->
-                while (c.moveToNext()) columns[c.getString(c.getColumnIndexOrThrow("name"))] = c.getString(c.getColumnIndexOrThrow("type")) to (c.getInt(c.getColumnIndexOrThrow("notnull")) == 1)
+            val columns = if (schema == 14 && table in setOf("family_groups", "family_members")) legacyFamilyColumns(table) else mutableMapOf<String, Pair<String, Boolean>>().also { result ->
+                db.openHelper.readableDatabase.query("PRAGMA table_info($table)").use { c ->
+                    while (c.moveToNext()) result[c.getString(c.getColumnIndexOrThrow("name"))] = c.getString(c.getColumnIndexOrThrow("type")) to (c.getInt(c.getColumnIndexOrThrow("notnull")) == 1)
+                }
             }
             if (schema < 11 && table == "transactions") columns.remove("reviewItemId")
             val rows = data.getJSONArray(table)
@@ -85,6 +87,9 @@ class LedgerBackup(private val db: FinexyDatabase, private val scope: String) {
             var restored = 0
             val restoredIds = mutableSetOf<String>()
             for (table in restoredTables) {
+                // Schema 14 family rows were a cache of the retired API. The
+                // canonical ledgers in the same backup are restored below.
+                if (table == "family_groups" || table == "family_members") continue
                 val rows = data.getJSONArray(table)
                 for (i in 0 until rows.length()) {
                     val row = rows.getJSONObject(i)
@@ -113,7 +118,24 @@ class LedgerBackup(private val db: FinexyDatabase, private val scope: String) {
 
     suspend fun clearLocal(confirmation: String) = withContext(Dispatchers.IO) {
         require(confirmation == "清空当前账本") { "请输入完整确认文字" }
-        db.withTransaction { tables.reversed().forEach { db.openHelper.writableDatabase.execSQL("DELETE FROM $it") } }
+        db.withTransaction {
+            (listOf("ledger_transaction_cache", "ledger_account_cache") + tables.reversed() + "sync_status")
+                .distinct().forEach { db.openHelper.writableDatabase.execSQL("DELETE FROM $it") }
+        }
+    }
+
+    private fun legacyFamilyColumns(table: String): MutableMap<String, Pair<String, Boolean>> = when (table) {
+        "family_groups" -> mutableMapOf(
+            "id" to ("INTEGER" to true), "ownerUid" to ("INTEGER" to true), "name" to ("TEXT" to true),
+            "comment" to ("TEXT" to true), "memberCount" to ("INTEGER" to true),
+            "createdTime" to ("INTEGER" to true), "updatedAt" to ("INTEGER" to true)
+        )
+        "family_members" -> mutableMapOf(
+            "id" to ("INTEGER" to true), "familyId" to ("INTEGER" to true), "uid" to ("INTEGER" to true),
+            "role" to ("INTEGER" to true), "status" to ("INTEGER" to true), "nickname" to ("TEXT" to true),
+            "joinedTime" to ("INTEGER" to true), "updatedAt" to ("INTEGER" to true)
+        )
+        else -> error("未知旧家庭表")
     }
 
     companion object {

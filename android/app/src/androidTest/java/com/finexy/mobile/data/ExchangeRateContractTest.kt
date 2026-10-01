@@ -61,7 +61,7 @@ class ExchangeRateContractTest {
                 old.execSQL("DROP TABLE exchange_rates"); old.version = 16
             }
             val migrated = Room.databaseBuilder(context, FinexyDatabase::class.java, name)
-                .addMigrations(FinexyDatabase.MIGRATION_16_17, FinexyDatabase.MIGRATION_17_18, FinexyDatabase.MIGRATION_18_19).build()
+                .addMigrations(FinexyDatabase.MIGRATION_16_17, FinexyDatabase.MIGRATION_17_18, FinexyDatabase.MIGRATION_18_19, FinexyDatabase.MIGRATION_19_20, FinexyDatabase.MIGRATION_20_21).build()
             try { assertTrue(migrated.dao().allExchangeRates().isEmpty()) } finally { migrated.close() }
         } finally { context.deleteDatabase(name) }
     }

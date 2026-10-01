@@ -260,6 +260,9 @@ export default defineConfig(() => {
                                         return true;
                                     } else if (/[\\/]src[\\/]components[\\/](base|common)[\\/]/i.test(id)) {
                                         return true;
+                                    } else if (/[\\/]src[\\/]components[\\/]ReleaseUpdateNotice\.vue/i.test(id)) {
+                                        // Keep shared app code out of the preload helper used by vendor chunks.
+                                        return true;
                                     } else if (/[\\/]src[\\/]views[\\/]base[\\/]/i.test(id)) {
                                         return true;
                                     } else if (/[\\/]src[\\/]locales[\\/]helpers\.(js|ts)/i.test(id)) {

@@ -23,10 +23,28 @@ docker compose ps
 离线镜像包用户先运行：
 
 ```bash
-docker load -i finexy-nas-amd64.tar
+docker load -i Finexy-NAS-1.9.2-linux-amd64.tar
 ```
 
-正式发布的离线包文件名为 `Finexy-NAS-1.9.1-linux-amd64.tar`，其中已包含
-`ph97/finexy-bookkeeping:1.9.1-amd64` 和
-`ph97/finexy-bookkeeping:ocr-1.0-amd64`。加载后可直接使用同目录的
-`compose.yaml` 启动，无需修改镜像名称。
+本版本的镜像包包含 `ph97/finexy-bookkeeping:1.9.2-amd64` 记账服务。
+OCR 镜像沿用 `ph97/finexy-bookkeeping:ocr-1.0-amd64`，需要单独拉取；
+完全离线部署时，请同时准备 OCR 镜像包。加载后可使用同目录的 `compose.yaml` 启动。
+
+## 从旧版本升级
+
+先备份现有 `data/`、`storage/`、`.env`，保持密钥和挂载路径不变，
+将记账镜像更新为 `1.9.2-amd64` 后执行：
+
+```bash
+docker compose pull bookkeeping
+docker compose up -d --no-deps bookkeeping
+docker compose ps
+```
+
+如果旧容器没有挂载数据目录，必须先迁出容器内的账本和附件，再重建服务。
+
+## 导入支付宝与微信
+
+登录默认个人账本，进入“流水”，点击“导入支付宝”或“导入微信”。
+支付宝支持 ZIP/CSV（ZIP 密码只在本地解压时使用），微信支持 XLSX/CSV。
+预览后显式选择账户和分类，勾选记录并确认导入。同一账单重复导入会产生重复流水。

@@ -11,6 +11,84 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestLegacyFamilyMigrationIsIdempotentAndPreservesFamilyWideInvite(t *testing.T) {
+	initFamilyTestEnvironment(t)
+	db := Ledgers.UserDataDB(100)
+	now := time.Now().Unix()
+	group := &models.FamilyGroup{FamilyGroupId: 5000, OwnerUid: 100, Name: "旧家庭", Comment: "迁移保留", CreatedUnixTime: now - 100, UpdatedUnixTime: now - 10}
+	emptyGroup := &models.FamilyGroup{FamilyGroupId: 6000, OwnerUid: 100, Name: "尚未建账的旧家庭", CreatedUnixTime: now - 50, UpdatedUnixTime: now - 5}
+	members := []*models.FamilyMember{
+		{FamilyMemberId: 5101, FamilyId: 5000, Uid: 100, Status: models.FAMILY_MEMBER_STATUS_ACTIVE, Role: models.FAMILY_MEMBER_ROLE_OWNER, CreatedUnixTime: now - 100, UpdatedUnixTime: now - 10},
+		{FamilyMemberId: 5102, FamilyId: 5000, Uid: 200, Status: models.FAMILY_MEMBER_STATUS_ACTIVE, Role: models.FAMILY_MEMBER_ROLE_MEMBER, CreatedUnixTime: now - 90, UpdatedUnixTime: now - 9},
+		{FamilyMemberId: 5103, FamilyId: 5000, Uid: 300, Status: models.FAMILY_MEMBER_STATUS_REMOVED, Role: models.FAMILY_MEMBER_ROLE_VIEWER, CreatedUnixTime: now - 80, UpdatedUnixTime: now - 8},
+		{FamilyMemberId: 6101, FamilyId: 6000, Uid: 100, Status: models.FAMILY_MEMBER_STATUS_ACTIVE, Role: models.FAMILY_MEMBER_ROLE_OWNER, CreatedUnixTime: now - 50, UpdatedUnixTime: now - 5},
+	}
+	ledgers := []*models.Ledger{
+		{LedgerId: 5201, OwnerUid: 200, Type: models.LEDGER_TYPE_FAMILY, FamilyId: 5000, Name: "家庭日常", CreatedUnixTime: now - 70, UpdatedUnixTime: now - 7},
+		{LedgerId: 5202, OwnerUid: 200, Type: models.LEDGER_TYPE_FAMILY, FamilyId: 5000, Name: "家庭旅行", CreatedUnixTime: now - 60, UpdatedUnixTime: now - 6},
+	}
+	legacyInvite := &models.FamilyInvitation{InvitationId: 5301, FamilyId: 5000, InviterUid: 100, InviteeName: "新成员", Role: models.FAMILY_MEMBER_ROLE_MEMBER, Token: "legacy-family-token", Status: models.FAMILY_INVITATION_STATUS_PENDING, CreatedUnixTime: now, ExpiredUnixTime: now + 3600}
+	_, err := db.NewSession(nil).Insert(group, emptyGroup)
+	require.NoError(t, err)
+	_, err = db.NewSession(nil).Insert(members)
+	require.NoError(t, err)
+	_, err = db.NewSession(nil).Insert(ledgers)
+	require.NoError(t, err)
+	_, err = db.NewSession(nil).Insert(legacyInvite)
+	require.NoError(t, err)
+
+	require.NoError(t, Ledgers.MigrateLegacyFamilies(nil))
+	createdForEmptyGroup := &models.Ledger{}
+	has, err := db.NewSession(nil).Where("family_id=?", emptyGroup.FamilyGroupId).Get(createdForEmptyGroup)
+	require.NoError(t, err)
+	require.True(t, has)
+	require.Equal(t, emptyGroup.Name, createdForEmptyGroup.Name)
+	require.Equal(t, emptyGroup.OwnerUid, createdForEmptyGroup.OwnerUid)
+	ownerExists, err := db.NewSession(nil).Where("ledger_id=? AND uid=? AND status=?", createdForEmptyGroup.LedgerId, emptyGroup.OwnerUid, models.FAMILY_MEMBER_STATUS_ACTIVE).Exist(new(models.LedgerMember))
+	require.NoError(t, err)
+	require.True(t, ownerExists)
+	for _, id := range []int64{5201, 5202} {
+		stored := &models.Ledger{}
+		has, findErr := db.NewSession(nil).ID(id).Get(stored)
+		require.NoError(t, findErr)
+		require.True(t, has)
+		require.Equal(t, int64(100), stored.OwnerUid)
+		count, countErr := db.NewSession(nil).Where("ledger_id=?", id).Count(new(models.LedgerMember))
+		require.NoError(t, countErr)
+		require.Equal(t, int64(3), count)
+	}
+	migratedInvite := &models.LedgerInvitation{}
+	has, err = db.NewSession(nil).Where("token=?", legacyInvite.Token).Get(migratedInvite)
+	require.NoError(t, err)
+	require.True(t, has)
+	require.Equal(t, int64(5000), migratedInvite.LegacyFamilyId)
+	require.Equal(t, int64(5201), migratedInvite.LedgerId)
+
+	member := &models.LedgerMember{}
+	has, err = db.NewSession(nil).Where("ledger_id=? AND uid=?", 5201, 200).Get(member)
+	require.NoError(t, err)
+	require.True(t, has)
+	_, err = db.NewSession(nil).ID(member.LedgerMemberId).Cols("status").Update(&models.LedgerMember{Status: models.FAMILY_MEMBER_STATUS_REMOVED})
+	require.NoError(t, err)
+	require.NoError(t, Ledgers.MigrateLegacyFamilies(nil))
+	refreshed := &models.LedgerMember{}
+	_, err = db.NewSession(nil).ID(member.LedgerMemberId).Get(refreshed)
+	require.NoError(t, err)
+	require.Equal(t, models.FAMILY_MEMBER_STATUS_REMOVED, refreshed.Status, "rerun must not restore a directly removed member")
+	inviteCount, err := db.NewSession(nil).Where("token=?", legacyInvite.Token).Count(new(models.LedgerInvitation))
+	require.NoError(t, err)
+	require.Equal(t, int64(1), inviteCount)
+
+	accepted, err := Ledgers.AcceptInvitation(nil, 400, legacyInvite.Token)
+	require.NoError(t, err)
+	require.Equal(t, int64(5201), accepted.LedgerId)
+	for _, id := range []int64{5201, 5202} {
+		joined, accessErr := db.NewSession(nil).Where("ledger_id=? AND uid=? AND status=?", id, 400, models.FAMILY_MEMBER_STATUS_ACTIVE).Exist(new(models.LedgerMember))
+		require.NoError(t, accessErr)
+		require.True(t, joined)
+	}
+}
+
 func TestLedgerInvitationPreviewDoesNotConsumeToken(t *testing.T) {
 	initFamilyTestEnvironment(t)
 	ledger, err := Ledgers.CreateLedger(nil, 100, &models.LedgerCreateRequest{Type: models.LEDGER_TYPE_PERSONAL, Name: "Preview", Comment: "Shared expenses"})

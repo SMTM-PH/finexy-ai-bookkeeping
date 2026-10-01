@@ -1108,7 +1108,7 @@ func (a *TransactionsApi) TransactionGetHandler(c *core.WebContext) (any, *errs.
 		return nil, errs.ErrUserNotFound
 	}
 
-	transaction, err := a.transactions.GetTransactionByTransactionId(c, postingUid, transactionGetReq.Id)
+	transaction, err := a.transactions.GetTransactionByTransactionIdInLedger(c, postingUid, transactionGetReq.LedgerId, transactionGetReq.Id)
 
 	if err != nil {
 		log.Errorf(c, "[transactions.TransactionGetHandler] failed to get transaction \"id:%d\" for user \"uid:%d\", because %s", transactionGetReq.Id, uid, err.Error())
@@ -1360,7 +1360,7 @@ func (a *TransactionsApi) TransactionCreateHandler(c *core.WebContext) (any, *er
 			transactionId, err := utils.StringToInt64(remark)
 
 			if err == nil {
-				transaction, err = a.transactions.GetTransactionByTransactionId(c, postingUid, transactionId)
+				transaction, err = a.transactions.GetTransactionByTransactionIdInLedger(c, postingUid, transactionCreateReq.LedgerId, transactionId)
 
 				if err != nil {
 					log.Errorf(c, "[transactions.TransactionCreateHandler] failed to get existed transaction \"id:%d\" for user \"uid:%d\", because %s", transactionId, uid, err.Error())
@@ -1452,7 +1452,7 @@ func (a *TransactionsApi) TransactionModifyHandler(c *core.WebContext) (any, *er
 		return nil, errs.ErrUserNotFound
 	}
 
-	transaction, err := a.transactions.GetTransactionByTransactionId(c, postingUid, transactionModifyReq.Id)
+	transaction, err := a.transactions.GetTransactionByTransactionIdInLedger(c, postingUid, transactionModifyReq.LedgerId, transactionModifyReq.Id)
 
 	if err != nil {
 		log.Errorf(c, "[transactions.TransactionModifyHandler] failed to get transaction \"id:%d\" for user \"uid:%d\", because %s", transactionModifyReq.Id, uid, err.Error())
@@ -2354,7 +2354,7 @@ func (a *TransactionsApi) TransactionDeleteHandler(c *core.WebContext) (any, *er
 		return nil, errs.ErrUserNotFound
 	}
 
-	transaction, err := a.transactions.GetTransactionByTransactionId(c, postingUid, transactionDeleteReq.Id)
+	transaction, err := a.transactions.GetTransactionByTransactionIdInLedger(c, postingUid, transactionDeleteReq.LedgerId, transactionDeleteReq.Id)
 
 	if err != nil {
 		log.Errorf(c, "[transactions.TransactionDeleteHandler] failed to get transaction \"id:%d\" for user \"uid:%d\", because %s", transactionDeleteReq.Id, uid, err.Error())

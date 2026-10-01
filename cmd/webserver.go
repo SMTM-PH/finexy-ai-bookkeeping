@@ -498,20 +498,7 @@ func startWebServer(c *core.CliContext) error {
 			apiV1Route.POST("/budget/monthly/set.json", bindApi(api.MonthlyBudgets.MonthlyBudgetSetHandler, config))
 			apiV1Route.POST("/budget/monthly/delete.json", bindApi(api.MonthlyBudgets.MonthlyBudgetDeleteHandler, config))
 
-			// Families, ledgers and savings goals
-			apiV1Route.POST("/family/group/create.json", bindApi(api.Families.FamilyCreateHandler, config))
-			apiV1Route.GET("/family/group/list.json", bindApi(api.Families.FamilyListHandler, config))
-			apiV1Route.POST("/family/group/modify.json", bindApi(api.Families.FamilyModifyHandler, config))
-			apiV1Route.POST("/family/group/delete.json", bindApi(api.Families.FamilyDeleteHandler, config))
-			apiV1Route.GET("/family/member/list.json", bindApi(api.Families.FamilyMemberListHandler, config))
-			apiV1Route.GET("/family/member/me.json", bindApi(api.Families.FamilyMemberMeHandler, config))
-			apiV1Route.POST("/family/member/change_role.json", bindApi(api.Families.FamilyMemberRoleChangeHandler, config))
-			apiV1Route.POST("/family/member/remove.json", bindApi(api.Families.FamilyMemberRemoveHandler, config))
-			apiV1Route.POST("/family/member/leave.json", bindApi(api.Families.FamilyMemberLeaveHandler, config))
-			apiV1Route.POST("/family/invitation/create.json", bindApi(api.Families.FamilyInvitationCreateHandler, config))
-			apiV1Route.GET("/family/invitation/list.json", bindApi(api.Families.FamilyInvitationListHandler, config))
-			apiV1Route.POST("/family/invitation/revoke.json", bindApi(api.Families.FamilyInvitationRevokeHandler, config))
-			apiV1Route.POST("/family/invitation/accept.json", bindApi(api.Families.FamilyInvitationAcceptHandler, config))
+			// Ledgers and savings goals
 			apiV1Route.GET("/ledger/list.json", bindApi(api.Ledgers.LedgerListHandler, config))
 			apiV1Route.GET("/ledger/overview.json", bindApi(api.Ledgers.LedgerOverviewHandler, config))
 			apiV1Route.GET("/ledger/member/list.json", bindApi(api.Ledgers.LedgerMemberListHandler, config))

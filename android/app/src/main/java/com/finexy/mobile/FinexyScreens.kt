@@ -57,6 +57,7 @@ import com.finexy.mobile.data.RemoteTransaction
 import com.finexy.mobile.data.ExchangeRateEntity
 import com.finexy.mobile.data.LedgerEntity
 import com.finexy.mobile.data.SavingsGoalEntity
+import com.finexy.mobile.data.AppUpdateInfo
 import com.finexy.mobile.data.convertMinorAmount
 import org.json.JSONArray
 import org.json.JSONObject
@@ -192,7 +193,7 @@ private fun ResponsivePair(first: @Composable (Modifier) -> Unit, second: @Compo
 }
 
 @Composable
-internal fun Dashboard(padding: PaddingValues, balance: Double, income: Double, expense: Double, activities: List<Activity>, pendingReviews: Int = 0, savingsGoals: List<SavingsGoalEntity> = emptyList(), showAmountsByDefault: Boolean = true, defaultCurrency: String = "CNY", onOpenReviews: () -> Unit = {}, onOpenSavingsGoals: () -> Unit = {}, onAll: () -> Unit, onWallet: () -> Unit, onSettings: () -> Unit, onEntry: (Boolean) -> Unit) {
+internal fun Dashboard(padding: PaddingValues, balance: Double, income: Double, expense: Double, activities: List<Activity>, pendingReviews: Int = 0, savingsGoals: List<SavingsGoalEntity> = emptyList(), showAmountsByDefault: Boolean = true, defaultCurrency: String = "CNY", appUpdate: AppUpdateInfo? = null, appUpdateMessage: String? = null, onOpenUpdate: (AppUpdateInfo) -> Unit = {}, onDismissUpdate: (AppUpdateInfo) -> Unit = {}, onOpenReviews: () -> Unit = {}, onOpenSavingsGoals: () -> Unit = {}, onAll: () -> Unit, onWallet: () -> Unit, onSettings: () -> Unit, onEntry: (Boolean) -> Unit) {
     var hidden by rememberSaveable { mutableStateOf(!showAmountsByDefault) }
     LaunchedEffect(showAmountsByDefault) { hidden = !showAmountsByDefault }
     Screen(padding) {
@@ -200,6 +201,35 @@ internal fun Dashboard(padding: PaddingValues, balance: Double, income: Double, 
             Box(Modifier.size(42.dp).background(Coral, CircleShape), contentAlignment = Alignment.Center) { Text("F", fontWeight = FontWeight.Bold, fontSize = 23.sp) }
             Column(Modifier.weight(1f).padding(start = 12.dp)) { Text("你好，记账人", fontWeight = FontWeight.SemiBold, fontSize = 16.sp); Text("Finexy / 私人账本", color = Muted, fontSize = 12.sp) }
             IconButton(onClick = onSettings, modifier = Modifier.semantics { contentDescription = "打开设置" }) { Mark("settings") }
+        }
+        appUpdate?.let { update ->
+            Surface(
+                color = MaterialTheme.colorScheme.tertiaryContainer,
+                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier.fillMaxWidth().semantics {
+                    contentDescription = "发现 Finexy 新版本 ${update.version}"
+                    liveRegion = LiveRegionMode.Polite
+                }
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        IconTile("update", MaterialTheme.colorScheme.onTertiaryContainer)
+                        Column(Modifier.weight(1f)) {
+                            Text("发现新版本 ${update.version}", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                            Text(update.title, color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = .72f), fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                    Text("当前版本 ${BuildConfig.VERSION_NAME} · 更新由 GitHub Releases 提供", color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = .72f), fontSize = 12.sp)
+                    appUpdateMessage?.let { message ->
+                        Text(message, color = MaterialTheme.colorScheme.error, fontSize = 12.sp, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite; error(message) })
+                    }
+                    ResponsivePair(
+                        first = { Button(onClick = { onOpenUpdate(update) }, modifier = it.heightIn(min = 48.dp), shape = CircleShape) { Text("查看更新") } },
+                        second = { TextButton(onClick = { onDismissUpdate(update) }, modifier = it.heightIn(min = 48.dp)) { Text("忽略此版本", color = MaterialTheme.colorScheme.onTertiaryContainer) } }
+                    )
+                }
+            }
         }
         PanelCard {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -295,7 +325,7 @@ private fun MetricCard(label: String, amount: String, icon: String, accent: Colo
 }
 
 @Composable
-internal fun ActivityScreen(padding: PaddingValues, activities: List<Activity>, accounts: List<AccountEntity> = emptyList(), tags: List<TagEntity> = emptyList(), onEdit: (Activity) -> Unit, onDelete: (Activity) -> Unit, readOnly: Boolean = false) {
+internal fun ActivityScreen(padding: PaddingValues, activities: List<Activity>, accounts: List<AccountEntity> = emptyList(), tags: List<TagEntity> = emptyList(), onEdit: (Activity) -> Unit, onDelete: (Activity) -> Unit, readOnly: Boolean = false, actionRunning: Boolean = false, actionMessage: String? = null, onImport: (() -> Unit)? = null) {
     var filter by rememberSaveable { mutableStateOf("全部") }
     var range by rememberSaveable { mutableStateOf("累计") }
     var accountId by rememberSaveable { mutableLongStateOf(0L) }
@@ -309,7 +339,11 @@ internal fun ActivityScreen(padding: PaddingValues, activities: List<Activity>, 
     val accountOptions = (listOf(AccountEntity(TransactionEntity.LOCAL_ACCOUNT_ID, "本地钱包", "CNY")) + accounts.filter { account -> !account.hidden && account.type == 1 && (account.parentId == 0L || accounts.any { it.id == account.parentId && !it.hidden }) }).distinctBy { it.id }
     val categoryOptions = activities.map { it.category }.filter(String::isNotBlank).distinct().sorted()
     LazyColumn(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        item { PageHeading("流水", if (readOnly) "可新增流水；既有流水编辑正在接入。" else "每一笔，都清楚。") }
+        item { PageHeading("流水", if (readOnly) "你在此账本中为只读成员。" else "每一笔，都清楚。") }
+        if (onImport != null && !readOnly) item {
+            OutlinedButton(onClick = onImport, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("导入支付宝 / 微信账单") }
+        }
+        actionMessage?.let { message -> item { Text(message, color = if (message.startsWith("删除失败")) MaterialTheme.colorScheme.error else Muted, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) } }
         item { OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), label = { Text("搜索交易描述") }, leadingIcon = { Mark("search", Muted, 20) }, singleLine = true, shape = RoundedCornerShape(18.dp)) }
         item { Text("日期范围", color = Muted, fontSize = 12.sp); FilterRow(listOf("近 7 天", "近 30 天", "近 90 天", "累计"), range) { range = it } }
         item { Text("类型", color = Muted, fontSize = 12.sp); FilterRow(listOf("全部", "支出", "收入", "转账", "余额调整"), filter) { filter = it } }
@@ -318,7 +352,10 @@ internal fun ActivityScreen(padding: PaddingValues, activities: List<Activity>, 
         if (tags.isNotEmpty()) item { Text("标签", color = Muted, fontSize = 12.sp); FilterIdRow(listOf(0L to "全部") + tags.map { it.id to "#${it.name}" }, tagId) { tagId = it } }
         item { Text("${filtered.size} 笔记录", color = Muted, fontSize = 12.sp) }
         if (filtered.isEmpty()) item { Text(if (activities.isEmpty()) "还没有流水，点击下方橙色按钮记下第一笔。" else "没有符合条件的流水，试试其他筛选条件。", color = Muted) }
-        else items(filtered, key = { it.id }) { TransactionRow(it, onEdit = if (readOnly) null else ({ onEdit(it) }), onDelete = if (readOnly) null else ({ pendingDelete = it })) }
+        else items(filtered, key = { it.id }) { row ->
+            val editable = !readOnly && row.editable && !actionRunning
+            TransactionRow(row, onEdit = if (editable) ({ onEdit(row) }) else null, onDelete = if (editable) ({ pendingDelete = row }) else null)
+        }
     }
     pendingDelete?.let { target ->
         AlertDialog(
@@ -347,7 +384,7 @@ internal fun ActivityScreen(padding: PaddingValues, activities: List<Activity>, 
 private fun TransactionRow(row: Activity, onEdit: (() -> Unit)? = null, onDelete: (() -> Unit)? = null) {
     val incoming = row.kind == "收入" || (row.kind == "余额调整" && row.sourceAmountMinor > 0)
     val icon = when (row.kind) { "转账" -> "swap"; "余额调整" -> "wallet"; else -> if (incoming) "in" else "out" }
-    Surface(onClick = { onEdit?.invoke() }, color = Panel, shape = RoundedCornerShape(18.dp)) {
+    Surface(onClick = { onEdit?.invoke() }, enabled = onEdit != null, color = Panel, shape = RoundedCornerShape(18.dp)) {
         Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             IconTile(icon, if (incoming) IncomeGreen else Coral)
             Column(Modifier.weight(1f)) {
@@ -364,7 +401,7 @@ private fun TransactionRow(row: Activity, onEdit: (() -> Unit)? = null, onDelete
 }
 
 @Composable
-internal fun EntryScreen(padding: PaddingValues, initialIncome: Boolean, existing: Activity? = null, customCategories: List<String> = emptyList(), accounts: List<AccountEntity> = emptyList(), serverCategories: List<CategoryEntity> = emptyList(), tags: List<TagEntity> = emptyList(), exchangeRates: List<ExchangeRateEntity> = emptyList(), defaultAccountId: Long = TransactionEntity.LOCAL_ACCOUNT_ID, saving: Boolean = false, saveError: String? = null, onAIRecognition: () -> Unit = {}, onSave: (Long, String, Int, String, Long?, String?, Long, String, Long?, Long) -> Unit) {
+internal fun EntryScreen(padding: PaddingValues, initialIncome: Boolean, existing: Activity? = null, customCategories: List<String> = emptyList(), accounts: List<AccountEntity> = emptyList(), serverCategories: List<CategoryEntity> = emptyList(), tags: List<TagEntity> = emptyList(), exchangeRates: List<ExchangeRateEntity> = emptyList(), defaultAccountId: Long = TransactionEntity.LOCAL_ACCOUNT_ID, saving: Boolean = false, saveError: String? = null, onAIRecognition: () -> Unit = {}, onlineOnly: Boolean = false, onSave: (Long, String, Int, String, Long?, String?, Long, String, Long?, Long) -> Unit) {
     var transactionType by rememberSaveable(existing?.id, initialIncome) { mutableStateOf(existing?.kind ?: if (initialIncome) "收入" else "支出") }
     var amount by rememberSaveable(existing?.id) { mutableStateOf(existing?.sourceAmountMinor?.takeIf { it != 0L }?.let { kotlin.math.abs(it) / 100.0 }?.let { "%.2f".format(Locale.US, it) } ?: existing?.let { parseAmountForUi(it.amount) } ?: "") }
     var note by rememberSaveable(existing?.id) { mutableStateOf(existing?.title ?: "") }
@@ -372,7 +409,8 @@ internal fun EntryScreen(padding: PaddingValues, initialIncome: Boolean, existin
     val isTransfer = transactionType == "转账"
     val isBalance = transactionType == "余额调整"
     var balanceIncrease by rememberSaveable(existing?.id) { mutableStateOf((existing?.sourceAmountMinor ?: 1L) > 0) }
-    val availableCategories = (if (isIncome) incomeCategories else expenseCategories).plus(customCategories).distinct()
+    val remoteEntryCategories = serverCategories.filter { it.isSelectableLeaf(serverCategories, if (isIncome) 1 else 2) }
+    val availableCategories = if (onlineOnly) remoteEntryCategories.map { it.name } else (if (isIncome) incomeCategories else expenseCategories).plus(customCategories).distinct()
     var category by rememberSaveable(existing?.id, initialIncome) { mutableStateOf(existing?.category ?: availableCategories.first()) }
     val transferCategories = serverCategories.filter { it.isSelectableLeaf(serverCategories, 3) }
     var transferCategoryId by rememberSaveable(existing?.id) { mutableStateOf(existing?.categoryId ?: transferCategories.firstOrNull()?.id) }
@@ -393,7 +431,7 @@ internal fun EntryScreen(padding: PaddingValues, initialIncome: Boolean, existin
     val destinationValue = if (!crossCurrency) value else runCatching { destinationAmount.toBigDecimalOrNull()?.movePointRight(2)?.longValueExact() }.getOrNull()
     val suggestedDestinationValue = if (crossCurrency && value != null) convertMinorAmount(value, selectedAccount!!.currency, destinationAccount!!.currency, exchangeRates) else null
     val destinationValid = !isTransfer || (destinationAccount != null && destinationValue != null && destinationValue in 1..99_999_999_999L)
-    val categoryValid = isBalance || if (isTransfer) transferCategories.any { it.id == transferCategoryId } else true
+    val categoryValid = isBalance || if (isTransfer) transferCategories.any { it.id == transferCategoryId } else !onlineOnly || remoteEntryCategories.any { it.name == category }
     val keyboard = LocalSoftwareKeyboardController.current
     Screen(padding) {
         PageHeading("记一笔", "把日常，记得清楚。")
@@ -452,14 +490,14 @@ internal fun EntryScreen(padding: PaddingValues, initialIncome: Boolean, existin
             }
         }
         OutlinedTextField(note, { note = it }, Modifier.fillMaxWidth(), label = { Text("描述（可选）") }, placeholder = { Text("例如：午餐、工资、咖啡") }, shape = RoundedCornerShape(18.dp), minLines = 2, maxLines = 4)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) { Mark("lock", Muted, 16); Text("保存在本设备，无需网络", color = Muted, fontSize = 12.sp) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) { Mark(if (onlineOnly) "connect" else "lock", Muted, 16); Text(if (onlineOnly) "共享账本修改会直接提交服务器" else "保存在本设备，无需网络", color = Muted, fontSize = 12.sp) }
         saveError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         Button(onClick = { if (valid && destinationValid && categoryValid) {
             keyboard?.hide()
             val type = when (transactionType) { "余额调整" -> TransactionRepository.TYPE_MODIFY_BALANCE; "收入" -> TransactionRepository.TYPE_INCOME; "转账" -> TransactionRepository.TYPE_TRANSFER; else -> TransactionRepository.TYPE_EXPENSE }
             val signedAmount = if (isBalance && !balanceIncrease) -value!! else value!!
             val selectedCategory = if (isBalance) "余额调整" else if (isTransfer) transferCategories.first { it.id == transferCategoryId }.name else category
-            val selectedCategoryId = if (isBalance) null else if (isTransfer) transferCategoryId else existing?.categoryId?.takeIf { existing.category == category && existing.kind == transactionType }
+            val selectedCategoryId = if (isBalance) null else if (isTransfer) transferCategoryId else if (onlineOnly) remoteEntryCategories.firstOrNull { it.name == category }?.id else existing?.categoryId?.takeIf { existing.category == category && existing.kind == transactionType }
             onSave(signedAmount, note, type, selectedCategory, selectedCategoryId, existing?.id, accountId, selectedTagIdsJson, destinationAccountId.takeIf { isTransfer }, destinationValue.takeIf { isTransfer } ?: 0L)
         } }, enabled = valid && destinationValid && categoryValid && !saving && selectedAccount != null, modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp), shape = CircleShape) { Text(if (saving) "正在保存…" else if (existing?.serverId != null) "保存修改" else "保存$transactionType") }
     }
@@ -1455,6 +1493,7 @@ private fun formatConflictTime(value: Long, utcOffset: Int): String {
             "out" -> { line(6f,18f,18f,5f); poly(8f,5f,18f,5f,18f,15f) }
             "chevron" -> poly(9f,5f,16f,12f,9f,19f)
             "schedule" -> { drawCircle(tint, 8f*u, pt(12f,12f), style=Stroke(1.7f*u)); line(12f,12f,12f,7f); line(12f,12f,16f,13f) }
+            "update" -> { line(12f,3f,12f,15f); poly(7f,10f,12f,15f,17f,10f); poly(5f,19f,5f,21f,19f,21f,19f,19f) }
             "back" -> poly(15f,5f,8f,12f,15f,19f)
             "search" -> { drawCircle(tint,6.5f*u,pt(10f,10f),style=Stroke(1.7f*u)); line(15f,15f,21f,21f) }
             "lock" -> { poly(7f,10f,7f,6f,9f,3f,15f,3f,17f,6f,17f,10f); poly(5f,10f,19f,10f,19f,21f,5f,21f,5f,10f); line(12f,14f,12f,17f) }

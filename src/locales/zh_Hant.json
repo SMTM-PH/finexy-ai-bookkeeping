@@ -1485,6 +1485,8 @@
     "Submit": "提交",
     "Add": "新增",
     "Import": "匯入",
+    "Import Alipay": "匯入支付寶帳單",
+    "Import WeChat Pay": "匯入微信帳單",
     "Export": "匯出",
     "Apply": "套用",
     "Save": "儲存",

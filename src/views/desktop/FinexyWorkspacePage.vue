@@ -139,6 +139,7 @@
                                 /></button></label
                     ></transition>
 
+                    <ReleaseUpdateNotice />
                     <header class="page-head">
                         <div>
                             <p>{{ config.eyebrow }}</p>
@@ -146,6 +147,10 @@
                             <span>{{ config.description }}</span>
                         </div>
                         <div>
+                            <template v-if="pageKey === 'activity' && selectedLedgerId === DefaultLedgerId && isDataImportingEnabled()">
+                                <button class="secondary" :disabled="busy" @click="importStatement('alipay_app_csv')">导入支付宝</button>
+                                <button class="secondary" :disabled="busy" @click="importStatement('wechat_pay_app')">导入微信</button>
+                            </template>
                             <button
                                 v-if="pageKey !== 'rates'"
                                 class="secondary"
@@ -2327,6 +2332,7 @@
         <AccountEditDialog ref="accountEditDialog" />
         <CategoryEditDialog ref="categoryEditDialog" />
         <ConfirmDialog ref="confirmDialog" />
+        <ImportDialog ref="statementImportDialog" :persistent="true" />
     </div>
 </template>
 
@@ -2348,6 +2354,8 @@ import { TransactionEditPageType } from "@/views/base/transactions/TransactionEd
 import AccountEditDialog from "@/views/desktop/accounts/list/dialogs/EditDialog.vue";
 import CategoryEditDialog from "@/views/desktop/categories/list/dialogs/EditDialog.vue";
 import ConfirmDialog from "@/components/desktop/ConfirmDialog.vue";
+import ImportDialog from "@/views/desktop/transactions/import/ImportDialog.vue";
+import ReleaseUpdateNotice from "@/components/ReleaseUpdateNotice.vue";
 import GlobalLedgerSwitcher from "@/components/desktop/GlobalLedgerSwitcher.vue";
 import { useAccountsStore } from "@/stores/account.ts";
 import { useTransactionCategoriesStore } from "@/stores/transactionCategory.ts";
@@ -2389,7 +2397,9 @@ import { getCurrentUnixTime } from "@/lib/datetime.ts";
 import services from "@/lib/services.ts";
 import logger from "@/lib/logger.ts";
 import { getClientDisplayVersion, getClientBuildTime } from "@/lib/version.ts";
+import { checkForWebUpdate } from "@/lib/release_update.ts";
 import {
+    isDataImportingEnabled,
     isTransactionFromAIImageRecognitionEnabled,
     setTransactionFromAIImageRecognitionEnabled,
     setTransactionFromAITextRecognitionEnabled,
@@ -2581,6 +2591,7 @@ const categoryEditDialog =
     useTemplateRef<CategoryDialogType>("categoryEditDialog");
 type ConfirmDialogType = InstanceType<typeof ConfirmDialog>;
 const confirmDialog = useTemplateRef<ConfirmDialogType>("confirmDialog");
+const statementImportDialog = useTemplateRef<InstanceType<typeof ImportDialog>>("statementImportDialog");
 const accountsStore = useAccountsStore();
 const categoriesStore = useTransactionCategoriesStore();
 const tagsStore = useTransactionTagsStore();
@@ -4002,6 +4013,14 @@ function transactionToItem(transaction: Transaction): Item {
 function refresh() {
     void loadPageData(true);
 }
+function importStatement(fileType: string): void {
+    if (busy.value || selectedLedgerId.value !== DefaultLedgerId || !isDataImportingEnabled()) return;
+    statementImportDialog.value?.open(fileType).then(() => {
+        void loadPageData(false, false);
+    }).catch((error: unknown) => {
+        if (error) showError(error);
+    });
+}
 function resetFilters() {
     typeFilter.value = "all";
     accountFilter.value = "all";
@@ -5171,15 +5190,18 @@ function openAboutInfo(type: "privacy" | "license") {
                   ],
               };
 }
-function checkForUpdates() {
+async function checkForUpdates() {
     busy.value = true;
-    services.getServerVersion().then(response => {
-        const server = response.data.result;
-        const serverVersion = server?.version ? `v${server.version}` : "未知";
-        showToast(`客户端 ${clientDisplayVersion} · 服务端 ${serverVersion}`);
-    }).catch(showError).finally(() => {
+    try {
+        const result = await checkForWebUpdate(true);
+        showToast(result.status === "available"
+            ? `发现新版本 v${result.release.version}，可在页面顶部查看更新`
+            : `当前版本 v${result.currentVersion}，未发现更高的正式版本`);
+    } catch {
+        showToast("检查更新失败，请检查网络后重试");
+    } finally {
         busy.value = false;
-    });
+    }
 }
 onMounted(() => {
     void loadPageData(false);

@@ -399,14 +399,6 @@ data class RemoteAccountOption(
 }
 
 
-fun RemoteFamilyGroup.toEntity() = FamilyGroupEntity(
-    id = id, ownerUid = ownerUid, name = name, comment = comment, memberCount = memberCount, createdTime = createdTime
-)
-
-fun RemoteFamilyMember.toEntity() = FamilyMemberEntity(
-    id = id, familyId = familyId, uid = uid, role = role, status = status, nickname = nickname, joinedTime = joinedTime
-)
-
 fun RemoteLedger.toEntity() = LedgerEntity(
     id = id, ownerUid = ownerUid, type = type, familyId = familyId, name = name, comment = comment, createdTime = createdTime
 )

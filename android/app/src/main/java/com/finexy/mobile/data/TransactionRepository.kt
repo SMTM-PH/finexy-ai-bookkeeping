@@ -38,14 +38,13 @@ class TransactionRepository(context: Context, private val database: FinexyDataba
     fun observeProductAssets(): Flow<List<ProductAssetEntity>> = dao.observeProductAssets()
     fun observeExchangeRates(): Flow<List<ExchangeRateEntity>> = dao.observeExchangeRates()
 
-    // --- 家庭、账本与存钱目标 ------------------------------------------
-
-    fun observeFamilyGroups(): Flow<List<FamilyGroupEntity>> = dao.observeFamilyGroups()
-    fun observeFamilyMembers(): Flow<List<FamilyMemberEntity>> = dao.observeFamilyMembers()
+    // --- 账本与存钱目标 -------------------------------------------------
     fun observeLedgers(): Flow<List<LedgerEntity>> = dao.observeLedgers()
     fun observeSavingsGoals(ledgerId: Long): Flow<List<SavingsGoalEntity>> = dao.observeSavingsGoals(ledgerId)
     fun observeLedgerAccounts(ledgerId: Long): Flow<List<AccountEntity>> = dao.observeLedgerAccounts(ledgerId).map { rows -> rows.map { it.toAccountEntity() } }
     fun observeLedgerTransactions(ledgerId: Long): Flow<List<TransactionEntity>> = dao.observeLedgerTransactions(ledgerId).map { rows -> rows.map { it.toTransactionEntity() } }
+    fun observeLedgerTransactionEditability(ledgerId: Long): Flow<Map<Long, Boolean>> =
+        dao.observeLedgerTransactions(ledgerId).map { rows -> rows.associate { it.id to it.editable } }
 
     suspend fun allSavingsGoals(): List<SavingsGoalEntity> = dao.allSavingsGoals()
 
@@ -58,30 +57,6 @@ class TransactionRepository(context: Context, private val database: FinexyDataba
     suspend fun removeSavingsGoal(id: Long) {
         require(id > 0) { "目标 ID 无效" }
         dao.deleteSavingsGoal(id)
-    }
-
-    suspend fun replaceFamilyGroups(remote: List<RemoteFamilyGroup>) = database.withTransaction {
-        require(remote.map { it.id }.distinct().size == remote.size && remote.all { it.id > 0 }) { "家庭列表包含无效或重复记录" }
-        if (remote.isEmpty()) dao.deleteAllFamilyGroups() else {
-            dao.upsertFamilyGroups(remote.map { group ->
-                FamilyGroupEntity(group.id, group.ownerUid, group.name, group.comment, group.memberCount, group.createdTime)
-            })
-            dao.deleteFamilyGroupsNotIn(remote.map { it.id })
-        }
-    }
-
-    /** Full per-family member reconcile; rows of other families stay untouched. */
-    suspend fun replaceFamilyMembers(familyId: Long, remote: List<RemoteFamilyMember>) = database.withTransaction {
-        require(familyId > 0) { "家庭 ID 无效" }
-        require(remote.map { it.id }.distinct().size == remote.size && remote.all { it.id > 0 && it.familyId == familyId }) { "家庭成员包含无效或重复记录" }
-        if (remote.isEmpty()) {
-            dao.deleteAllFamilyMembers()
-        } else {
-            dao.upsertFamilyMembers(remote.map { member ->
-                FamilyMemberEntity(member.id, member.familyId, member.uid, member.role, member.status, member.nickname, member.joinedTime)
-            })
-            dao.deleteFamilyMembersNotIn(familyId, remote.map { it.id })
-        }
     }
 
     suspend fun replaceLedgers(remote: List<RemoteLedger>) = database.withTransaction {
@@ -115,7 +90,8 @@ class TransactionRepository(context: Context, private val database: FinexyDataba
         if (transactions.isNotEmpty()) dao.upsertLedgerTransactions(transactions.map { item ->
             LedgerTransactionCacheEntity(item.id, ledgerId, item.type, item.sourceAccountId, item.destinationAccountId,
                 item.categoryId, item.categoryName, item.sourceAmountMinor, item.destinationAmountMinor, item.currency,
-                item.comment, Math.multiplyExact(item.time, 1000L), item.utcOffset, item.tagIdsJson, item.hideAmount)
+                item.comment, Math.multiplyExact(item.time, 1000L), item.utcOffset, item.tagIdsJson, item.hideAmount,
+                item.recorderUid, item.payerUid, item.editable)
         })
     }
 

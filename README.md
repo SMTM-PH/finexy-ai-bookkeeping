@@ -90,9 +90,9 @@ Finexy 是以**账本**为中心的自托管财务管理系统。你可以为个
 | --- | --- |
 | `Finexy-Windows-1.9.1-x64-Setup.exe` | Windows x64 安装版 |
 | `Finexy-Windows-1.9.1-x64-Portable.exe` | Windows 便携版 |
-| `Finexy-NAS-1.9.1-amd64-deploy.zip` | NAS 在线部署配置包 |
-| `Finexy-NAS-1.9.1-linux-amd64.tar` | Finexy 与 OCR 的 AMD64 Docker 离线镜像 |
-| `Finexy-Android-1.0.0-debug.apk` | Android 测试版（调试签名，客户端自身版本号） |
+| `Finexy-NAS-1.9.2-amd64-deploy.zip` | NAS 在线部署配置包 |
+| `Finexy-NAS-1.9.2-linux-amd64.tar` | Finexy AMD64 镜像包（OCR 需单独准备） |
+| `Finexy-Android-1.0.1-debug.apk` | Android 测试版（调试签名，客户端自身版本号） |
 | `SHA256SUMS.txt` | 发布文件完整性校验值 |
 
 Windows 包当前未进行代码签名，首次运行时 SmartScreen 可能显示提示。Android APK 使用调试签名，请只从本仓库 Releases 下载并核对 SHA-256；正式发布签名将在后续版本提供。
@@ -114,7 +114,7 @@ Windows 包当前未进行代码签名，首次运行时 SmartScreen 可能显�
 Docker Hub 网页搜索时请使用包含命名空间的完整名称 `ph97/finexy-bookkeeping`。公开镜像无需登录即可拉取：
 
 ```bash
-docker pull ph97/finexy-bookkeeping:1.9.1-amd64
+docker pull ph97/finexy-bookkeeping:1.9.2-amd64
 docker pull ph97/finexy-bookkeeping:latest-amd64
 docker pull ph97/finexy-bookkeeping:ocr-1.0-amd64
 ```

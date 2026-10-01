@@ -97,6 +97,7 @@
 
                 <v-window class="disable-tab-transition" v-model="currentStep">
                     <v-window-item value="uploadFile">
+                        <p class="mb-2" v-if="fileType === 'alipay_app_csv' || fileType === 'wechat_pay_app'">支付宝、微信账单将导入个人账本；请先核对账户和分类，避免重复导入。</p>
                         <v-row class="pt-2">
                             <v-col cols="12" md="12">
                                 <two-column-select primary-key-field="displayCategoryName"
@@ -205,6 +206,11 @@
                                     v-model="fileName"
                                     @click="showOpenFileDialog"
                                 />
+                            </v-col>
+
+                            <v-col cols="12" md="12" v-if="isAlipayArchive">
+                                <v-text-field type="password" autocomplete="off" label="压缩包密码" hint="密码仅用于浏览器本地解压，不会上传" persistent-hint
+                                              :disabled="submitting" v-model="archivePassword" />
                             </v-col>
 
                             <v-col cols="12" md="12" v-if="isImportDataFromTextbox">
@@ -369,6 +375,7 @@ import { type ImportTransactionResponse, ImportTransaction } from '@/models/impo
 
 import { isDefined, isNumber } from '@/lib/common.ts';
 import { findExtensionByType, isFileExtensionSupported, detectFileEncoding } from '@/lib/file.ts';
+import { extractAlipayCsv } from '@/lib/alipay_archive.ts';
 import { generateRandomUUID } from '@/lib/misc.ts';
 import { isTransactionFromAITextRecognitionEnabled, isTransactionFromAIImageRecognitionEnabled } from '@/lib/server_settings.ts';
 import { compressJpgImageByQuality } from '@/lib/ui/common.ts';
@@ -463,6 +470,7 @@ const detectingFileEncoding = ref<boolean>(false);
 const autoDetectedFileEncoding = ref<string | undefined>(undefined);
 const processCustomFileFormatMethod = ref<ImportCustomFileFormatProcessMethod>(ImportCustomFileFormatProcessMethod.ColumnMapping);
 const importFile = ref<File | null>(null);
+const archivePassword = ref<string>('');
 const importImageFiles = ref<BatchImportImageItem[]>([]);
 const importData = ref<string>('');
 const importAdditionalOptions = ref<ImportFileTypeSupportedAdditionalOptions>({});
@@ -517,6 +525,7 @@ const isCustomFileFormat = computed<boolean>(() => fileType.value === 'dsv' || f
 const isImportDataFromTextbox = computed<boolean>(() => allSupportedImportFileTypesMap.value[fileType.value]?.dataFromTextbox ?? false);
 const needAITextRecognition = computed<boolean>(() => allSupportedImportFileTypesMap.value[fileType.value]?.needAITextRecognition ?? false);
 const isAIImageImport = computed<boolean>(() => fileType.value === 'ai_image');
+const isAlipayArchive = computed<boolean>(() => fileType.value === 'alipay_app_csv' && importFile.value?.name.toLowerCase().endsWith('.zip') === true);
 const needAIImageRecognition = computed<boolean>(() => allSupportedImportFileTypesMap.value[fileType.value]?.needAIImageRecognition ?? false);
 const supportedAdditionalOptions = computed<ImportFileTypeSupportedAdditionalOptions | undefined>(() => allSupportedImportFileTypesMap.value[fileType.value]?.supportedAdditionalOptions);
 const supportedAIAdditionalPrompt = computed<boolean>(() => !!allSupportedImportFileTypesMap.value[fileType.value]?.supportedAIAdditionalPrompt);
@@ -583,6 +592,9 @@ const allSupportedImportFileTypesMap = computed<Record<string, LocalizedImportFi
 });
 
 const supportedImportFileExtensions = computed<string | undefined>(() => {
+    if (fileType.value === 'alipay_app_csv') {
+        return '.csv,.zip';
+    }
     if (allFileSubTypes.value && allFileSubTypes.value.length) {
         const subTypeExtensions = findExtensionByType(allFileSubTypes.value, fileSubType.value);
 
@@ -667,11 +679,11 @@ function loadInitFileTypeFromSettings(): void {
     }
 }
 
-function open(): Promise<void> {
-    fileType.value = 'ezbookkeeping';
-    fileSubType.value = 'ezbookkeeping_csv';
+function open(initialFileType?: string): Promise<void> {
+    fileType.value = initialFileType || 'ezbookkeeping';
+    fileSubType.value = initialFileType === 'wechat_pay_app' ? 'wechat_pay_app_xlsx' : initialFileType || 'ezbookkeeping_csv';
 
-    if (settingsStore.appSettings.rememberLastSelectedFileTypeInImportTransactionDialog && settingsStore.appSettings.lastSelectedFileTypeInImportTransactionDialog) {
+    if (!initialFileType && settingsStore.appSettings.rememberLastSelectedFileTypeInImportTransactionDialog && settingsStore.appSettings.lastSelectedFileTypeInImportTransactionDialog) {
         loadInitFileTypeFromSettings();
     }
 
@@ -682,6 +694,7 @@ function open(): Promise<void> {
     currentStep.value = 'uploadFile';
     importProcess.value = 0;
     importFile.value = null;
+    archivePassword.value = '';
     importData.value = '';
     importAdditionalOptions.value = Object.assign({}, supportedAdditionalOptions.value ?? {});
     importAIAdditionalPrompt.value = '';
@@ -757,7 +770,7 @@ function setImportFile(event: Event): void {
         autoDetectedFileEncoding.value = undefined;
         el.value = '';
 
-        if (allSupportedEncodings.value) {
+        if (allSupportedEncodings.value && !isAlipayArchive.value) {
             detectingFileEncoding.value = true;
 
             detectFileEncoding(importFile.value).then(detectedEncoding => {
@@ -932,7 +945,7 @@ function cancelBatchRecognizeImages(): void {
     snackbar.value?.showMessage('User Canceled');
 }
 
-function parseData(): void {
+async function parseData(): Promise<void> {
     let uploadFile: File;
     let type: string = fileType.value;
     let encoding: string | undefined = undefined;
@@ -1012,7 +1025,26 @@ function parseData(): void {
             }
         }
 
-        uploadFile = importFile.value;
+        if (isAlipayArchive.value) {
+            if (!archivePassword.value) {
+                snackbar.value?.showError('请输入压缩包密码');
+                return;
+            }
+
+            submitting.value = true;
+
+            try {
+                uploadFile = await extractAlipayCsv(importFile.value, archivePassword.value);
+            } catch (error) {
+                submitting.value = false;
+                snackbar.value?.showError(error instanceof Error ? error.message : '解压失败');
+                return;
+            }
+
+            submitting.value = false;
+        } else {
+            uploadFile = importFile.value;
+        }
     } else if (isImportDataFromTextbox.value) {
         if (!importData.value) {
             snackbar.value?.showError('No data to import');
@@ -1269,6 +1301,7 @@ function close(completed: boolean): void {
 }
 
 watch(fileType, (newValue) => {
+    archivePassword.value = '';
     const subFileTypes = allSupportedImportFileTypesMap.value[newValue]?.subTypes;
 
     if (subFileTypes && subFileTypes.length) {
@@ -1295,7 +1328,7 @@ watch(fileSubType, (newValue) => {
         settingsStore.setLastSelectedFileTypeInImportTransactionDialog(`${fileType.value}|${newValue}`);
     }
 
-    let supportedExtensions: string | undefined = findExtensionByType(allFileSubTypes.value, newValue);
+    let supportedExtensions: string | undefined = fileType.value === 'alipay_app_csv' ? '.csv,.zip' : findExtensionByType(allFileSubTypes.value, newValue);
 
     if (!supportedExtensions) {
         supportedExtensions = allSupportedImportFileTypesMap.value[fileType.value]?.extensions;

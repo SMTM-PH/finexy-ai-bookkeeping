@@ -7,6 +7,7 @@ import (
 	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/datastore"
 	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/log"
 	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/models"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/services"
 )
 
 // Database represents the database command
@@ -220,6 +221,14 @@ func updateAllDatabaseTablesStructure(c *core.CliContext) error {
 	}
 
 	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] ledger table maintained successfully")
+
+	err = services.Ledgers.MigrateLegacyFamilies(c)
+
+	if err != nil {
+		return err
+	}
+
+	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] legacy family data migrated to ledgers successfully")
 
 	err = datastore.Container.UserDataStore.SyncStructs(new(models.SavingsGoal), new(models.SavingsGoalFund))
 

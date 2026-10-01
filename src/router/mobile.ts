@@ -49,6 +49,8 @@ import TagListPage from '@/views/mobile/tags/ListPage.vue';
 import TagGroupListPage from '@/views/mobile/tags/GroupListPage.vue';
 
 import TemplateListPage from '@/views/mobile/templates/ListPage.vue';
+import LedgerListPage from '@/views/mobile/ledgers/ListPage.vue';
+import SavingsGoalListPage from '@/views/mobile/savings/ListPage.vue';
 
 function asyncResolve(component: unknown): (ctx: Router.RouteCallbackCtx) => void {
     return function({ resolve }: { resolve: ({ component }: { component: unknown }) => void }): void {
@@ -350,6 +352,20 @@ const routes: Router.RouteParameters[] = [
     {
         path: '/schedule/list',
         async: asyncResolve(TemplateListPage),
+        beforeEnter: [checkLogin]
+    },
+    {
+        path: '/ledger/manage',
+        async: asyncResolve(LedgerListPage),
+        beforeEnter: [checkLogin]
+    },
+    {
+        path: '/family/manage',
+        redirect: '/ledger/manage'
+    },
+    {
+        path: '/savings/goals',
+        async: asyncResolve(SavingsGoalListPage),
         beforeEnter: [checkLogin]
     },
     {

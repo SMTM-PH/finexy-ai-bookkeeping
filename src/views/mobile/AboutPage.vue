@@ -13,6 +13,7 @@
         <f7-block-title class="margin-top">{{ tt('global.app.title') }}</f7-block-title>
         <f7-list strong inset dividers>
             <f7-list-item :title="tt('Version')" :after="clientVersion" @click="showVersion"></f7-list-item>
+            <f7-list-item title="检查更新" link="#" @click="checkForUpdates"></f7-list-item>
             <f7-list-item :title="tt('Build Time')" :after="clientBuildTime" v-if="clientBuildTime"></f7-list-item>
             <f7-list-item :title="tt('Official Website')" link="#" @click="openExternalUrl('https://github.com/SMTM-PH/finexy-ai-bookkeeping')"></f7-list-item>
             <f7-list-item :title="tt('Report Issue')" link="#" @click="openExternalUrl('https://github.com/SMTM-PH/finexy-ai-bookkeeping/issues')"></f7-list-item>
@@ -167,6 +168,7 @@ import { useAboutPageBase } from '@/views/base/AboutPageBase.ts';
 
 import { isWebAuthnCompletelySupported } from '@/lib/webauthn.ts';
 import { getStringifiedServerSetting } from '@/lib/server_settings.ts';
+import { checkForWebUpdate } from '@/lib/release_update.ts';
 
 const { tt, getCurrentLanguageTag, getAllLanguageOptions } = useI18n();
 const { showAlert, showToast, openExternalUrl } = useI18nUIComponents();
@@ -279,6 +281,17 @@ function showVersion(): void {
 
     if (serverDisplayVersion.value && serverDisplayVersion.value !== 'unknown' && serverDisplayVersion.value !== clientVersion) {
         showAlert(versionMessage);
+    }
+}
+
+async function checkForUpdates(): Promise<void> {
+    try {
+        const result = await checkForWebUpdate(true);
+        showToast(result.status === 'available'
+            ? `发现新版本 v${result.release.version}，请返回首页查看更新`
+            : `当前版本 v${result.currentVersion}，未发现更高的正式版本`);
+    } catch {
+        showToast('检查更新失败，请检查网络后重试');
     }
 }
 
