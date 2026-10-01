@@ -39,7 +39,7 @@ RUN apk add git
 RUN if [ "$SKIP_TESTS" = "true" ]; then ./build.sh frontend --no-test; else ./build.sh frontend; fi
 
 # Package docker image
-FROM alpine:3.24.1
+FROM alpine:3.24.2
 LABEL maintainer="SMTM-PH"
 RUN addgroup -S -g 1000 ezbookkeeping && adduser -S -G ezbookkeeping -u 1000 ezbookkeeping
 RUN apk --no-cache add tzdata
