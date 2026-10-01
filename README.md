@@ -90,8 +90,8 @@ Finexy 是以**账本**为中心的自托管财务管理系统。你可以为个
 | --- | --- |
 | `Finexy-Windows-1.9.1-x64-Setup.exe` | Windows x64 安装版 |
 | `Finexy-Windows-1.9.1-x64-Portable.exe` | Windows 便携版 |
-| `Finexy-NAS-1.9.2-amd64-deploy.zip` | NAS 在线部署配置包 |
-| `Finexy-NAS-1.9.2-linux-amd64.tar` | Finexy AMD64 镜像包（OCR 需单独准备） |
+| `Finexy-NAS-1.9.3-amd64-deploy.zip` | NAS 在线部署配置包 |
+| `Finexy-NAS-1.9.3-linux-amd64.tar` | Finexy AMD64 镜像包（OCR 需单独准备） |
 | `Finexy-Android-1.0.1-debug.apk` | Android 测试版（调试签名，客户端自身版本号） |
 | `SHA256SUMS.txt` | 发布文件完整性校验值 |
 
