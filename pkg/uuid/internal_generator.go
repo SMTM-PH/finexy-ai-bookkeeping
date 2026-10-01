@@ -1,6 +1,7 @@
 package uuid
 
 import (
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -37,12 +38,17 @@ type InternalUuidInfo struct {
 type InternalUuidGenerator struct {
 	uuidSeqNumbers [1 << internalUuidTypeBits]atomic.Uint64
 	uuidServerId   uint8
+	readyAt        time.Time
+	ready          sync.Once
 }
 
 // NewInternalUuidGenerator returns a new internal uuid generator
 func NewInternalUuidGenerator(config *settings.Config) (*InternalUuidGenerator, error) {
 	generator := &InternalUuidGenerator{
 		uuidServerId: config.UuidServerId,
+		// Sequences start at zero. Skip the startup second so a fast restart
+		// cannot reuse IDs issued by the previous process in that second.
+		readyAt: time.Unix(time.Now().Unix()+1, 0),
 	}
 
 	return generator, nil
@@ -68,6 +74,11 @@ func (u *InternalUuidGenerator) GenerateUuids(idType UuidType, count uint16) []i
 	if count < 1 {
 		return uuids
 	}
+	u.ready.Do(func() {
+		if delay := time.Until(u.readyAt); delay > 0 {
+			time.Sleep(delay)
+		}
+	})
 
 	var unixTime uint64
 	var newFirstSeqId uint64
