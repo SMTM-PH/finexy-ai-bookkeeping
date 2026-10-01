@@ -1,4 +1,4 @@
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 
 import { useI18n } from '@/locales/helpers.ts';
 
@@ -12,8 +12,9 @@ import { updateMapCacheExpiration } from '@/lib/cache.ts';
 import { getOAuth2Provider, getOIDCCustomDisplayNames, getLoginPageTips } from '@/lib/server_settings.ts';
 import { getClientDisplayVersion } from '@/lib/version.ts';
 import { setExpenseAndIncomeAmountColor } from '@/lib/ui/common.ts';
+import { clearRememberedLogin, readRememberedLogin, saveRememberedLogin } from '@/lib/remembered_login.ts';
 
-export function useLoginPageBase(platform: 'mobile' | 'desktop') {
+export function useLoginPageBase(platform: 'mobile' | 'desktop', restoreSavedLogin = true) {
     const { getServerMultiLanguageConfigContent, getLocalizedOAuth2LoginText, setLanguage } = useI18n();
 
     const rootStore = useRootStore();
@@ -22,8 +23,18 @@ export function useLoginPageBase(platform: 'mobile' | 'desktop') {
 
     const version = `${getClientDisplayVersion()}`;
 
-    const username = ref<string>('');
-    const password = ref<string>('');
+    const savedLogin = restoreSavedLogin ? readRememberedLogin() : null;
+    const username = ref<string>(savedLogin?.username ?? '');
+    const password = ref<string>(savedLogin?.password ?? '');
+    const rememberLogin = ref<boolean>(!!savedLogin);
+    const rememberLoginError = ref<string>('');
+
+    watch(rememberLogin, enabled => {
+        rememberLoginError.value = '';
+        if (!enabled && !clearRememberedLogin()) {
+            rememberLoginError.value = '无法清除保存的登录信息，请在浏览器设置中清除此网站的数据。';
+        }
+    }, { flush: 'sync' });
     const passcode = ref<string>('');
     const backupCode = ref<string>('');
     const tempToken = ref<string>('');
@@ -48,6 +59,12 @@ export function useLoginPageBase(platform: 'mobile' | 'desktop') {
     const tips = computed<string>(() => getServerMultiLanguageConfigContent(getLoginPageTips()));
 
     function doAfterLogin(authResponse: AuthResponse): void {
+        if (!authResponse.need2FA && username.value && password.value) {
+            const saved = rememberLogin.value
+                ? saveRememberedLogin({ username: username.value, password: password.value })
+                : clearRememberedLogin();
+            if (!saved) rememberLoginError.value = '浏览器不允许保存登录信息，本次登录仍然有效。';
+        }
         if (authResponse.user) {
             const localeDefaultSettings = setLanguage(authResponse.user.language);
             settingsStore.updateLocalizedDefaultSettings(localeDefaultSettings);
@@ -62,6 +79,9 @@ export function useLoginPageBase(platform: 'mobile' | 'desktop') {
         if (authResponse.notificationContent) {
             rootStore.setNotificationContent(authResponse.notificationContent);
         }
+        if (rememberLoginError.value) {
+            rootStore.setNotificationContent(rememberLoginError.value);
+        }
     }
 
     return {
@@ -70,6 +90,8 @@ export function useLoginPageBase(platform: 'mobile' | 'desktop') {
         // states
         username,
         password,
+        rememberLogin,
+        rememberLoginError,
         passcode,
         backupCode,
         tempToken,

@@ -70,6 +70,15 @@
                                         />
                                     </v-col>
 
+                                    <v-col cols="12" class="py-0" v-if="isInternalAuthEnabled()">
+                                        <v-theme-provider theme="light" with-background>
+                                        <v-checkbox v-model="rememberLogin" class="remember-login-checkbox" label="记住账号和密码" hide-details
+                                                    :disabled="show2faInput || loggingInByPassword || loggingInByOAuth2 || verifying" />
+                                        <p class="remember-login-help text-caption mb-0">仅在个人设备使用；取消勾选可清除本机保存内容。</p>
+                                        <p v-if="rememberLoginError" role="alert" class="text-error text-caption">{{ rememberLoginError }}</p>
+                                        </v-theme-provider>
+                                    </v-col>
+
                                     <v-col cols="12" v-show="show2faInput">
                                         <v-text-field
                                             persistent-placeholder
@@ -222,6 +231,8 @@ const {
     version,
     username,
     password,
+    rememberLogin,
+    rememberLoginError,
     passcode,
     backupCode,
     tempToken,
@@ -236,7 +247,7 @@ const {
     oauth2LoginDisplayName,
     tips,
     doAfterLogin
-} = useLoginPageBase('desktop');
+} = useLoginPageBase('desktop', route.query['switch'] !== '1');
 
 const passwordInput = useTemplateRef<VTextField>('passwordInput');
 const passcodeInput = useTemplateRef<VTextField>('passcodeInput');
@@ -352,6 +363,14 @@ oauth2ClientSessionId.value = generateRandomUUID();
 </script>
 
 <style scoped>
+.remember-login-help {
+    color: rgba(var(--v-theme-on-surface), 0.85);
+}
+
+.remember-login-checkbox :deep(.v-selection-control) {
+    min-height: 48px;
+}
+
 .auth-logo h1 {
     color: #f7f8fb !important;
     font-weight: 700 !important;

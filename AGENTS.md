@@ -315,6 +315,8 @@ docker stop finexy-android-e2e
 
 32. **忘记密码字体修复与部署（2026-10-01）**：白色表单在深色主题下继承浅色文字，导致标题、说明和邮箱字段难以辨认。页面局部固定浅色主题，使用设计基线的中文正文字体及语义色，保持 Vuetify 浮动标签行为。lint、类型检查、生产/PWA 构建通过；浏览器分别在隔离候选镜像、本地 18080 与 NAS 8080 验证浅/深系统主题、375/768/1024/1440px、100%/125% 缩放各 16 个场景，文字颜色、字体、无横向溢出与无页面异常断言通过。镜像 `ai-bookkeeping-bookkeeping:forgot-password-font-20261001` 仅覆盖前端；本地保留 `rollback-pre-forgot-password-font-20261001`，NAS 新容器 `finexy-bookkeeping-import-fontfix` 沿用原环境变量及 data/storage/log 挂载，原导入容器停止保留。两处健康接口均 HTTP 200；无卷临时容器 `finexy-forgot-font-preview` 已停止并自动删除。未发送重置邮件、未写入真实账本，本轮未运行 Android 测试。1.9.2 GitHub 发布仍等待独立审核或用户明确授权管理员合并。
 
+33. **Web 记住登录信息（2026-10-01）**：桌面与移动 Web 登录页新增默认关闭的“记住账号和密码”，成功登录后保存到当前浏览器并自动填入，取消勾选立即清除；账号切换页初始化不回填旧账号。复用 CryptoJS 加密本地保存内容，密钥同样属于浏览器资料，仅提供设备便利，不宣称抵御浏览器资料访问者。未完成两步验证不保存。移动复选框恢复原生键盘焦点与读屏语义，两端点击区域至少 48px。全量 lint/类型检查、保存逻辑专项 3 项、生产/PWA 构建通过；无卷容器 finexy-remember-login-e2e 随机账号完成 11 项浏览器流程断言（两步验证挑战为响应合同模拟，不计完整 2FA E2E），深浅系统主题、四种宽度、100%/125% 缩放共 32 场景含键盘空格切换通过。证据 artifacts/remember-login-browser-e2e-final.json 与 remember-login-layout-final.json。部署镜像 ai-bookkeeping-bookkeeping:remember-login-20261001 至本地 18080，保留 rollback-pre-remember-login-20261001；桌面/移动冷启动无浏览器异常。未写入真实账本，临时容器已停止自动删除，未运行 Android 测试。NAS 已导入镜像，但自动审批拒绝容器替换操作且未给出具体原因，仍运行 finexy-bookkeeping-import-fontfix，已向用户请求本次更新授权；不得声称 NAS 新功能已部署。
+
 ### 阶段 E
 
 完成 TalkBack、最大字体、多尺寸/横屏、主题语义色、导航一致性；将 lint、Room migration、关键 instrumentation 和发布签名验证纳入 CI；生成并验证 release APK/AAB。生物识别成功路径需在已录入指纹的设备上人工验收。
