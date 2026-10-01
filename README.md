@@ -114,7 +114,7 @@ Windows 包当前未进行代码签名，首次运行时 SmartScreen 可能显�
 Docker Hub 网页搜索时请使用包含命名空间的完整名称 `ph97/finexy-bookkeeping`。公开镜像无需登录即可拉取：
 
 ```bash
-docker pull ph97/finexy-bookkeeping:1.9.2-amd64
+docker pull ph97/finexy-bookkeeping:1.9.3-amd64
 docker pull ph97/finexy-bookkeeping:latest-amd64
 docker pull ph97/finexy-bookkeeping:ocr-1.0-amd64
 ```
@@ -156,6 +156,7 @@ go test ./...
 - [贡献指南](CONTRIBUTING.md)
 - [分支策略](CONTRIBUTING.md#分支策略)
 - [安全政策](SECURITY.md)
+- [Agent 接入、Codex 配置与批量账单导入](docs/AGENT_ACCESS.md)
 - [行为准则](CODE_OF_CONDUCT.md)
 - [AI / 开发者必读项目手册](AGENTS.md)
 - [Web / Android UI/UX 设计基线](docs/UI_UX_DESIGN.md)

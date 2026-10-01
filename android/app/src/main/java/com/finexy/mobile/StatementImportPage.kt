@@ -55,7 +55,7 @@ internal fun StatementImportPage(
         item {
             TextButton(onClick = onBack, modifier = Modifier.heightIn(min = 48.dp)) { Text("返回流水") }
             Text("导入支付账单", style = MaterialTheme.typography.headlineSmall)
-            Text("先预览并校对账户、分类，确认后才会写入个人账本。重复导入同一账单会产生重复流水。")
+            Text("先预览并校对账户、分类，确认后才会写入当前选中的账本。重复导入同一账单会产生重复流水。")
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -76,7 +76,7 @@ internal fun StatementImportPage(
                     running = true; message = null; rows.clear()
                     runCatching {
                         val file = readStatementFile(context.contentResolver, selected, password, provider)
-                        api.parseStatement(file.name, file.bytes, file.fileType)
+                        api.parseStatement(file.name, file.bytes, file.fileType, ledgerId)
                     }.onSuccess { rows.addAll(it); message = "已解析 ${it.size} 笔，请核对后选择导入" }
                         .onFailure { message = "解析失败：${it.message ?: "请检查文件或密码"}" }
                     running = false

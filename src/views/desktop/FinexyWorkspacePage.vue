@@ -147,7 +147,7 @@
                             <span>{{ config.description }}</span>
                         </div>
                         <div>
-                            <template v-if="pageKey === 'activity' && selectedLedgerId === DefaultLedgerId && isDataImportingEnabled()">
+                            <template v-if="pageKey === 'activity' && selectedLedgerCanWrite && isDataImportingEnabled()">
                                 <button class="secondary" :disabled="busy" @click="importStatement('alipay_app_csv')">导入支付宝</button>
                                 <button class="secondary" :disabled="busy" @click="importStatement('wechat_pay_app')">导入微信</button>
                             </template>
@@ -825,7 +825,7 @@
                                     >
                                         退出登录
                                     </button>
-                                </div></template
+                                </div><AgentAccessPanel /></template
                             ><template
                                 v-else-if="selectedSetting === '基础设置'"
                                 ><div class="form-grid">
@@ -2355,6 +2355,7 @@ import AccountEditDialog from "@/views/desktop/accounts/list/dialogs/EditDialog.
 import CategoryEditDialog from "@/views/desktop/categories/list/dialogs/EditDialog.vue";
 import ConfirmDialog from "@/components/desktop/ConfirmDialog.vue";
 import ImportDialog from "@/views/desktop/transactions/import/ImportDialog.vue";
+import AgentAccessPanel from "@/components/AgentAccessPanel.vue";
 import ReleaseUpdateNotice from "@/components/ReleaseUpdateNotice.vue";
 import GlobalLedgerSwitcher from "@/components/desktop/GlobalLedgerSwitcher.vue";
 import { useAccountsStore } from "@/stores/account.ts";
@@ -3278,7 +3279,8 @@ const currentPage = ref(1);
 const pageSize = 10;
 const allSelected = ref(false);
 const reportPeriod = ref("近 6 个月");
-const selectedSetting = ref("个人资料");
+const selectedSetting = ref(route.query["tab"] === "securitySetting" ? "安全设置" : "个人资料");
+watch(() => route.query["tab"], tab => { if (tab === "securitySetting") selectedSetting.value = "安全设置"; });
 const profileName = ref(userStore.currentUserNickname || "当前用户");
 const profileEmail = ref(userStore.currentUserBasicInfo?.email || "");
 const currency = ref(userStore.currentUserDefaultCurrency || "CNY");
@@ -4014,7 +4016,7 @@ function refresh() {
     void loadPageData(true);
 }
 function importStatement(fileType: string): void {
-    if (busy.value || selectedLedgerId.value !== DefaultLedgerId || !isDataImportingEnabled()) return;
+    if (busy.value || !selectedLedgerCanWrite.value || !isDataImportingEnabled()) return;
     statementImportDialog.value?.open(fileType).then(() => {
         void loadPageData(false, false);
     }).catch((error: unknown) => {

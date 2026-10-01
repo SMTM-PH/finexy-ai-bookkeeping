@@ -124,6 +124,7 @@ type MCPListToolsResponse struct {
 
 // MCPTool defines the structure of a tool in the MCP
 type MCPTool struct {
+	Annotations  map[string]bool    `json:"annotations,omitempty"`
 	Name         string             `json:"name"`
 	InputSchema  *jsonschema.Schema `json:"inputSchema"`
 	OutputSchema *jsonschema.Schema `json:"outputSchema,omitempty"`

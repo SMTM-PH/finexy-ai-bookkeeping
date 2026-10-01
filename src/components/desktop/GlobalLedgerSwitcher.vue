@@ -1,14 +1,9 @@
 <template>
-    <v-menu
-        v-model="menuOpen"
-        location="bottom end"
-        :offset="8"
-        :close-on-content-click="false"
-        :disabled="disabled"
-    >
-        <template #activator="{ props: activatorProps }">
+    <div ref="switcher" class="ledger-switcher" @keydown="onKeydown">
             <button
-                v-bind="activatorProps"
+                :aria-expanded="menuOpen"
+                aria-haspopup="listbox"
+                @click="menuOpen = !menuOpen"
                 class="ledger-switch-trigger"
                 :class="{ open: menuOpen }"
                 type="button"
@@ -30,9 +25,9 @@
                     aria-hidden="true"
                 />
             </button>
-        </template>
 
-        <section class="ledger-switch-menu" aria-label="选择账本">
+
+        <section v-if="menuOpen" class="ledger-switch-menu" aria-label="选择账本">
             <header>
                 <span>切换账本</span>
                 <small>{{ ledgers.length }} 个可用账本</small>
@@ -61,11 +56,11 @@
                 </button>
             </div>
         </section>
-    </v-menu>
+    </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, onMounted, onUnmounted, nextTick } from "vue";
 import { mdiBookOpenOutline, mdiCheck, mdiChevronDown } from "@mdi/js";
 import type { Ledger } from "@/models/ledger.ts";
 
@@ -79,7 +74,29 @@ const emit = defineEmits<{
     select: [ledgerId: string];
 }>();
 
+const switcher = ref<HTMLElement>();
 const menuOpen = ref(false);
+function onOutside(event: PointerEvent): void {
+    if (!switcher.value?.contains(event.target as Node)) menuOpen.value = false;
+}
+function onKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Escape') {
+        menuOpen.value = false;
+        switcher.value?.querySelector<HTMLButtonElement>('.ledger-switch-trigger')?.focus();
+        event.preventDefault();
+    } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        menuOpen.value = true;
+        void nextTick(() => {
+            const options = [...(switcher.value?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? [])];
+            const index = options.indexOf(document.activeElement as HTMLButtonElement);
+            const next = index < 0 ? 0 : (index + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length;
+            options[next]?.focus();
+        });
+    }
+}
+onMounted(() => document.addEventListener('pointerdown', onOutside));
+onUnmounted(() => document.removeEventListener('pointerdown', onOutside));
 const selectedLedger = computed(() =>
     props.ledgers.find((ledger) => ledger.id === props.selectedId),
 );
@@ -97,6 +114,7 @@ function selectLedger(ledgerId: string): void {
 </script>
 
 <style scoped>
+.ledger-switcher { position: relative; }
 .ledger-switch-trigger {
     display: grid;
     grid-template-columns: 30px minmax(0, 1fr) 17px;
@@ -165,7 +183,13 @@ function selectLedger(ledgerId: string): void {
     transform: rotate(180deg);
 }
 .ledger-switch-menu {
-    width: 292px;
+    position: absolute;
+    z-index: 4600;
+    top: calc(100% + 8px);
+    right: 0;
+    width: min(292px, calc(100vw - 32px));
+    max-height: min(420px, calc(100vh - 140px));
+    overflow-y: auto;
     padding: 9px;
     border: 1px solid #e9ebf0;
     border-radius: 18px;

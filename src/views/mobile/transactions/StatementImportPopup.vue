@@ -5,7 +5,7 @@
                 <f7-nav-right><f7-link popup-close>关闭</f7-link></f7-nav-right>
             </f7-navbar>
             <f7-block strong inset>
-                <p>账单将导入个人账本。先核对账户和分类，再确认入账；重复导入同一账单会产生重复流水。</p>
+                <p>账单将导入「{{ importLedgerName }}」。先核对账户和分类，再确认入账；重复导入同一账单会产生重复流水。</p>
                 <div class="display-flex gap-8 margin-bottom">
                     <f7-button :fill="provider === 'alipay'" outline @click="selectProvider('alipay')">支付宝</f7-button>
                     <f7-button :fill="provider === 'wechat'" outline @click="selectProvider('wechat')">微信支付</f7-button>
@@ -26,30 +26,7 @@
                 <f7-block strong inset>
                     <p>共 {{ rows.length }} 笔，已选 {{ chosen.length }} 笔，待补全 {{ invalidCount }} 笔。</p>
                     <p>未匹配的账户和末级分类须手动选择；可逐笔取消勾选。</p>
-                    <template v-for="name in missingSourceNames" :key="`source-${name}`">
-                        <label class="display-block margin-bottom">付款账户「{{ name }}」
-                            <select aria-label="映射付款账户" @change="mapAccount('source', name, ($event.target as HTMLSelectElement).value)">
-                                <option value="">请选择</option>
-                                <option v-for="account in availableAccounts" :key="account.id" :value="account.id">{{ account.name }}</option>
-                            </select>
-                        </label>
-                    </template>
-                    <template v-for="name in missingDestinationNames" :key="`destination-${name}`">
-                        <label class="display-block margin-bottom">收款账户「{{ name }}」
-                            <select aria-label="映射收款账户" @change="mapAccount('destination', name, ($event.target as HTMLSelectElement).value)">
-                                <option value="">请选择</option>
-                                <option v-for="account in availableAccounts" :key="account.id" :value="account.id">{{ account.name }}</option>
-                            </select>
-                        </label>
-                    </template>
-                    <template v-for="mapping in missingCategories" :key="`category-${mapping.type}-${mapping.name}`">
-                        <label class="display-block margin-bottom">{{ typeLabel(mapping.type) }}分类「{{ mapping.name }}」
-                            <select aria-label="映射分类" @change="mapCategory(mapping.type, mapping.name, ($event.target as HTMLSelectElement).value)">
-                                <option value="">请选择</option>
-                                <option v-for="category in categoriesFor(mapping.type)" :key="category.id" :value="category.id">{{ category.name }}</option>
-                            </select>
-                        </label>
-                    </template>
+                    <StatementMappingPanel :rows="rows" :accounts="accountsStore.allAccountsMap" :categories="categoriesStore.allTransactionCategoriesMap" :disabled="busy" />
                     <f7-button fill :disabled="busy || !chosen.length || invalidCount > 0" @click="submit">确认导入 {{ chosen.length }} 笔</f7-button>
                 </f7-block>
 
@@ -89,7 +66,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import StatementMappingPanel from '@/components/StatementMappingPanel.vue';
+import { useLedgersStore } from '@/stores/ledger.ts';
+import { ref, computed, watch } from 'vue';
 import { useAccountsStore } from '@/stores/account.ts';
 import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
 import { useTransactionsStore } from '@/stores/transaction.ts';
@@ -103,6 +82,12 @@ import { generateRandomUUID } from '@/lib/misc.ts';
 
 const opened = defineModel<boolean>('opened', { required: true });
 const emit = defineEmits<{ imported: [] }>();
+const ledgersStore = useLedgersStore();
+const importLedgerId = ref('0');
+const importLedgerName = ref('默认个人账本');
+watch(opened, value => {
+    if (value) { importLedgerId.value = ledgersStore.selectedLedgerId; importLedgerName.value = ledgersStore.selectedLedger.name; rows.value = []; }
+});
 const accountsStore = useAccountsStore();
 const categoriesStore = useTransactionCategoriesStore();
 const transactionsStore = useTransactionsStore();
@@ -125,22 +110,6 @@ const accountIds = computed(() => new Set(availableAccounts.value.map(account =>
 const chosen = computed(() => rows.value.filter(row => row.selected));
 const invalidCount = computed(() => chosen.value.filter(row => !ready(row)).length);
 const visibleRows = computed(() => rows.value.slice(0, visibleCount.value));
-const missingSourceNames = computed(() => [...new Set(chosen.value.filter(row => !accountIds.value.has(row.sourceAccountId) && row.originalSourceAccountName)
-    .map(row => row.originalSourceAccountName))]);
-const missingDestinationNames = computed(() => [...new Set(chosen.value.filter(row => row.type === TransactionType.Transfer && !accountIds.value.has(row.destinationAccountId) && row.originalDestinationAccountName)
-    .map(row => row.originalDestinationAccountName!))]);
-const missingCategories = computed(() => {
-    const seen = new Set<string>();
-    return chosen.value.filter(row => !categoriesFor(row.type).some(category => category.id === row.categoryId) && row.originalCategoryName)
-        .map(row => ({ type: row.type, name: row.originalCategoryName }))
-        .filter(item => {
-            const key = `${item.type}:${item.name}`;
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
-        });
-});
-
 function typeLabel(type: number): string {
     return type === TransactionType.Income ? '收入' : type === TransactionType.Expense ? '支出' : '转账';
 }
@@ -171,33 +140,23 @@ function selectFile(event: Event): void {
     rows.value = []; message.value = ''; sessionId.value = generateRandomUUID();
 }
 
-function mapAccount(side: 'source' | 'destination', name: string, id: string): void {
-    if (!id) return;
-    rows.value.forEach(row => {
-        if (side === 'source' && row.originalSourceAccountName === name && !accountIds.value.has(row.sourceAccountId)) row.sourceAccountId = id;
-        if (side === 'destination' && row.originalDestinationAccountName === name && !accountIds.value.has(row.destinationAccountId)) row.destinationAccountId = id;
-    });
-}
-
-function mapCategory(type: number, name: string, id: string): void {
-    if (!id) return;
-    rows.value.forEach(row => {
-        if (row.type === type && row.originalCategoryName === name && !categoriesFor(type).some(category => category.id === row.categoryId)) row.categoryId = id;
-    });
-}
-
 async function parse(): Promise<void> {
     if (!file.value || busy.value) return;
     busy.value = true; message.value = '';
     try {
-        const [accounts] = await Promise.all([accountsStore.loadAllAccounts({ force: false }), categoriesStore.loadAllCategories({ force: false })]);
-        if (!accounts.length) throw new Error('请先创建个人账本账户');
+        const [accounts] = await Promise.all([accountsStore.loadAllAccounts({ force: true, ledgerId: importLedgerId.value }).catch(error => {
+            if (!error?.isUpToDate) throw error;
+            return accountsStore.allAccounts;
+        }), categoriesStore.loadAllCategories({ force: true, ledgerId: importLedgerId.value }).catch(error => {
+            if (!error?.isUpToDate) throw error;
+        })]);
+        if (!accounts.length) throw new Error('请先创建当前账本账户');
         const selectedFile = provider.value === 'alipay' && file.value.name.toLowerCase().endsWith('.zip')
             ? await extractAlipayCsv(file.value, password.value) : file.value;
         const type = provider.value === 'alipay' ? 'alipay_app_csv' : selectedFile.name.toLowerCase().endsWith('.xlsx') ? 'wechat_pay_app_xlsx' : 'wechat_pay_app_csv';
         if (provider.value === 'alipay' && !selectedFile.name.toLowerCase().endsWith('.csv')) throw new Error('请选择支付宝 ZIP 或 CSV');
         if (provider.value === 'wechat' && !/\.(xlsx|csv)$/i.test(selectedFile.name)) throw new Error('请选择微信支付 XLSX 或 CSV');
-        const response = await transactionsStore.parseImportTransaction({ fileType: type, importFile: selectedFile });
+        const response = await transactionsStore.parseImportTransaction({ ledgerId: importLedgerId.value, fileType: type, importFile: selectedFile });
         rows.value = response.items.map((item, index) => {
             const row = ImportTransaction.of(item, index);
             row.selected = true;
@@ -212,14 +171,15 @@ async function parse(): Promise<void> {
 
 function submit(): void {
     if (busy.value || !chosen.value.length || invalidCount.value) return;
-    showConfirm(`确认将 ${chosen.value.length} 笔流水导入个人账本？重复导入会产生重复流水。`, () => void submitConfirmed());
+    showConfirm(`确认将 ${chosen.value.length} 笔流水导入「${importLedgerName.value}」？重复导入会产生重复流水。`, () => void submitConfirmed());
 }
 
 async function submitConfirmed(): Promise<void> {
+    if (ledgersStore.selectedLedgerId !== importLedgerId.value) { message.value = '账本已切换，请关闭后重新预览账单'; return; }
     if (busy.value || !chosen.value.length || invalidCount.value) return;
     busy.value = true; message.value = '';
     try {
-        const count = await transactionsStore.importTransactions({ transactions: chosen.value, clientSessionId: sessionId.value });
+        const count = await transactionsStore.importTransactions({ ledgerId: importLedgerId.value, transactions: chosen.value, clientSessionId: sessionId.value });
         accountsStore.updateAccountListInvalidState(true);
         transactionsStore.updateTransactionListInvalidState(true);
         overviewStore.updateTransactionOverviewInvalidState(true);

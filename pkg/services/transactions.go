@@ -749,6 +749,11 @@ func (s *TransactionService) createTransactionWithHooks(c core.Context, transact
 
 // BatchCreateTransactions saves new transactions to database
 func (s *TransactionService) BatchCreateTransactions(c core.Context, uid int64, transactions []*models.Transaction, allTagIds map[int][]int64, processHandler core.TaskProcessUpdateHandler) error {
+	return s.batchCreateTransactionsWithHooks(c, uid, transactions, allTagIds, processHandler, nil, nil)
+}
+
+// Hooks participate in the same transaction as every row and account balance update.
+func (s *TransactionService) batchCreateTransactionsWithHooks(c core.Context, uid int64, transactions []*models.Transaction, allTagIds map[int][]int64, processHandler core.TaskProcessUpdateHandler, before func(*xorm.Session) error, after func(*xorm.Session) error) error {
 	now := time.Now().Unix()
 	currentProcess := float64(0)
 	processUpdateStep := int(math.Max(100.0, float64(len(transactions)/100.0)))
@@ -851,6 +856,11 @@ func (s *TransactionService) BatchCreateTransactions(c core.Context, uid int64, 
 	userDataDb := s.UserDataDB(uid)
 
 	return userDataDb.DoTransaction(c, func(sess *xorm.Session) error {
+		if before != nil {
+			if err := before(sess); err != nil {
+				return err
+			}
+		}
 		for i := 0; i < len(transactions); i++ {
 			transaction := transactions[i]
 			transactionTagIndexes := allTransactionTagIndexes[transaction.TransactionId]
@@ -871,6 +881,9 @@ func (s *TransactionService) BatchCreateTransactions(c core.Context, uid int64, 
 			}
 		}
 
+		if after != nil {
+			return after(sess)
+		}
 		return nil
 	})
 }
@@ -2253,6 +2266,13 @@ func (s *TransactionService) DeleteAllTransactions(c core.Context, uid int64, de
 	}
 
 	return s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
+		if _, err := sess.Where("uid=?", uid).Delete(new(models.AgentImportBatch)); err != nil {
+			return err
+		}
+		if _, err := sess.Where("uid=?", uid).Delete(new(models.AgentImportFingerprint)); err != nil {
+			return err
+		}
+
 		// Update all transactions to deleted
 		_, err := sess.Cols("deleted", "deleted_unix_time").Where("uid=? AND deleted=?", uid, false).Update(updateModel)
 

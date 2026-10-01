@@ -173,12 +173,19 @@ func (a *ModelContextProtocolAPI) ListToolsHandler(c *core.WebContext, jsonRPCRe
 	}
 
 	mcpVersion := a.getMCPVersion(c)
-	toolsInfo := mcp.Container.GetMCPTools()
+	allTools := mcp.Container.GetMCPTools()
+	toolsInfo := make([]*mcp.MCPTool, 0, len(allTools))
+	for _, tool := range allTools {
+		if c.GetTokenClaims().HasAgentScope(mcp.AgentToolScope(tool.Name)) {
+			toolsInfo = append(toolsInfo, tool)
+		}
+	}
 	finalToolsInfos := make([]*mcp.MCPTool, len(toolsInfo))
 
 	for i := 0; i < len(toolsInfo); i++ {
 		finalToolsInfos[i] = &mcp.MCPTool{
 			Name:        toolsInfo[i].Name,
+			Annotations: toolsInfo[i].Annotations,
 			InputSchema: toolsInfo[i].InputSchema,
 			Title:       toolsInfo[i].Title,
 			Description: toolsInfo[i].Description,

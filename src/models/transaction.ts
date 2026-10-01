@@ -605,6 +605,7 @@ export interface TransactionBatchDeleteRequest {
 }
 
 export interface TransactionImportRequest {
+    readonly ledgerId?: string;
     readonly transactions: TransactionCreateRequest[];
     readonly clientSessionId: string;
 }

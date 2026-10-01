@@ -7,6 +7,7 @@ import (
 	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/core"
 	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/log"
 	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/models"
+	bookkeeping "github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/services"
 	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/settings"
 )
 
@@ -42,6 +43,11 @@ func (h *mcpQueryAllTransactionTagsToolHandler) OutputType() reflect.Type {
 // Handle processes the MCP call tool request and returns the response
 func (h *mcpQueryAllTransactionTagsToolHandler) Handle(c *core.WebContext, callToolReq *MCPCallToolRequest, user *models.User, currentConfig *settings.Config, services MCPAvailableServices) (any, []*MCPTextContent, error) {
 	uid := user.Uid
+	_, ledger, err := bookkeeping.Ledgers.GetLedgerWithAccess(c, uid, c.GetTokenClaims().AgentLedgerId, func(models.FamilyMemberRole) bool { return true })
+	if err != nil {
+		return nil, nil, err
+	}
+	uid = ledger.OwnerUid
 	tags, err := services.GetTransactionTagService().GetAllTagsByUid(c, uid)
 
 	if err != nil {

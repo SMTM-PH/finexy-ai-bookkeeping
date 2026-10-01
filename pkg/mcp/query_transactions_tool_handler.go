@@ -107,6 +107,9 @@ func (h *mcpQueryTransactionsToolHandler) Handle(c *core.WebContext, callToolReq
 	if queryTransactionsRequest.Count <= 0 {
 		queryTransactionsRequest.Count = 100
 	}
+	if queryTransactionsRequest.Count > 1000 {
+		queryTransactionsRequest.Count = 1000
+	}
 
 	if queryTransactionsRequest.Page <= 0 {
 		queryTransactionsRequest.Page = 1
@@ -143,7 +146,7 @@ func (h *mcpQueryTransactionsToolHandler) Handle(c *core.WebContext, callToolReq
 		}
 	}
 
-	allCategories, err := services.GetTransactionCategoryService().GetAllCategoriesByUid(c, uid, 0, -1)
+	allCategories, err := services.GetTransactionCategoryService().GetAllCategoriesInLedger(c, uid, c.GetTokenClaims().AgentLedgerId, 0, -1)
 
 	if err != nil {
 		log.Warnf(c, "[add_transaction.Handle] get transaction category error, because %s", err.Error())
@@ -166,14 +169,16 @@ func (h *mcpQueryTransactionsToolHandler) Handle(c *core.WebContext, callToolReq
 		matchModeType = core.MATCH_MODE_IGNORE_CASE
 	}
 
-	totalCount, err := services.GetTransactionService().GetTransactionCount(c, uid, maxTransactionTime, minTransactionTime, transactionType, filterCategoryIds, filterAccountIds, nil, false, "", queryTransactionsRequest.Keyword, matchModeType, false)
-
+	transactions, totalCount, err := services.GetTransactionService().GetLedgerTransactions(c, uid, c.GetTokenClaims().AgentLedgerId, &models.TransactionListByMaxTimeRequest{
+		MaxTime: maxTransactionTime, MinTime: minTransactionTime, Type: transactionType, Keyword: queryTransactionsRequest.Keyword, MatchMode: matchModeType,
+		Page: queryTransactionsRequest.Page, Count: queryTransactionsRequest.Count, WithCount: true,
+	}, filterCategoryIds, filterAccountIds, nil, false)
 	if err != nil {
-		log.Errorf(c, "[transactions.TransactionListHandler] failed to get transaction count for user \"uid:%d\", because %s", uid, err.Error())
 		return nil, nil, err
 	}
-
-	transactions, err := services.GetTransactionService().GetTransactionsByMaxTimeUpToCount(c, uid, maxTransactionTime, minTransactionTime, transactionType, filterCategoryIds, filterAccountIds, nil, false, "", queryTransactionsRequest.Keyword, matchModeType, false, queryTransactionsRequest.Page, queryTransactionsRequest.Count, pageCountForLoadTransactions, false, true)
+	if len(transactions) > int(queryTransactionsRequest.Count) {
+		transactions = transactions[:queryTransactionsRequest.Count]
+	}
 	structuredResponse, response, err := h.createNewMCPQueryTransactionsResponse(c, &queryTransactionsRequest, transactions, totalCount, services.GetAccountService().GetAccountMapByList(allAccounts), services.GetTransactionCategoryService().GetCategoryMapByList(allCategories))
 
 	if err != nil {

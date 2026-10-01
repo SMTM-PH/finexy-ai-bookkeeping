@@ -44,7 +44,7 @@ func (h *mcpQueryAllTransactionCategoriesToolHandler) OutputType() reflect.Type 
 // Handle processes the MCP call tool request and returns the response
 func (h *mcpQueryAllTransactionCategoriesToolHandler) Handle(c *core.WebContext, callToolReq *MCPCallToolRequest, user *models.User, currentConfig *settings.Config, services MCPAvailableServices) (any, []*MCPTextContent, error) {
 	uid := user.Uid
-	categories, err := services.GetTransactionCategoryService().GetAllCategoriesByUid(c, uid, 0, -1)
+	categories, err := services.GetTransactionCategoryService().GetAllCategoriesInLedger(c, uid, c.GetTokenClaims().AgentLedgerId, 0, -1)
 
 	if err != nil {
 		log.Errorf(c, "[query_all_transaction_categories.Handle] failed to get categories for user \"uid:%d\", because %s", uid, err.Error())

@@ -27,14 +27,20 @@ type OAuth2CallbackTokenContext struct {
 
 // TokenGenerateAPIRequest represents all parameters of api token generation request
 type TokenGenerateAPIRequest struct {
-	ExpiredInSeconds int64  `json:"expiresInSeconds" binding:"omitempty,min=0,max=4294967295"`
-	Password         string `json:"password" binding:"omitempty,min=6,max=128"`
+	LedgerId         int64    `json:"ledgerId,string" binding:"min=0"`
+	Name             string   `json:"name" binding:"max=64"`
+	Scopes           []string `json:"scopes"`
+	ExpiredInSeconds int64    `json:"expiresInSeconds" binding:"omitempty,min=0,max=4294967295"`
+	Password         string   `json:"password" binding:"omitempty,min=6,max=128"`
 }
 
 // TokenGenerateMCPRequest represents all parameters of mcp token generation request
 type TokenGenerateMCPRequest struct {
-	ExpiredInSeconds int64  `json:"expiresInSeconds" binding:"omitempty,min=0,max=4294967295"`
-	Password         string `json:"password" binding:"omitempty,min=6,max=128"`
+	LedgerId         int64    `json:"ledgerId,string" binding:"min=0"`
+	Name             string   `json:"name" binding:"max=64"`
+	Scopes           []string `json:"scopes"`
+	ExpiredInSeconds int64    `json:"expiresInSeconds" binding:"omitempty,min=0,max=4294967295"`
+	Password         string   `json:"password" binding:"omitempty,min=6,max=128"`
 }
 
 // TokenRevokeRequest represents all parameters of token revoking request
@@ -65,6 +71,10 @@ type TokenRefreshResponse struct {
 
 // TokenInfoResponse represents a view-object of token
 type TokenInfoResponse struct {
+	LedgerId  int64          `json:"ledgerId,string"`
+	Name      string         `json:"name,omitempty"`
+	Scopes    []string       `json:"scopes,omitempty"`
+	ExpiresAt int64          `json:"expiresAt"`
 	TokenId   string         `json:"tokenId"`
 	TokenType core.TokenType `json:"tokenType"`
 	UserAgent string         `json:"userAgent"`

@@ -36,6 +36,11 @@ func (c *MCPContainer) GetMCPTools() []*MCPTool {
 
 // HandleTool returns the result of the MCP tool handler based on the tool name
 func (c *MCPContainer) HandleTool(ctx *core.WebContext, callToolReq *MCPCallToolRequest, user *models.User, currentConfig *settings.Config, services MCPAvailableServices) (any, error) {
+	scope := AgentToolScope(callToolReq.Name)
+	if scope == "" || !ctx.GetTokenClaims().HasAgentScope(scope) {
+		return nil, errs.ErrAgentPermissionDenied
+	}
+
 	if handler, exists := c.mcpTextContentTools.Get(callToolReq.Name); exists {
 		return handleTool(ctx, handler, currentConfig, services, callToolReq, user)
 	}
@@ -70,6 +75,9 @@ func InitializeMCPHandlers(config *settings.Config) error {
 		mcpTools:                 make([]*MCPTool, 0),
 	}
 
+	for _, name := range []string{"query_import_context", "preview_bill_import", "map_bill_import", "confirm_bill_import"} {
+		registerMCPTextContentToolHandler(container, &agentImportTool{name: name})
+	}
 	registerMCPTextContentToolHandler(container, MCPAddTransactionToolHandler)
 	registerMCPTextContentToolHandler(container, MCPQueryTransactionsToolHandler)
 	registerMCPTextContentToolHandler(container, MCPQueryAllAccountsToolHandler)
@@ -134,6 +142,7 @@ func handleTool[T MCPTextContent | MCPImageContent | MCPAudioContent | MCPResour
 func createNewMCPToolInfo[T MCPTextContent | MCPImageContent | MCPAudioContent | MCPResourceLink | MCPEmbeddedResource](name string, handler MCPToolHandler[T]) *MCPTool {
 	mcpTool := &MCPTool{
 		Name:        name,
+		Annotations: map[string]bool{"readOnlyHint": AgentToolScope(name) == core.AgentScopeRead, "destructiveHint": AgentToolScope(name) != core.AgentScopeRead, "openWorldHint": name == "recognize_receipt_image" || name == "query_latest_exchange_rates"},
 		Description: handler.Description(),
 	}
 

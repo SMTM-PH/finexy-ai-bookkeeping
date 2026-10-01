@@ -2,10 +2,12 @@ package middlewares
 
 import (
 	"github.com/golang-jwt/jwt/v5"
+	"net/http"
 
 	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/core"
 	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/errs"
 	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/log"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/models"
 	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/services"
 	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/settings"
 	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/utils"
@@ -105,6 +107,7 @@ func JWTResetPasswordAuthorization(config *settings.Config) core.MiddlewareHandl
 // JWTMCPAuthorization verifies whether current request is valid by jwt mcp token in header
 func JWTMCPAuthorization(config *settings.Config) core.MiddlewareHandlerFunc {
 	return func(c *core.WebContext) {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 28*1024*1024)
 		claims, tokenContext, err := getTokenClaims(c, TOKEN_SOURCE_TYPE_HEADER)
 
 		if err != nil {
@@ -118,7 +121,21 @@ func JWTMCPAuthorization(config *settings.Config) core.MiddlewareHandlerFunc {
 			return
 		}
 
+		enabled, accessErr := services.Users.IsMCPAccessEnabled(c, claims.Uid)
+		if accessErr != nil {
+			utils.PrintJsonErrorResult(c, errs.ErrOperationFailed)
+			return
+		}
+		if !config.EnableMCPServer || !enabled {
+			utils.PrintJsonErrorResult(c, errs.ErrAgentPermissionDenied)
+			return
+		}
+
 		c.SetTokenClaims(claims)
+		if _, _, err := services.Ledgers.GetLedgerWithAccess(c, claims.Uid, claims.AgentLedgerId, func(models.FamilyMemberRole) bool { return true }); err != nil {
+			utils.PrintJsonErrorResult(c, errs.ErrAgentPermissionDenied)
+			return
+		}
 		c.SetTokenContext(tokenContext)
 		c.Next()
 	}
@@ -171,6 +188,18 @@ func jwtAuthorization(config *settings.Config, source TokenSourceType) core.Midd
 			log.Warnf(c, "[authorization.jwtAuthorization] api token is not enabled")
 			utils.PrintJsonErrorResult(c, errs.ErrAPITokenNotEnabled)
 			return
+		}
+
+		if claims.Type == core.USER_TOKEN_TYPE_API && !AgentAPIRequestAllowed(claims, c.Request.Method, c.Request.URL.Path) {
+			utils.PrintJsonErrorResult(c, errs.ErrAgentPermissionDenied)
+			return
+		}
+		if claims.Type == core.USER_TOKEN_TYPE_API {
+			c.SetTokenClaims(claims)
+			if err := checkAgentAPILedger(c, claims); err != nil {
+				utils.PrintJsonErrorResult(c, err)
+				return
+			}
 		}
 
 		c.SetTokenClaims(claims)

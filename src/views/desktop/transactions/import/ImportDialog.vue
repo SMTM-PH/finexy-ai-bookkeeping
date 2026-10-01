@@ -99,7 +99,7 @@
 
                 <v-window class="disable-tab-transition" v-model="currentStep">
                     <v-window-item value="uploadFile">
-                        <p class="mb-2" v-if="fileType === 'alipay_app_csv' || fileType === 'wechat_pay_app'">支付宝、微信账单将导入个人账本；请先核对账户和分类，避免重复导入。</p>
+                        <p class="mb-2" v-if="fileType === 'alipay_app_csv' || fileType === 'wechat_pay_app'">账单将导入「{{ importLedgerName }}」；请先核对账户和分类，避免重复导入。</p>
                         <v-row class="pt-2">
                             <v-col cols="12" md="12">
                                 <two-column-select primary-key-field="displayCategoryName"
@@ -340,6 +340,7 @@
 </template>
 
 <script setup lang="ts">
+import { useLedgersStore } from '@/stores/ledger.ts';
 import type { StepBarItem } from '@/components/desktop/StepsBar.vue';
 import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
@@ -421,6 +422,9 @@ const {
     getLocalizedFileEncodingName
 } = useI18n();
 
+const ledgersStore = useLedgersStore();
+const importLedgerId = ref('0');
+const importLedgerName = ref('默认个人账本');
 const settingsStore = useSettingsStore();
 const accountsStore = useAccountsStore();
 const transactionCategoriesStore = useTransactionCategoriesStore();
@@ -682,6 +686,8 @@ function loadInitFileTypeFromSettings(): void {
 }
 
 function open(initialFileType?: string): Promise<void> {
+    importLedgerId.value = ledgersStore.selectedLedgerId;
+    importLedgerName.value = ledgersStore.selectedLedger.name;
     fileType.value = initialFileType || 'ezbookkeeping';
     fileSubType.value = initialFileType === 'wechat_pay_app' ? 'wechat_pay_app_xlsx' : initialFileType || 'ezbookkeeping_csv';
 
@@ -705,17 +711,20 @@ function open(initialFileType?: string): Promise<void> {
     importTransactionExecuteCustomScriptTab.value?.reset();
     importTransactions.value = undefined;
     importTransactionCheckDataTab.value?.reset();
+    loading.value = true;
     showState.value = true;
     clientSessionId.value = generateRandomUUID();
     clearImportImageFiles();
 
     const promises = [
-        accountsStore.loadAllAccounts({ force: false }),
-        transactionCategoriesStore.loadAllCategories({ force: false }),
-        transactionTagsStore.loadAllTags({ force: false })
+        accountsStore.loadAllAccounts({ force: true, ledgerId: importLedgerId.value }),
+        transactionCategoriesStore.loadAllCategories({ force: true, ledgerId: importLedgerId.value }),
+        transactionTagsStore.loadAllTags({ force: true })
     ];
 
-    Promise.all(promises).then(() => {
+    Promise.all(promises.map(promise => promise.catch((error: unknown) => {
+        if (!error || typeof error !== 'object' || !('isUpToDate' in error) || !error.isUpToDate) throw error;
+    }))).then(() => {
         loading.value = false;
     }).catch(error => {
         logger.error('failed to load essential data for importing transaction', error);
@@ -810,8 +819,8 @@ function reloadBasisData(): void {
     loading.value = true;
 
     Promise.allSettled([
-        accountsStore.loadAllAccounts({ force: true }),
-        transactionCategoriesStore.loadAllCategories({ force: true }),
+        accountsStore.loadAllAccounts({ force: true, ledgerId: importLedgerId.value }),
+        transactionCategoriesStore.loadAllCategories({ force: true, ledgerId: importLedgerId.value }),
         transactionTagsStore.loadAllTags({ force: true })
     ]).then(results => {
         loading.value = false;
@@ -853,6 +862,7 @@ function recognizeImage(item: BatchImportImageItem, additionalPrompt?: string): 
             importImageCancelRecognizingUuid.value = generateRandomUUID();
 
             transactionsStore.parseImportTransaction({
+                ledgerId: importLedgerId.value,
                 fileType: 'ai_image',
                 aiAdditionalPrompt: additionalPrompt,
                 importFile: compressedFile,
@@ -1147,6 +1157,7 @@ async function parseData(): Promise<void> {
         submitting.value = true;
 
         transactionsStore.parseImportTransaction({
+                ledgerId: importLedgerId.value,
             fileType: type,
             additionalOptions: importAdditionalOptions.value,
             aiAdditionalPrompt: supportedAIAdditionalPrompt.value ? importAIAdditionalPrompt.value : undefined,
@@ -1219,6 +1230,10 @@ function submit(): void {
     confirmDialog.value?.open('format.misc.confirmImportTransactions', {
         count: formatNumberToLocalizedNumerals(transactions.length)
     }).then(() => {
+        if (ledgersStore.selectedLedgerId !== importLedgerId.value) {
+            snackbar.value?.showMessage('账本已切换，请关闭后重新预览账单');
+            return;
+        }
         submitting.value = true;
 
         let showProcessTimer : number | undefined = undefined;
@@ -1254,6 +1269,7 @@ function submit(): void {
         }
 
         transactionsStore.importTransactions({
+            ledgerId: importLedgerId.value,
             transactions: transactions,
             clientSessionId: clientSessionId.value
         }).then(response => {

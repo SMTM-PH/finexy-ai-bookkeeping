@@ -336,6 +336,8 @@ func startWebServer(c *core.CliContext) error {
 		apiV1Route.Use(bindMiddleware(middlewares.APITokenIpLimit(config), config))
 		{
 			// Tokens
+			apiV1Route.GET("/agent/access/get.json", bindApi(api.Tokens.AgentAccessGetHandler, config))
+			apiV1Route.POST("/agent/access/update.json", bindApi(api.Tokens.AgentAccessUpdateHandler, config))
 			apiV1Route.GET("/tokens/list.json", bindApi(api.Tokens.TokenListHandler, config))
 			apiV1Route.POST("/tokens/generate/api.json", bindApi(api.Tokens.TokenGenerateAPIHandler, config))
 			apiV1Route.POST("/tokens/generate/mcp.json", bindApi(api.Tokens.TokenGenerateMCPHandler, config))
@@ -429,6 +431,9 @@ func startWebServer(c *core.CliContext) error {
 			if config.EnableDataImport {
 				apiV1Route.POST("/transactions/parse_custom_file.json", bindApi(api.Transactions.TransactionParseImportCustomFileDataHandler, config))
 				apiV1Route.POST("/transactions/parse_import.json", bindApi(api.Transactions.TransactionParseImportFileHandler, config))
+				apiV1Route.POST("/agent/import/preview.json", bindApi(api.AgentImports.PreviewHandler, config))
+				apiV1Route.POST("/agent/import/map.json", bindApi(api.AgentImports.MapHandler, config))
+				apiV1Route.POST("/agent/import/confirm.json", bindApi(api.AgentImports.ConfirmHandler, config))
 				apiV1Route.POST("/transactions/import.json", bindApi(api.Transactions.TransactionImportHandler, config))
 				apiV1Route.GET("/transactions/import/process.json", bindApi(api.Transactions.TransactionImportProcessHandler, config))
 			}

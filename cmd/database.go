@@ -46,7 +46,7 @@ func updateDatabaseStructure(c *core.CliContext) error {
 func updateAllDatabaseTablesStructure(c *core.CliContext) error {
 	var err error
 
-	err = datastore.Container.UserStore.SyncStructs(new(models.User))
+	err = datastore.Container.UserStore.SyncStructs(new(models.User), new(models.AgentAccessSetting))
 
 	if err != nil {
 		return err
@@ -126,7 +126,7 @@ func updateAllDatabaseTablesStructure(c *core.CliContext) error {
 
 	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] transaction tag index table maintained successfully")
 
-	err = datastore.Container.UserDataStore.SyncStructs(new(models.TransactionTemplate), new(models.ScheduledOccurrence))
+	err = datastore.Container.UserDataStore.SyncStructs(new(models.TransactionTemplate), new(models.ScheduledOccurrence), new(models.AgentImportBatch), new(models.AgentImportFingerprint))
 
 	if err != nil {
 		return err
