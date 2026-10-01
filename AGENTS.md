@@ -353,3 +353,5 @@ docker stop finexy-android-e2e
 - 本轮验收证据写入 artifacts/agent-access/；发布镜像前必须运行无卷 finexy-agent-e2e（18110）的 API/MCP/真实浏览器门禁。NAS 更新保留三处数据挂载、完整备份及原容器回退，不在真实账本创建验收数据。
 
    本轮发布前验收：npm run check（14 文件、38,494 测试、类型/lint、生产/PWA 构建）通过；CGO=1 go test ./... 全部通过；21 组无卷 HTTP/MCP/真实浏览器验收通过，包括指定账本 UI 生成、MCP 查询/记账、跨账本账户隐藏与普通记账拒绝、撤销/到期、成员降权/移除、分组应用和覆盖门禁、桌面与移动 Web 布局。发现共享组件生产分块循环及账户隐藏接口归属遗漏后均已修复，并重建最终镜像重新验收。原生 Android 本轮未改新增分组映射或 Agent 设置，未重测主账本四条计数。
+
+   发布门禁发现并修复快速重启 ID 冲突：Linux 发布容器在同一 Unix 秒重启后内部 UUID 计数从零重用，导致后续导入触发事务插入失败（HTTP 500），旧财务事务未被部分提交。新增 TestRestartedGeneratorDoesNotReusePredecessorIds 先获得失败证据，再修复为首个有效发号通过 sync.Once 等到启动秒结束（最多不到 1 秒）；保持原 ID 位结构与常规计数不变。此约束适用于正常系统时钟下的单进程替换；多个同时运行的实例仍须各自使用不同 UuidServerId。GitHub 失败门禁已阻止镜像推送，未把失败镜像部署到 NAS。

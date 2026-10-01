@@ -410,3 +410,24 @@ func TestGenerateUuid_Over524287Times(t *testing.T) {
 		}
 	}
 }
+
+// A new server may start in the same second as its predecessor. Its IDs must
+// not repeat the predecessor's per-type sequence in that second.
+func TestRestartedGeneratorDoesNotReusePredecessorIds(t *testing.T) {
+	time.Sleep(time.Until(time.Unix(time.Now().Unix()+1, 0)))
+	config := &settings.Config{UuidServerId: 7}
+	predecessor, err := NewInternalUuidGenerator(config)
+	assert.NoError(t, err)
+	issued := predecessor.GenerateUuids(UUID_TYPE_TRANSACTION, 256)
+	restarted, err := NewInternalUuidGenerator(config)
+	assert.NoError(t, err)
+	seen := make(map[int64]bool, len(issued))
+	for _, id := range issued {
+		seen[id] = true
+	}
+	for _, id := range restarted.GenerateUuids(UUID_TYPE_TRANSACTION, 256) {
+		if seen[id] {
+			t.Fatal("restart reused an issued transaction ID")
+		}
+	}
+}
