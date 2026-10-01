@@ -84,7 +84,7 @@ class ProductAssetContractTest {
             }
             val migrated = Room.databaseBuilder(context, FinexyDatabase::class.java, name)
                 .addMigrations(FinexyDatabase.MIGRATION_15_16, FinexyDatabase.MIGRATION_16_17,
-                FinexyDatabase.MIGRATION_17_18, FinexyDatabase.MIGRATION_18_19).build()
+                FinexyDatabase.MIGRATION_17_18, FinexyDatabase.MIGRATION_18_19, FinexyDatabase.MIGRATION_19_20, FinexyDatabase.MIGRATION_20_21).build()
             try { assertTrue(migrated.dao().allProductAssets().isEmpty()) } finally { migrated.close() }
         } finally { context.deleteDatabase(name) }
     }

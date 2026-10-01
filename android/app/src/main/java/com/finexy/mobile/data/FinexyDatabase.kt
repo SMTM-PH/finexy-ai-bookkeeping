@@ -244,42 +244,7 @@ data class ExchangeRateEntity(
     val fetchedAt: Long
 )
 
-// --- 家庭、账本与存钱目标（Room v18） ----------------------------------
-
-/** Cached family group. Family rows live in the owner's server-side shard; this is a read-only cache. */
-@Entity(tableName = "family_groups")
-data class FamilyGroupEntity(
-    @PrimaryKey val id: Long,
-    val ownerUid: Long,
-    val name: String,
-    val comment: String = "",
-    val memberCount: Int = 0,
-    val createdTime: Long = 0,
-    val updatedAt: Long = System.currentTimeMillis()
-)
-
-/** Cached membership rows of every family the user actively belongs to. */
-@Entity(tableName = "family_members")
-data class FamilyMemberEntity(
-    @PrimaryKey val id: Long,
-    val familyId: Long,
-    val uid: Long,
-    val role: Int,
-    val status: Int,
-    val nickname: String = "",
-    val joinedTime: Long = 0,
-    val updatedAt: Long = System.currentTimeMillis()
-) {
-    companion object {
-        const val ROLE_OWNER = 1
-        const val ROLE_ADMIN = 2
-        const val ROLE_MEMBER = 3
-        const val ROLE_VIEWER = 4
-        const val STATUS_ACTIVE = 1
-        const val STATUS_LEFT = 2
-        const val STATUS_REMOVED = 3
-    }
-}
+// --- 账本与存钱目标（Room v18） ----------------------------------------
 
 /** Cached ledger. Id zero is the implicit default personal ledger and never has a row. */
 @Entity(tableName = "ledgers")
@@ -355,7 +320,10 @@ data class LedgerTransactionCacheEntity(
     val time: Long,
     val utcOffset: Int,
     val tagIdsJson: String,
-    val hideAmount: Boolean
+    val hideAmount: Boolean,
+    @ColumnInfo(defaultValue = "0") val recorderUid: Long = 0,
+    @ColumnInfo(defaultValue = "0") val payerUid: Long = 0,
+    @ColumnInfo(defaultValue = "0") val editable: Boolean = false
 ) {
     fun toTransactionEntity() = TransactionEntity(
         localId = "ledger-$ledgerId-$id", serverId = id, type = type,
@@ -500,25 +468,7 @@ interface FinexyDao {
     @Query("DELETE FROM product_assets WHERE id = :id")
     suspend fun deleteProductAsset(id: Long)
 
-    // --- 家庭、账本与存钱目标 ------------------------------------------
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertFamilyGroups(items: List<FamilyGroupEntity>)
-
-    @Query("DELETE FROM family_groups")
-    suspend fun deleteAllFamilyGroups()
-
-    @Query("DELETE FROM family_groups WHERE id NOT IN (:ids)")
-    suspend fun deleteFamilyGroupsNotIn(ids: List<Long>)
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertFamilyMembers(items: List<FamilyMemberEntity>)
-
-    @Query("DELETE FROM family_members")
-    suspend fun deleteAllFamilyMembers()
-
-    @Query("DELETE FROM family_members WHERE familyId = :familyId AND id NOT IN (:ids)")
-    suspend fun deleteFamilyMembersNotIn(familyId: Long, ids: List<Long>)
+    // --- 账本与存钱目标 -------------------------------------------------
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertLedgers(items: List<LedgerEntity>)
@@ -540,18 +490,6 @@ interface FinexyDao {
 
     @Query("DELETE FROM savings_goals WHERE id = :id")
     suspend fun deleteSavingsGoal(id: Long)
-
-    @Query("SELECT * FROM family_groups ORDER BY createdTime, id")
-    fun observeFamilyGroups(): Flow<List<FamilyGroupEntity>>
-
-    @Query("SELECT * FROM family_members WHERE status = 1 ORDER BY joinedTime, id")
-    fun observeFamilyMembers(): Flow<List<FamilyMemberEntity>>
-
-    @Query("SELECT * FROM family_groups ORDER BY id")
-    suspend fun allFamilyGroups(): List<FamilyGroupEntity>
-
-    @Query("SELECT * FROM family_members ORDER BY joinedTime, id")
-    suspend fun allFamilyMembers(): List<FamilyMemberEntity>
 
     @Query("SELECT * FROM ledgers WHERE id != 0 ORDER BY createdTime, id")
     fun observeLedgers(): Flow<List<LedgerEntity>>
@@ -689,7 +627,7 @@ interface FinexyDao {
     suspend fun upsertSyncStatus(status: SyncStatusEntity)
 }
 
-@Database(entities = [TransactionEntity::class, AccountEntity::class, CategoryEntity::class, CategoryMappingEntity::class, AccountMappingEntity::class, TagEntity::class, TemplateEntity::class, SyncConflictEntity::class, SyncStatusEntity::class, ScheduledOccurrenceEntity::class, AIReviewItemEntity::class, ProductAssetEntity::class, ExchangeRateEntity::class, FamilyGroupEntity::class, FamilyMemberEntity::class, LedgerEntity::class, SavingsGoalEntity::class, LedgerAccountCacheEntity::class, LedgerTransactionCacheEntity::class], version = 19, exportSchema = false)
+@Database(entities = [TransactionEntity::class, AccountEntity::class, CategoryEntity::class, CategoryMappingEntity::class, AccountMappingEntity::class, TagEntity::class, TemplateEntity::class, SyncConflictEntity::class, SyncStatusEntity::class, ScheduledOccurrenceEntity::class, AIReviewItemEntity::class, ProductAssetEntity::class, ExchangeRateEntity::class, LedgerEntity::class, SavingsGoalEntity::class, LedgerAccountCacheEntity::class, LedgerTransactionCacheEntity::class], version = 21, exportSchema = false)
 abstract class FinexyDatabase : androidx.room.RoomDatabase() {
     abstract fun dao(): FinexyDao
 
@@ -716,6 +654,8 @@ abstract class FinexyDatabase : androidx.room.RoomDatabase() {
                 .addMigrations(MIGRATION_16_17)
                 .addMigrations(MIGRATION_17_18)
                 .addMigrations(MIGRATION_18_19)
+                .addMigrations(MIGRATION_19_20)
+                .addMigrations(MIGRATION_20_21)
                 .build() }
         }
 
@@ -1076,6 +1016,27 @@ abstract class FinexyDatabase : androidx.room.RoomDatabase() {
                         PRIMARY KEY(ledgerId, id)
                     )
                 """.trimIndent())
+            }
+        }
+
+        val MIGRATION_19_20 = object : Migration(19, 20) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                val existingColumns = buildSet {
+                    database.query("PRAGMA table_info(ledger_transaction_cache)").use { cursor ->
+                        val nameIndex = cursor.getColumnIndex("name")
+                        while (cursor.moveToNext()) add(cursor.getString(nameIndex))
+                    }
+                }
+                if ("recorderUid" !in existingColumns) database.execSQL("ALTER TABLE ledger_transaction_cache ADD COLUMN recorderUid INTEGER NOT NULL DEFAULT 0")
+                if ("payerUid" !in existingColumns) database.execSQL("ALTER TABLE ledger_transaction_cache ADD COLUMN payerUid INTEGER NOT NULL DEFAULT 0")
+                if ("editable" !in existingColumns) database.execSQL("ALTER TABLE ledger_transaction_cache ADD COLUMN editable INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        val MIGRATION_20_21 = object : Migration(20, 21) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("DROP TABLE IF EXISTS family_members")
+                database.execSQL("DROP TABLE IF EXISTS family_groups")
             }
         }
     }

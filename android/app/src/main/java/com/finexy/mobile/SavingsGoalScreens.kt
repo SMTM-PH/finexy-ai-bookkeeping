@@ -482,299 +482,6 @@ private fun LedgerRoleOption(selected: Int, value: Int, label: String, onSelect:
 
 private fun ledgerMemberRoleLabel(role: Int) = when (role) { 1 -> "所有者"; 2 -> "管理员"; 4 -> "只读成员"; else -> "普通成员" }
 
-/** Legacy family page retained for server compatibility during migration. */
-@Composable
-internal fun FamilyPage(store: SecureStore, repository: TransactionRepository, localMode: Boolean, onBack: () -> Unit) {
-    BackHandler { onBack() }
-    val groups by repository.observeFamilyGroups().collectAsState(initial = emptyList())
-    val members by repository.observeFamilyMembers().collectAsState(initial = emptyList())
-    var running by remember { mutableStateOf(false) }
-    var message by remember { mutableStateOf<String?>(null) }
-    var groupEditorOpen by remember { mutableStateOf(false) }
-    var inviteEditorOpen by remember { mutableStateOf(false) }
-    var createdInvitation by remember { mutableStateOf<RemoteFamilyInvitation?>(null) }
-    var acceptEditorOpen by remember { mutableStateOf(false) }
-    var roleTarget by remember { mutableStateOf<FamilyMemberEntity?>(null) }
-    var leaveConfirm by remember { mutableStateOf(false) }
-    var removeConfirm by remember { mutableStateOf<FamilyMemberEntity?>(null) }
-    var deleteGroupConfirm by remember { mutableStateOf(false) }
-    var ledgerEditorOpen by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-    val api = remember(store) { FinexyApi(store) }
-
-    val activeGroup = groups.firstOrNull()
-    val activeMember = members.firstOrNull { it.status == FamilyMemberEntity.STATUS_ACTIVE }
-    val canManage = activeMember?.let { it.role == FamilyMemberEntity.ROLE_OWNER || it.role == FamilyMemberEntity.ROLE_ADMIN } ?: false
-    val isOwner = activeMember?.role == FamilyMemberEntity.ROLE_OWNER
-
-    fun refresh() {
-        scope.launch {
-            running = true; message = null
-            runCatching {
-                val loaded = api.listFamilyGroupsIfEnabled() ?: throw IllegalStateException("家庭共享在本服务上不可用")
-                repository.replaceFamilyGroups(loaded)
-                loaded.forEach { group -> repository.replaceFamilyMembers(group.id, api.listFamilyMembers(group.id)) }
-            }.onFailure { message = "刷新失败：${it.message ?: "请稍后重试"}" }
-            running = false
-        }
-    }
-
-    Surface(Modifier.fillMaxSize(), color = CanvasBlack) {
-        Box(Modifier.safeDrawingPadding().imePadding()) {
-            Column(Modifier.widthIn(max = 640.dp).fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                TextButton(onClick = onBack, modifier = Modifier.semantics { contentDescription = "返回设置" }) { Text("返回设置") }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("家庭共享", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.semantics { heading() })
-                        Text("共享家庭账本；成员的个人账本永远私密。", color = Muted, fontSize = 13.sp)
-                    }
-                    TextButton(enabled = !localMode && !running, onClick = ::refresh,
-                        modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "刷新家庭信息" }) { Text("刷新") }
-                }
-                message?.let { Text(it, color = if (it.contains("失败") || it.contains("无法")) MaterialTheme.colorScheme.error else Muted, fontSize = 13.sp) }
-                if (localMode) Text("本地模式没有服务端家庭功能。", color = Muted, fontSize = 13.sp)
-                when {
-                    localMode -> {}
-                    activeGroup == null -> {
-                        Text("还没有加入任何家庭。创建一个家庭并邀请家人，或粘贴邀请码加入；个人账本永远私密。", color = Muted, fontSize = 13.sp)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(enabled = !running, onClick = { groupEditorOpen = true },
-                                modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "创建家庭" }) { Text("创建家庭") }
-                            OutlinedButton(enabled = !running, onClick = { acceptEditorOpen = true },
-                                modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "用邀请码加入家庭" }) { Text("用邀请码加入") }
-                        }
-                    }
-                    else -> {
-                        PanelCard {
-                            Text(activeGroup.name, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                            if (activeGroup.comment.isNotBlank()) Text(activeGroup.comment, color = Muted, fontSize = 13.sp)
-                            Text("成员 ${activeGroup.memberCount} 位", color = Muted, fontSize = 12.sp)
-                        }
-                        if (canManage) {
-                            Button(enabled = !running, onClick = { ledgerEditorOpen = true },
-                                modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "创建家庭账本" }) {
-                                Text("创建家庭账本")
-                            }
-                        }
-                        Text("成员", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                        members.filter { it.familyId == activeGroup.id && it.status == FamilyMemberEntity.STATUS_ACTIVE }.forEach { member ->
-                            PanelCard {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text(member.nickname.ifBlank { "成员 ${member.uid}" }, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                                        Text(if (member.status == FamilyMemberEntity.STATUS_ACTIVE) familyRoleLabel(member.role) else if (member.status == FamilyMemberEntity.STATUS_LEFT) "已退出" else "已被移除",
-                                            color = Muted, fontSize = 12.sp)
-                                    }
-                                    if (canManage && member.status == FamilyMemberEntity.STATUS_ACTIVE && member.role != FamilyMemberEntity.ROLE_OWNER) {
-                                        TextButton(enabled = !running, onClick = { roleTarget = member },
-                                            modifier = Modifier.heightIn(min = 44.dp).semantics { contentDescription = "调整 ${member.nickname.ifBlank { member.uid.toString() }} 的权限" }) { Text("权限") }
-                                        TextButton(enabled = !running, onClick = { removeConfirm = member },
-                                            modifier = Modifier.heightIn(min = 44.dp).semantics { contentDescription = "移除 ${member.nickname.ifBlank { member.uid.toString() }}" }) { Text("移除", color = MaterialTheme.colorScheme.error) }
-                                    }
-                                }
-                            }
-                        }
-                        if (canManage) {
-                            Text("邀请记录", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                            Button(enabled = !running, onClick = { createdInvitation = null; inviteEditorOpen = true },
-                                modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "邀请成员" }) { Text("邀请成员") }
-                        }
-                        OutlinedButton(enabled = !running && !isOwner, onClick = { leaveConfirm = true },
-                            modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "退出家庭" }) {
-                            Text(if (isOwner) "所有者不能退出（可解散家庭）" else "退出家庭", color = if (isOwner) Muted else MaterialTheme.colorScheme.error)
-                        }
-                        if (isOwner) {
-                            OutlinedButton(enabled = !running, onClick = { deleteGroupConfirm = true },
-                                modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "解散家庭" }) { Text("解散家庭", color = MaterialTheme.colorScheme.error) }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    if (groupEditorOpen) {
-        FamilyGroupEditorDialog(onDismiss = { groupEditorOpen = false }, onSubmit = { name, comment ->
-            groupEditorOpen = false
-            scope.launch {
-                running = true; message = null
-                runCatching {
-                    api.createFamilyGroup(name, comment)
-                    val loaded = api.listFamilyGroupsIfEnabled() ?: emptyList()
-                    repository.replaceFamilyGroups(loaded)
-                    loaded.forEach { group -> repository.replaceFamilyMembers(group.id, api.listFamilyMembers(group.id)) }
-                }.onSuccess { message = "家庭已创建，去邀请成员吧" }
-                    .onFailure { message = "创建失败：${it.message ?: "请稍后重试"}" }
-                running = false
-            }
-        })
-    }
-    if (ledgerEditorOpen) {
-        FamilyLedgerEditorDialog(running = running, onDismiss = { ledgerEditorOpen = false }, onSubmit = { name, comment ->
-            val groupId = activeGroup?.id
-            if (groupId == null || !canManage) return@FamilyLedgerEditorDialog
-            scope.launch {
-                running = true; message = null
-                runCatching {
-                    api.createLedger(RemoteLedger.TYPE_FAMILY, groupId, name, comment)
-                    repository.replaceLedgers(api.listLedgers())
-                }.onSuccess {
-                    ledgerEditorOpen = false
-                    message = "家庭账本已创建，可在顶部切换"
-                }.onFailure { message = "创建失败：${it.message ?: "请稍后重试"}" }
-                running = false
-            }
-        })
-    }
-    if (inviteEditorOpen) {
-        FamilyInviteDialog(createdToken = createdInvitation?.token, running = running, onDismiss = { inviteEditorOpen = false; createdInvitation = null },
-            onSubmit = { inviteeName, role ->
-                val groupId = activeGroup?.id
-                if (groupId == null) { createdInvitation = null; return@FamilyInviteDialog }
-                scope.launch {
-                    running = true; message = null
-                    runCatching { createdInvitation = api.createFamilyInvitation(groupId, inviteeName, role) }
-                        .onSuccess { message = "邀请已生成，把邀请码发给对方" }
-                        .onFailure { message = "生成失败：${it.message ?: "请稍后重试"}" }
-                    running = false
-                }
-            })
-    }
-    if (acceptEditorOpen) {
-        FamilyAcceptDialog(running = running, onDismiss = { acceptEditorOpen = false }, onSubmit = { token ->
-            scope.launch {
-                running = true; message = null
-                runCatching { api.acceptFamilyInvitation(token) }
-                    .onSuccess { acceptEditorOpen = false; message = "已加入家庭"; refresh() }
-                    .onFailure { message = "加入失败：${it.message ?: "请检查邀请码"}" }
-                running = false
-            }
-        })
-    }
-    roleTarget?.let { member ->
-        var draft by remember(member.id) { mutableStateOf(if (member.role == FamilyMemberEntity.ROLE_VIEWER) FamilyMemberEntity.ROLE_MEMBER else member.role) }
-        AlertDialog(onDismissRequest = { roleTarget = null },
-            title = { Text("调整「${member.nickname.ifBlank { member.uid.toString() }}」的权限") },
-            text = {
-                Column {
-                    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(selected = draft == FamilyMemberEntity.ROLE_ADMIN, onClick = { draft = FamilyMemberEntity.ROLE_ADMIN },
-                            modifier = Modifier.semantics { contentDescription = "设为管理员" })
-                        Text("管理员（管理账目、目标与邀请）", fontSize = 14.sp)
-                    }
-                    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(selected = draft == FamilyMemberEntity.ROLE_MEMBER, onClick = { draft = FamilyMemberEntity.ROLE_MEMBER },
-                            modifier = Modifier.semantics { contentDescription = "设为普通成员" })
-                        Text("普通成员（可记账）", fontSize = 14.sp)
-                    }
-                    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(selected = draft == FamilyMemberEntity.ROLE_VIEWER, onClick = { draft = FamilyMemberEntity.ROLE_VIEWER },
-                            modifier = Modifier.semantics { contentDescription = "设为只读成员" })
-                        Text("只读成员（仅查看）", fontSize = 14.sp)
-                    }
-                    Text("改为只读后不能再新增或修改流水，历史记录保留。", color = Muted, fontSize = 12.sp)
-                }
-            },
-            confirmButton = { TextButton(enabled = !running, onClick = {
-                val target = roleTarget; roleTarget = null
-                val groupId = activeGroup?.id
-                if (target == null || groupId == null) return@TextButton
-                scope.launch {
-                    running = true; message = null
-                    runCatching { api.changeFamilyMemberRole(groupId, target.id, draft); refresh() }
-                        .onSuccess { message = "成员权限已更新" }
-                        .onFailure { message = "调整失败：${it.message ?: "请稍后重试"}" }
-                    running = false
-                }
-            }, modifier = Modifier.heightIn(min = 48.dp)) { Text("应用") } },
-            dismissButton = { TextButton(onClick = { roleTarget = null }, modifier = Modifier.heightIn(min = 48.dp)) { Text("取消") } })
-    }
-    removeConfirm?.let { member ->
-        AlertDialog(onDismissRequest = { removeConfirm = null },
-            title = { Text("移除成员") },
-            text = { Text("移除「${member.nickname.ifBlank { member.uid.toString() }}」后，该成员将无法访问家庭账本。") },
-            confirmButton = { TextButton(enabled = !running, onClick = {
-                val target = removeConfirm; removeConfirm = null
-                val groupId = activeGroup?.id
-                if (target == null || groupId == null) return@TextButton
-                scope.launch {
-                    running = true; message = null
-                    runCatching { api.removeFamilyMember(groupId, target.id); refresh() }
-                        .onSuccess { message = "成员已移除" }
-                        .onFailure { message = "移除失败：${it.message ?: "请稍后重试"}" }
-                    running = false
-                }
-            }, modifier = Modifier.heightIn(min = 48.dp)) { Text("移除", color = MaterialTheme.colorScheme.error) } },
-            dismissButton = { TextButton(onClick = { removeConfirm = null }, modifier = Modifier.heightIn(min = 48.dp)) { Text("取消") } })
-    }
-    if (leaveConfirm) {
-        AlertDialog(onDismissRequest = { leaveConfirm = false },
-            title = { Text("退出家庭") },
-            text = { Text("退出后将无法查看家庭账本，历史记录保留。") },
-            confirmButton = { TextButton(enabled = !running, onClick = {
-                leaveConfirm = false
-                val groupId = activeGroup?.id
-                if (groupId == null) return@TextButton
-                scope.launch {
-                    running = true; message = null
-                    runCatching { api.leaveFamily(groupId); refresh() }
-                        .onSuccess { message = "已退出家庭" }
-                        .onFailure { message = "退出失败：${it.message ?: "请稍后重试"}" }
-                    running = false
-                }
-            }, modifier = Modifier.heightIn(min = 48.dp)) { Text("退出") } },
-            dismissButton = { TextButton(onClick = { leaveConfirm = false }, modifier = Modifier.heightIn(min = 48.dp)) { Text("取消") } })
-    }
-    if (deleteGroupConfirm) {
-        AlertDialog(onDismissRequest = { deleteGroupConfirm = false },
-            title = { Text("解散家庭") },
-            text = { Text("解散后所有成员失去访问。仅所有者可以解散，操作不能撤销。") },
-            confirmButton = { TextButton(enabled = !running, onClick = {
-                deleteGroupConfirm = false
-                val groupId = activeGroup?.id
-                if (groupId == null) return@TextButton
-                scope.launch {
-                    running = true; message = null
-                    runCatching { api.deleteFamilyGroup(groupId); refresh() }
-                        .onSuccess { message = "家庭已解散" }
-                        .onFailure { message = "解散失败：${it.message ?: "请稍后重试"}" }
-                    running = false
-                }
-            }, modifier = Modifier.heightIn(min = 48.dp)) { Text("解散", color = MaterialTheme.colorScheme.error) } },
-            dismissButton = { TextButton(onClick = { deleteGroupConfirm = false }, modifier = Modifier.heightIn(min = 48.dp)) { Text("取消") } })
-    }
-}
-
-private fun familyRoleLabel(role: Int): String = when (role) {
-    FamilyMemberEntity.ROLE_OWNER -> "所有者"
-    FamilyMemberEntity.ROLE_ADMIN -> "管理员"
-    FamilyMemberEntity.ROLE_MEMBER -> "普通成员"
-    else -> "只读成员"
-}
-
-@Composable
-private fun FamilyGroupEditorDialog(onDismiss: () -> Unit, onSubmit: (name: String, comment: String) -> Unit) {
-    var name by remember { mutableStateOf("") }
-    var comment by remember { mutableStateOf("") }
-    var error by remember { mutableStateOf<String?>(null) }
-    AlertDialog(onDismissRequest = onDismiss,
-        title = { Text("创建家庭") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("创建后你就是家庭的所有者。成员加入后可以看到家庭账本，但永远看不到彼此的个人账本。", color = Muted, fontSize = 12.sp)
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("家庭名称 *") }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth().semantics { contentDescription = "家庭名称" })
-                OutlinedTextField(value = comment, onValueChange = { comment = it }, label = { Text("描述") },
-                    modifier = Modifier.fillMaxWidth().semantics { contentDescription = "家庭描述" })
-                error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
-            }
-        },
-        confirmButton = { TextButton(onClick = {
-            if (name.trim().isEmpty()) { error = "请输入家庭名称。"; return@TextButton }
-            onSubmit(name.trim(), comment.trim())
-        }, modifier = Modifier.heightIn(min = 48.dp)) { Text("创建家庭") } },
-        dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text("取消") } })
-}
-
 @Composable
 private fun FamilyLedgerEditorDialog(running: Boolean, onDismiss: () -> Unit, onSubmit: (name: String, comment: String) -> Unit) {
     var name by remember { mutableStateOf("") }
@@ -802,7 +509,7 @@ private fun FamilyLedgerEditorDialog(running: Boolean, onDismiss: () -> Unit, on
 @Composable
 private fun FamilyInviteDialog(createdToken: String?, running: Boolean, onDismiss: () -> Unit, onSubmit: (inviteeName: String, role: Int) -> Unit) {
     var name by remember { mutableStateOf("") }
-    var role by remember { mutableStateOf(FamilyMemberEntity.ROLE_MEMBER) }
+    var role by remember { mutableStateOf(RemoteLedgerMember.ROLE_MEMBER) }
     var error by remember { mutableStateOf<String?>(null) }
     AlertDialog(onDismissRequest = onDismiss,
         title = { Text(if (createdToken == null) "邀请成员" else "邀请已生成") },
@@ -813,12 +520,12 @@ private fun FamilyInviteDialog(createdToken: String?, running: Boolean, onDismis
                     OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("邀请备注 *") }, singleLine = true,
                         modifier = Modifier.fillMaxWidth().semantics { contentDescription = "邀请备注" })
                     Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(selected = role == FamilyMemberEntity.ROLE_MEMBER, onClick = { role = FamilyMemberEntity.ROLE_MEMBER },
+                        RadioButton(selected = role == RemoteLedgerMember.ROLE_MEMBER, onClick = { role = RemoteLedgerMember.ROLE_MEMBER },
                             modifier = Modifier.semantics { contentDescription = "邀请为普通成员" })
                         Text("普通成员（可记账）", fontSize = 14.sp)
                     }
                     Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(selected = role == FamilyMemberEntity.ROLE_VIEWER, onClick = { role = FamilyMemberEntity.ROLE_VIEWER },
+                        RadioButton(selected = role == RemoteLedgerMember.ROLE_VIEWER, onClick = { role = RemoteLedgerMember.ROLE_VIEWER },
                             modifier = Modifier.semantics { contentDescription = "邀请为只读成员" })
                         Text("只读成员（仅查看）", fontSize = 14.sp)
                     }
@@ -846,23 +553,6 @@ private fun FamilyInviteDialog(createdToken: String?, running: Boolean, onDismis
                 TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text("取消") }
             }
         })
-}
-
-@Composable
-private fun FamilyAcceptDialog(running: Boolean, onDismiss: () -> Unit, onSubmit: (token: String) -> Unit) {
-    var token by remember { mutableStateOf("") }
-    AlertDialog(onDismissRequest = onDismiss,
-        title = { Text("用邀请码加入账本") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("粘贴对方发来的邀请码。加入后可按邀请权限访问该账本。", color = Muted, fontSize = 12.sp)
-                OutlinedTextField(value = token, onValueChange = { token = it }, label = { Text("邀请码 *") }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth().semantics { contentDescription = "邀请码" })
-            }
-        },
-        confirmButton = { TextButton(enabled = !running && token.trim().isNotEmpty(), onClick = { onSubmit(token.trim()) },
-            modifier = Modifier.heightIn(min = 48.dp)) { Text("加入账本") } },
-        dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text("取消") } })
 }
 
 @Composable

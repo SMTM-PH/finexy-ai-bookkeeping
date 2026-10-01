@@ -19,8 +19,8 @@ import java.util.UUID
 
 /**
  * Joint acceptance on a throwaway no-volume Docker server: two real accounts
- * join one family through the invitation flow, the owner creates the family
- * ledger and shared account, an admin member creates a savings goal and moves
+ * join one ledger through the invitation flow, the owner creates the shared
+ * account, an admin member creates a savings goal and moves
  * funds, and both devices observe the same server-derived snapshot through
  * SyncEngine. Run only with `-e finexy.e2e.url`.
  */
@@ -71,6 +71,13 @@ class DockerFamilyGoalE2ETest {
             return store to FinexyApi(store)
         }
 
+        suspend fun denied(block: suspend () -> Unit): Boolean = try {
+            block()
+            false
+        } catch (error: ApiException) {
+            error.status == 400 || error.status == 403 || error.status == 404
+        }
+
         val (ownerStore, ownerApi) = register("Owner")
         val (memberStore, memberApi) = register("Member")
         val memberUsername = "famMember$suffix"
@@ -80,24 +87,21 @@ class DockerFamilyGoalE2ETest {
         val ownerRepository = TransactionRepository(context, database, importLegacy = false)
         val ownerEngine = SyncEngine(ownerApi, ownerRepository)
 
-        // The owner creates the family and invites the member; the member joins
-        // through the one-shot invitation token.
-        ownerApi.createFamilyGroup("温暖小家", "docker e2e")
-        val groups = ownerApi.listFamilyGroups()
-        assertEquals(1, groups.size)
-        val familyId = groups.first().id
-        val invitation = ownerApi.createFamilyInvitation(familyId, "陈远", RemoteFamilyMember.ROLE_MEMBER)
-        memberApi.acceptFamilyInvitation(invitation.token)
-        assertTrue(memberApi.listFamilyGroups().any { it.id == familyId })
+        // The owner creates a direct ledger and invites the member through the
+        // one-shot ledger invitation contract. "Family" is now only a UI
+        // template and is never persisted as a separate resource.
+        val familyLedger = ownerApi.createLedger(RemoteLedger.TYPE_PERSONAL, 0, "家庭账本", "docker e2e")
+        val invitation = ownerApi.createLedgerInvitation(familyLedger.id, "陈远", RemoteLedgerMember.ROLE_MEMBER)
+        memberApi.acceptLedgerInvitation(invitation.token)
+        assertTrue(memberApi.listLedgers().any { it.id == familyLedger.id })
 
         // Only the owner may change roles; promote the member to admin.
-        val members = ownerApi.listFamilyMembers(familyId)
+        val members = ownerApi.listLedgerMembers(familyLedger.id)
         val memberRow = members.first { it.nickname == "Member" }
-        ownerApi.changeFamilyMemberRole(familyId, memberRow.id, RemoteFamilyMember.ROLE_ADMIN)
-        assertEquals(RemoteFamilyMember.ROLE_ADMIN, memberApi.getMyFamilyMember(familyId)!!.role)
+        ownerApi.changeLedgerMemberRole(familyLedger.id, memberRow.id, RemoteLedgerMember.ROLE_ADMIN)
+        assertEquals(RemoteLedgerMember.ROLE_ADMIN, memberApi.listLedgerMembers(familyLedger.id).first { it.isCurrentUser }.role)
 
-        // The owner creates the family ledger and the shared family account.
-        val familyLedger = ownerApi.createLedger(RemoteLedger.TYPE_FAMILY, familyId, "家庭账本", "")
+        // The owner creates the shared account.
         val personalToMove = memberApi.createAccount(AccountDraft("迁移钱包", 1, "CNY", 12_345)).single()
         val movedToFamily = memberApi.moveAccountToLedger(personalToMove.id, familyLedger.id)
         assertEquals(familyLedger.id, get("v1/accounts/get.json?id=${movedToFamily.single().id}", memberToken)
@@ -112,9 +116,67 @@ class DockerFamilyGoalE2ETest {
         memberApi.deleteAccount(disposableFamilyAccount)
         val accountId = post("v1/accounts/add.json", JSONObject().put("name", "家庭公共钱包")
             .put("category", 1).put("type", 1).put("icon", "1").put("color", "F05537")
-            .put("currency", "CNY").put("balance", 1_000_000).put("balanceTime", System.currentTimeMillis() / 1000)
-            .put("ledgerId", familyLedger.id.toString()), memberStore.get(FinexyApi.KEY_TOKEN))
+            .put("currency", "CNY").put("balance", 1_000_000).put("balanceTime", System.currentTimeMillis() / 1000 - 3600)
+            .put("ledgerId", familyLedger.id.toString()), ownerStore.get(FinexyApi.KEY_TOKEN))
             .getJSONObject("result").getString("id").toLong()
+
+        // Shared-ledger transaction permissions are enforced per record. A
+        // writable member may edit/delete records they created, the owner may
+        // manage every record, and a viewer cannot write at all.
+        val expenseCategory = memberApi.parseCategoryResponse(memberApi.listCategories(ledgerId = familyLedger.id))
+            .first { it.type == 2 && it.parentId > 0 && !it.hidden }
+        fun transactionPayload(comment: String, amount: Long) = TransactionEntity(
+            localId = UUID.randomUUID().toString(), type = TransactionRepository.TYPE_EXPENSE,
+            sourceAccountId = accountId, categoryId = expenseCategory.id, categoryName = expenseCategory.name,
+            sourceAmountMinor = amount, comment = comment, time = System.currentTimeMillis(), utcOffset = 480
+        ).toApiPayload().put("ledgerId", familyLedger.id.toString())
+        suspend fun add(api: FinexyApi, comment: String, amount: Long): RemoteTransaction {
+            val payload = transactionPayload(comment, amount)
+            return api.parseWrittenTransaction(api.addTransaction(payload, UUID.randomUUID().toString()))
+        }
+        suspend fun modify(api: FinexyApi, transaction: RemoteTransaction, comment: String, amount: Long) {
+            api.parseWrittenTransaction(api.modifyTransaction(transactionPayload(comment, amount)
+                .put("id", transaction.id.toString())))
+        }
+
+        add(ownerApi, "所有者记录", 10_000)
+        add(memberApi, "成员待修改", 20_000)
+        add(memberApi, "成员待删除", 30_000)
+        val sharedTransactions = memberApi.parseTransactionResponse(memberApi.listTransactions(familyLedger.id), familyLedger.id)
+        val ownerTransaction = sharedTransactions.first { it.comment == "所有者记录" }
+        val memberEditedTransaction = sharedTransactions.first { it.comment == "成员待修改" }
+        val memberDeletedTransaction = sharedTransactions.first { it.comment == "成员待删除" }
+        assertTrue("成员不能修改所有者流水", denied { modify(memberApi, ownerTransaction, "越权修改", 11_000) })
+        assertTrue("成员不能删除所有者流水", denied { memberApi.deleteTransaction(ownerTransaction.id, familyLedger.id) })
+        modify(memberApi, memberEditedTransaction, "成员已修改", 22_000)
+        memberApi.deleteTransaction(memberDeletedTransaction.id, familyLedger.id)
+
+        val (viewerStore, viewerApi) = register("Viewer")
+        val viewerInvitation = ownerApi.createLedgerInvitation(familyLedger.id, "只读验收", RemoteLedgerMember.ROLE_VIEWER)
+        viewerApi.acceptLedgerInvitation(viewerInvitation.token)
+        assertTrue("只读成员不能新增流水", denied { add(viewerApi, "只读越权新增", 40_000) })
+        assertTrue("只读成员不能修改流水", denied { modify(viewerApi, ownerTransaction, "只读越权修改", 40_000) })
+        assertTrue("只读成员不能删除流水", denied { viewerApi.deleteTransaction(ownerTransaction.id, familyLedger.id) })
+
+        val memberRepository = TransactionRepository(context,
+            Room.inMemoryDatabaseBuilder(context, FinexyDatabase::class.java).build(), importLegacy = false)
+        val memberEngine = SyncEngine(memberApi, memberRepository)
+        memberEngine.sync()
+        val memberEditability = memberRepository.observeLedgerTransactionEditability(familyLedger.id).first()
+        assertEquals(false, memberEditability[ownerTransaction.id])
+        assertEquals(true, memberEditability[memberEditedTransaction.id])
+        ownerEngine.sync()
+        val ownerEditability = ownerRepository.observeLedgerTransactionEditability(familyLedger.id).first()
+        assertEquals(true, ownerEditability[ownerTransaction.id])
+        assertEquals(true, ownerEditability[memberEditedTransaction.id])
+
+        modify(ownerApi, memberEditedTransaction, "所有者代为修改", 23_000)
+        ownerApi.deleteTransaction(memberEditedTransaction.id, familyLedger.id)
+        ownerApi.deleteTransaction(ownerTransaction.id, familyLedger.id)
+        memberEngine.sync()
+        assertTrue(memberRepository.observeLedgerTransactions(familyLedger.id).first().none {
+            it.serverId == ownerTransaction.id || it.serverId == memberEditedTransaction.id || it.serverId == memberDeletedTransaction.id
+        })
 
         // The admin member creates the family savings goal and moves funds.
         val goal = memberApi.createSavingsGoal(familyLedger.id, SavingsGoalDraft("全家旅行基金", 2_000_000))
@@ -126,18 +188,14 @@ class DockerFamilyGoalE2ETest {
             memberApi.moveAccountToLedger(accountId, LedgerEntity.DEFAULT_LEDGER_ID)
             false
         } catch (error: ApiException) {
-            error.status == 400
+            error.status == 400 || error.status == 403
         }
         assertTrue("关联存钱计划的账户必须保留在原账本", linkedGoalMoveRejected)
 
         // The member device syncs through SyncEngine and caches the shared state.
-        val memberRepository = TransactionRepository(context,
-            Room.inMemoryDatabaseBuilder(context, FinexyDatabase::class.java).build(), importLegacy = false)
-        val memberEngine = SyncEngine(memberApi, memberRepository)
         memberEngine.sync()
         val memberLedgers = memberRepository.observeLedgers().first()
-        assertEquals(1, memberLedgers.filter { it.type == LedgerEntity.TYPE_FAMILY }.size)
-        assertEquals(familyId, memberRepository.observeFamilyGroups().first().first().id)
+        assertEquals(familyLedger.id, memberLedgers.single().id)
         val cachedGoal = memberRepository.observeSavingsGoals(familyLedger.id).first().first { it.id == goal.id }
         assertEquals(1_000_000L, cachedGoal.savedAmountMinor)
         assertEquals(false, cachedGoal.achieved)
@@ -157,9 +215,12 @@ class DockerFamilyGoalE2ETest {
         // The owner device observes the same family data through its own sync.
         val ownerGoals = ownerApi.listSavingsGoals(familyLedger.id)
         assertEquals(800_000L, ownerGoals.first { it.id == goal.id }.savedAmountMinor)
-        ownerApi.listFamilyMembers(familyId).also { memberList ->
-            assertEquals(2, memberList.size)
+        ownerApi.listLedgerMembers(familyLedger.id).also { memberList ->
+            assertEquals(3, memberList.size)
             assertTrue(memberList.all { it.nickname.isNotBlank() })
+            assertTrue(memberList.any { it.role == RemoteLedgerMember.ROLE_OWNER })
+            assertTrue(memberList.any { it.role == RemoteLedgerMember.ROLE_ADMIN })
+            assertTrue(memberList.any { it.role == RemoteLedgerMember.ROLE_VIEWER })
         }
 
         // A stranger without any membership sees no family ledger and no goals.
@@ -173,11 +234,14 @@ class DockerFamilyGoalE2ETest {
             error.status == 403
         }
         assertTrue("陌生人应被拒绝访问家庭目标", strangerDenied)
+        assertTrue("陌生人应被拒绝新增家庭流水", denied { add(strangerApi, "陌生人越权", 50_000) })
 
         // Goal movements post external transfers, update the shared account,
         // and remain isolated from the member's default personal ledger.
-        val familyAccount = get("v1/accounts/get.json?id=$accountId", memberStore.get(FinexyApi.KEY_TOKEN)!!)
-            .getJSONObject("result")
+        val familyAccountItems = get("v1/accounts/list.json?ledgerId=${familyLedger.id}", memberStore.get(FinexyApi.KEY_TOKEN)!!)
+            .getJSONArray("result")
+        val familyAccount = (0 until familyAccountItems.length()).map { familyAccountItems.getJSONObject(it) }
+            .first { it.getString("id") == accountId.toString() }
         assertEquals(200_000L, familyAccount.getLong("balance"))
         assertEquals(familyLedger.id.toString(), familyAccount.getString("ledgerId"))
         val familyTransactions = get(

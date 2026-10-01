@@ -82,13 +82,6 @@ class SyncEngine(
             ledgerSnapshots.forEach { (ledgerId, snapshot) ->
                 repository.replaceLedgerSnapshot(ledgerId, snapshot.first, snapshot.second)
             }
-            val familyGroups = api.listFamilyGroupsIfEnabled()
-            if (familyGroups != null) {
-                repository.replaceFamilyGroups(familyGroups)
-                familyGroups.forEach { group ->
-                    repository.replaceFamilyMembers(group.id, api.listFamilyMembers(group.id))
-                }
-            }
             // One complete snapshot across every visible ledger, including the
             // implicit default personal ledger, so a single ledger failure can
             // never look like an emptied plan.

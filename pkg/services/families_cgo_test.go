@@ -176,6 +176,7 @@ func TestFamilyLedgerAndGoalServiceFlow(t *testing.T) {
 		Type: models.LEDGER_TYPE_FAMILY, FamilyId: group.FamilyGroupId, Name: "管理员建立的家庭账本",
 	})
 	require.NoError(t, err)
+	require.Equal(t, group.OwnerUid, adminLedger.OwnerUid)
 	adminGoal, err := SavingsGoals.CreateSavingsGoal(nil, 200, &models.SavingsGoalCreateRequest{
 		LedgerId: adminLedger.LedgerId, Name: "共同教育金", TargetAmount: 50000,
 	})

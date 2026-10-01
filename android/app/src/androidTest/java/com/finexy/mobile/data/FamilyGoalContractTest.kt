@@ -18,9 +18,9 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * Contract tests for the family / ledger / savings-goal feature: strict API
- * parsing, safe Room reconciliation, the v17→v18 migration and backup schema
- * 14 round-trip. A malformed server response must throw instead of reaching
+ * Contract tests for the ledger / savings-goal feature: strict API parsing,
+ * safe Room reconciliation, the v17→v21 migration and backup schema 15
+ * round-trip. A malformed server response must throw instead of reaching
  * Room, and only a real empty list may clear cached rows.
  */
 @RunWith(AndroidJUnit4::class)
@@ -62,11 +62,9 @@ class FamilyGoalContractTest {
     }
 
     @Test
-    fun familyGroupParsingAcceptsWellFormedListAndReconcilesRoom() = runBlocking {
+    fun legacyFamilyGroupParsingRemainsReadableDuringServerUpgrade() {
         val parsed = api().parseFamilyGroups(envelope(groupJson("7"), groupJson("8")))
         assertEquals(2, parsed.size)
-        repository.replaceFamilyGroups(parsed)
-        assertEquals(2, listOfFlow(repository.observeFamilyGroups()).size)
     }
 
     @Test
@@ -207,27 +205,18 @@ class FamilyGoalContractTest {
     }
 
     @Test
-    fun familyMemberReconcileScopesPerFamily() = runBlocking {
+    fun legacyFamilyMemberParsingRejectsInvalidStatus() {
         val member = api().parseFamilyMembers(envelope(
             JSONObject().put("id", "11").put("familyId", "7").put("uid", "100").put("role", 1)
                 .put("status", 1).put("nickname", "林悦").put("joinedTime", 1700000000)
         ))
-        repository.replaceFamilyMembers(7, member)
-        val rows = listOfFlow(repository.observeFamilyMembers())
-        assertEquals(1, rows.size)
-        assertEquals("林悦", rows.first().nickname)
-
-        val rejectedMember = try {
-            repository.replaceFamilyMembers(7, api().parseFamilyMembers(envelope(
+        assertEquals("林悦", member.single().nickname)
+        assertThrows(IllegalArgumentException::class.java) {
+            api().parseFamilyMembers(envelope(
                 JSONObject().put("id", "12").put("familyId", "9").put("uid", "200").put("role", 3)
-                    .put("status", 1).put("nickname", "").put("joinedTime", 1700000001)
-            )))
-            false
-        } catch (error: IllegalArgumentException) {
-            true
+                    .put("status", 9).put("nickname", "").put("joinedTime", 1700000001)
+            ))
         }
-        assertTrue(rejectedMember)
-        assertEquals(1, listOfFlow(repository.observeFamilyMembers()).size)
     }
 
     @Test
@@ -236,7 +225,7 @@ class FamilyGoalContractTest {
             id = 1, timeSequenceId = 1700000000000, type = TransactionRepository.TYPE_EXPENSE,
             categoryId = 3, categoryName = "餐饮", sourceAccountId = 1, destinationAccountId = null,
             sourceAmountMinor = 2500, destinationAmountMinor = 0, currency = "CNY", comment = comment,
-            time = 1700000000, utcOffset = 480, tagIdsJson = "[]", ledgerId = ledgerId
+            time = 1700000000, utcOffset = 480, tagIdsJson = "[]", ledgerId = ledgerId, editable = ledgerId == 9L
         )
         val account = RemoteAccount(1, "家庭钱包", "CNY", 97500, false)
         repository.replaceLedgerSnapshot(9, listOf(account), listOf(transaction(9, "九号账本")))
@@ -246,6 +235,8 @@ class FamilyGoalContractTest {
         assertEquals("十号钱包", listOfFlow(repository.observeLedgerAccounts(10)).single().name)
         assertEquals("九号账本", listOfFlow(repository.observeLedgerTransactions(9)).single().comment)
         assertEquals("十号账本", listOfFlow(repository.observeLedgerTransactions(10)).single().comment)
+        assertEquals(true, repository.observeLedgerTransactionEditability(9).first()[1L])
+        assertEquals(false, repository.observeLedgerTransactionEditability(10).first()[1L])
 
         val rejected = try {
             repository.replaceLedgerSnapshot(9, emptyList(), listOf(transaction(10, "跨账本")))
@@ -274,7 +265,7 @@ class FamilyGoalContractTest {
     }
 
     @Test
-    fun migrationFromV17CreatesFamilyTablesAndPreservesRows() = runBlocking {
+    fun migrationFromV17RemovesLegacyFamilyCachesAndPreservesLedgers() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val name = "family-migration-${java.util.UUID.randomUUID()}.db"
         var persisted: FinexyDatabase? = null
@@ -287,16 +278,26 @@ class FamilyGoalContractTest {
             android.database.sqlite.SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null,
                 android.database.sqlite.SQLiteDatabase.OPEN_READWRITE).use { old -> old.version = 17 }
             persisted = Room.databaseBuilder(context, FinexyDatabase::class.java, name)
-                .addMigrations(FinexyDatabase.MIGRATION_17_18, FinexyDatabase.MIGRATION_18_19).build()
+                .addMigrations(FinexyDatabase.MIGRATION_17_18, FinexyDatabase.MIGRATION_18_19, FinexyDatabase.MIGRATION_19_20, FinexyDatabase.MIGRATION_20_21).build()
             assertTrue(persisted.dao().allSavingsGoals().isEmpty())
             val migrated = persisted.openHelper.readableDatabase
-            listOf("family_groups", "family_members", "ledgers", "savings_goals", "ledger_account_cache", "ledger_transaction_cache").forEach { table ->
+            listOf("ledgers", "savings_goals", "ledger_account_cache", "ledger_transaction_cache").forEach { table ->
                 migrated.query("SELECT COUNT(*) FROM $table").use { cursor ->
                     assertTrue(cursor.moveToFirst())
                 }
             }
-            persisted.dao().upsertFamilyGroups(listOf(FamilyGroupEntity(7, 100, "温暖小家")))
-            assertEquals("温暖小家", persisted.dao().allFamilyGroups().first().name)
+            listOf("family_groups", "family_members").forEach { table ->
+                migrated.query("SELECT name FROM sqlite_master WHERE type='table' AND name='$table'").use { cursor ->
+                    assertFalse(cursor.moveToFirst())
+                }
+            }
+            migrated.query("PRAGMA table_info(ledger_transaction_cache)").use { cursor ->
+                val nameIndex = cursor.getColumnIndexOrThrow("name")
+                val columns = buildSet { while (cursor.moveToNext()) add(cursor.getString(nameIndex)) }
+                assertTrue(columns.containsAll(listOf("recorderUid", "payerUid", "editable")))
+            }
+            persisted.dao().upsertLedgers(listOf(LedgerEntity(7, 100, LedgerEntity.TYPE_PERSONAL, name = "共享账本")))
+            assertEquals("共享账本", persisted.dao().allLedgers().first().name)
         } finally {
             persisted?.close()
             context.deleteDatabase(name)

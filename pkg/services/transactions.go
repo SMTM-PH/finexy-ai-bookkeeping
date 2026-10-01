@@ -535,8 +535,17 @@ func (s *TransactionService) GetLedgerTransactionsInMonth(c core.Context, uid, l
 
 // GetTransactionByTransactionId returns a transaction model according to transaction id
 func (s *TransactionService) GetTransactionByTransactionId(c core.Context, uid int64, transactionId int64) (*models.Transaction, error) {
+	return s.GetTransactionByTransactionIdInLedger(c, uid, models.DefaultLedgerId, transactionId)
+}
+
+// GetTransactionByTransactionIdInLedger returns one active transaction from
+// the specified ledger in the supplied data-owner shard.
+func (s *TransactionService) GetTransactionByTransactionIdInLedger(c core.Context, uid, ledgerId, transactionId int64) (*models.Transaction, error) {
 	if uid <= 0 {
 		return nil, errs.ErrUserIdInvalid
+	}
+	if ledgerId < models.DefaultLedgerId {
+		return nil, errs.ErrLedgerNotFound
 	}
 
 	if transactionId <= 0 {
@@ -544,7 +553,7 @@ func (s *TransactionService) GetTransactionByTransactionId(c core.Context, uid i
 	}
 
 	transaction := &models.Transaction{}
-	has, err := s.UserDataDB(uid).NewSession(c).ID(transactionId).Where("uid=? AND ledger_id=? AND deleted=?", uid, models.DefaultLedgerId, false).Get(transaction)
+	has, err := s.UserDataDB(uid).NewSession(c).ID(transactionId).Where("uid=? AND ledger_id=? AND deleted=?", uid, ledgerId, false).Get(transaction)
 
 	if err != nil {
 		return nil, err

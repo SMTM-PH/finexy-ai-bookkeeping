@@ -91,6 +91,7 @@
                 <main>
                     <h1>{{ homeGreeting }}，{{ currentUserName }}</h1>
                     <p class="sub">这里是「{{ selectedLedgerName }}」的余额、收支、目标与待办。</p>
+                    <ReleaseUpdateNotice />
 
                     <section class="ledger-context" aria-label="当前账本信息">
                         <div class="ledger-context-mark"><v-icon :icon="mdiBookOpenVariant" size="18"/></div>
@@ -221,6 +222,7 @@
 
 <script setup lang="ts">
 import SnackBar from '@/components/desktop/SnackBar.vue';
+import ReleaseUpdateNotice from '@/components/ReleaseUpdateNotice.vue';
 import GlobalLedgerSwitcher from '@/components/desktop/GlobalLedgerSwitcher.vue';
 import TransactionEditDialog from '@/views/desktop/transactions/list/dialogs/EditDialog.vue';
 import AccountEditDialog from '@/views/desktop/accounts/list/dialogs/EditDialog.vue';

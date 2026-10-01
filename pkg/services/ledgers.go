@@ -30,6 +30,125 @@ var Ledgers = &LedgerService{
 	ServiceUsingUuid: ServiceUsingUuid{container: uuid.Container},
 }
 
+// MigrateLegacyFamilies materializes the former family-wide membership and
+// invitation contract as direct ledger resources. It is safe to run at every
+// startup: existing direct rows always win, so a role change, removal or exit
+// made after migration can never be reverted by stale legacy data.
+func (s *LedgerService) MigrateLegacyFamilies(c core.Context) error {
+	for i := 0; i < s.UserDataDBCount(); i++ {
+		db := s.UserDataDBByIndex(i)
+		groups := make([]*models.FamilyGroup, 0)
+		if err := db.NewSession(c).OrderBy("created_unix_time, family_group_id").Find(&groups); err != nil {
+			return err
+		}
+		for _, group := range groups {
+			group := group
+			if err := db.DoTransaction(c, func(sess *xorm.Session) error {
+				ledgers := make([]*models.Ledger, 0)
+				if err := sess.Where("family_id=? AND type=?", group.FamilyGroupId, models.LEDGER_TYPE_FAMILY).
+					OrderBy("created_unix_time, ledger_id").Find(&ledgers); err != nil {
+					return err
+				}
+				if len(ledgers) == 0 && !group.Deleted {
+					ledgerID := group.FamilyGroupId
+					collision, err := sess.ID(ledgerID).Exist(new(models.Ledger))
+					if err != nil {
+						return err
+					}
+					if collision {
+						ledgerID = s.GenerateUuid(uuid.UUID_TYPE_FAMILY)
+					}
+					if ledgerID < 1 {
+						return errs.ErrSystemIsBusy
+					}
+					ledger := &models.Ledger{LedgerId: ledgerID, OwnerUid: group.OwnerUid, Type: models.LEDGER_TYPE_FAMILY,
+						FamilyId: group.FamilyGroupId, Name: group.Name, Comment: group.Comment,
+						CreatedUnixTime: group.CreatedUnixTime, UpdatedUnixTime: group.UpdatedUnixTime}
+					if _, err := sess.Insert(ledger); err != nil {
+						return err
+					}
+					ledgers = append(ledgers, ledger)
+				}
+
+				legacyMembers := make([]*models.FamilyMember, 0)
+				if err := sess.Where("family_id=?", group.FamilyGroupId).OrderBy("created_unix_time, family_member_id").Find(&legacyMembers); err != nil {
+					return err
+				}
+				for _, ledger := range ledgers {
+					// Family data already lives in the family owner's shard. Make
+					// that ownership explicit before the legacy lookup disappears.
+					if ledger.OwnerUid != group.OwnerUid {
+						if _, err := sess.ID(ledger.LedgerId).Cols("owner_uid", "updated_unix_time").
+							Update(&models.Ledger{OwnerUid: group.OwnerUid, UpdatedUnixTime: time.Now().Unix()}); err != nil {
+							return err
+						}
+						ledger.OwnerUid = group.OwnerUid
+					}
+					for _, legacy := range legacyMembers {
+						exists, err := sess.Where("ledger_id=? AND uid=?", ledger.LedgerId, legacy.Uid).Exist(new(models.LedgerMember))
+						if err != nil {
+							return err
+						}
+						if exists {
+							continue
+						}
+						member := &models.LedgerMember{LedgerMemberId: s.GenerateUuid(uuid.UUID_TYPE_FAMILY), LedgerId: ledger.LedgerId,
+							Uid: legacy.Uid, Status: legacy.Status, Role: legacy.Role,
+							CreatedUnixTime: legacy.CreatedUnixTime, UpdatedUnixTime: legacy.UpdatedUnixTime}
+						if member.LedgerMemberId < 1 || member.Validate() != nil {
+							return errs.ErrSystemIsBusy
+						}
+						if _, err := sess.Insert(member); err != nil {
+							return err
+						}
+					}
+				}
+
+				if len(ledgers) == 0 {
+					return nil
+				}
+				legacyInvitations := make([]*models.FamilyInvitation, 0)
+				if err := sess.Where("family_id=?", group.FamilyGroupId).OrderBy("created_unix_time, invitation_id").Find(&legacyInvitations); err != nil {
+					return err
+				}
+				primary := ledgers[0]
+				for _, legacy := range legacyInvitations {
+					exists, err := sess.Where("token=?", legacy.Token).Exist(new(models.LedgerInvitation))
+					if err != nil {
+						return err
+					}
+					if exists {
+						continue
+					}
+					invitationID := legacy.InvitationId
+					collision, err := sess.ID(invitationID).Exist(new(models.LedgerInvitation))
+					if err != nil {
+						return err
+					}
+					if collision {
+						invitationID = s.GenerateUuid(uuid.UUID_TYPE_FAMILY)
+					}
+					item := &models.LedgerInvitation{InvitationId: invitationID, LedgerId: primary.LedgerId,
+						InviterUid: legacy.InviterUid, InviteeName: legacy.InviteeName, Role: legacy.Role,
+						Token: legacy.Token, Status: legacy.Status, CreatedUnixTime: legacy.CreatedUnixTime,
+						ExpiredUnixTime: legacy.ExpiredUnixTime, UsedUnixTime: legacy.UsedUnixTime,
+						UsedByUid: legacy.UsedByUid, LegacyFamilyId: group.FamilyGroupId}
+					if item.InvitationId < 1 {
+						return errs.ErrSystemIsBusy
+					}
+					if _, err := sess.Insert(item); err != nil {
+						return err
+					}
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // locateLedger returns the shard and row holding one ledger.
 func (s *LedgerService) locateLedger(c core.Context, ledgerId int64) (*datastore.Database, *models.Ledger, error) {
 	if ledgerId <= 0 {
@@ -78,32 +197,19 @@ func (s *LedgerService) GetLedgerWithAccess(c core.Context, uid, ledgerId int64,
 		return nil, nil, errs.ErrLedgerAccessDenied
 	}
 
-	if ledger.Type == models.LEDGER_TYPE_PERSONAL {
-		// Compatibility for personal ledgers created before LedgerMember.
-		if ledger.OwnerUid == uid {
-			return db, ledger, nil
-		}
-		return nil, nil, errs.ErrLedgerAccessDenied
+	// Explicit personal ledgers created before LedgerMember remain accessible
+	// to their owner until the direct row is materialized by ensureMembers.
+	if ledger.Type == models.LEDGER_TYPE_PERSONAL && ledger.OwnerUid == uid {
+		return db, ledger, nil
 	}
-
-	if _, _, err := Families.locateFamilyDB(c, uid, ledger.FamilyId, capability); err != nil {
-		return nil, nil, errs.ErrLedgerAccessDenied
-	}
-	return db, ledger, nil
+	return nil, nil, errs.ErrLedgerAccessDenied
 }
 
 // LedgerDataOwnerUid is the transaction row owner in a ledger's shard. A
 // family ledger may have been created by an administrator, while its rows
 // still live in the family owner's shard.
 func (s *LedgerService) LedgerDataOwnerUid(c core.Context, uid int64, ledger *models.Ledger) (int64, error) {
-	if ledger.Type != models.LEDGER_TYPE_FAMILY {
-		return ledger.OwnerUid, nil
-	}
-	family, err := Families.GetFamilyGroup(c, uid, ledger.FamilyId)
-	if err != nil {
-		return 0, err
-	}
-	return family.OwnerUid, nil
+	return ledger.OwnerUid, nil
 }
 
 // CreateLedger creates a personal or family ledger. Family ledgers require a
@@ -141,6 +247,13 @@ func (s *LedgerService) CreateLedger(c core.Context, uid int64, request *models.
 		if err != nil {
 			return nil, err
 		}
+		group, err := Families.GetFamilyGroup(c, uid, ledger.FamilyId)
+		if err != nil {
+			return nil, err
+		}
+		// Legacy family ledgers and their transactions share the family
+		// owner's shard, including when an administrator creates the ledger.
+		ledger.OwnerUid = group.OwnerUid
 	} else {
 		db = s.UserDataDB(uid)
 	}
@@ -185,9 +298,9 @@ func (s *LedgerService) CreateLedger(c core.Context, uid int64, request *models.
 	return ledger, nil
 }
 
-// ListLedgers returns the personal ledgers of the user and the family ledgers
-// of every family the user actively belongs to, optionally filtered to one
-// family.
+// ListLedgers returns every ledger for which the user has an active direct
+// membership. familyId remains as a read-only migration filter for older
+// clients; it no longer authorizes access through the retired family tables.
 func (s *LedgerService) ListLedgers(c core.Context, uid int64, familyId int64) ([]*models.LedgerInfoResponse, error) {
 	if uid <= 0 {
 		return nil, errs.ErrUserIdInvalid
@@ -195,20 +308,7 @@ func (s *LedgerService) ListLedgers(c core.Context, uid int64, familyId int64) (
 
 	ledgers := make([]*models.Ledger, 0)
 
-	if familyId > 0 {
-		db, _, err := Families.locateFamilyDB(c, uid, familyId, func(models.FamilyMemberRole) bool { return true })
-		if err != nil {
-			return nil, err
-		}
-
-		err = db.NewSession(c).
-			Where("deleted=? AND type=? AND family_id=?", false, models.LEDGER_TYPE_FAMILY, familyId).
-			OrderBy("created_unix_time").
-			Find(&ledgers)
-		if err != nil {
-			return nil, err
-		}
-	} else {
+	if familyId == 0 {
 		err := s.UserDataDB(uid).NewSession(c).
 			Where("deleted=? AND type=? AND owner_uid=?", false, models.LEDGER_TYPE_PERSONAL, uid).
 			OrderBy("created_unix_time").
@@ -217,49 +317,23 @@ func (s *LedgerService) ListLedgers(c core.Context, uid int64, familyId int64) (
 			return nil, err
 		}
 
-		// LedgerMember is the canonical source for newly shared ledgers.
-		for i := 0; i < s.UserDataDBCount(); i++ {
-			db := s.UserDataDBByIndex(i)
-			members := make([]*models.LedgerMember, 0)
-			if err := db.NewSession(c).Where("uid=? AND status=?", uid, models.FAMILY_MEMBER_STATUS_ACTIVE).Find(&members); err != nil {
-				return nil, err
-			}
-			for _, member := range members {
-				ledger := &models.Ledger{}
-				has, err := db.NewSession(c).ID(member.LedgerId).Where("deleted=?", false).Get(ledger)
-				if err != nil {
-					return nil, err
-				}
-				if has {
-					ledgers = append(ledgers, ledger)
-				}
-			}
+	}
+
+	// LedgerMember is the only authorization source after family migration.
+	for i := 0; i < s.UserDataDBCount(); i++ {
+		db := s.UserDataDBByIndex(i)
+		members := make([]*models.LedgerMember, 0)
+		if err := db.NewSession(c).Where("uid=? AND status=?", uid, models.FAMILY_MEMBER_STATUS_ACTIVE).Find(&members); err != nil {
+			return nil, err
 		}
-
-		// Family ledgers are co-located with the membership rows, so every
-		// shard that holds a membership of this user also holds the family
-		// ledgers of the families the user belongs to.
-		for i := 0; i < s.UserDataDBCount(); i++ {
-			db := s.UserDataDBByIndex(i)
-
-			members := make([]*models.FamilyMember, 0)
-			err := db.NewSession(c).
-				Where("uid=? AND status=?", uid, models.FAMILY_MEMBER_STATUS_ACTIVE).
-				Find(&members)
+		for _, member := range members {
+			ledger := &models.Ledger{}
+			has, err := db.NewSession(c).ID(member.LedgerId).Where("deleted=?", false).Get(ledger)
 			if err != nil {
 				return nil, err
 			}
-
-			for _, member := range members {
-				familyLedgers := make([]*models.Ledger, 0)
-				err := db.NewSession(c).
-					Where("deleted=? AND type=? AND family_id=?", false, models.LEDGER_TYPE_FAMILY, member.FamilyId).
-					OrderBy("created_unix_time").
-					Find(&familyLedgers)
-				if err != nil {
-					return nil, err
-				}
-				ledgers = append(ledgers, familyLedgers...)
+			if has && (familyId == 0 || ledger.FamilyId == familyId) {
+				ledgers = append(ledgers, ledger)
 			}
 		}
 	}
@@ -271,7 +345,6 @@ func (s *LedgerService) ListLedgers(c core.Context, uid int64, familyId int64) (
 			continue
 		}
 		seen[ledger.LedgerId] = true
-		// Legacy family discovery must not re-expose explicitly removed members.
 		if _, _, err := s.GetLedgerWithAccess(c, uid, ledger.LedgerId, func(models.FamilyMemberRole) bool { return true }); err != nil {
 			if errors.Is(err, errs.ErrLedgerAccessDenied) {
 				continue
@@ -283,9 +356,7 @@ func (s *LedgerService) ListLedgers(c core.Context, uid int64, familyId int64) (
 	return responses, nil
 }
 
-// ListMembers returns the canonical members of a ledger. For an old family
-// ledger without migrated rows it materializes a read-compatible response
-// from the legacy family memberships without changing stored data.
+// ListMembers returns the canonical direct members of a ledger.
 func (s *LedgerService) ListMembers(c core.Context, uid, ledgerId int64) ([]*models.LedgerMemberInfoResponse, error) {
 	db, ledger, err := s.GetLedgerWithAccess(c, uid, ledgerId, func(models.FamilyMemberRole) bool { return true })
 	if err != nil {
@@ -295,15 +366,7 @@ func (s *LedgerService) ListMembers(c core.Context, uid, ledgerId int64) ([]*mod
 	if err := db.NewSession(c).Where("ledger_id=?", ledgerId).OrderBy("created_unix_time").Find(&members); err != nil {
 		return nil, err
 	}
-	if len(members) == 0 && ledger.Type == models.LEDGER_TYPE_FAMILY {
-		legacy := make([]*models.FamilyMember, 0)
-		if err := db.NewSession(c).Where("family_id=?", ledger.FamilyId).OrderBy("created_unix_time").Find(&legacy); err != nil {
-			return nil, err
-		}
-		for _, item := range legacy {
-			members = append(members, &models.LedgerMember{LedgerMemberId: item.FamilyMemberId, LedgerId: ledgerId, Uid: item.Uid, Status: item.Status, Role: item.Role, CreatedUnixTime: item.CreatedUnixTime, UpdatedUnixTime: item.UpdatedUnixTime})
-		}
-	} else if len(members) == 0 && ledger.Type == models.LEDGER_TYPE_PERSONAL {
+	if len(members) == 0 && ledger.Type == models.LEDGER_TYPE_PERSONAL {
 		// Explicit personal ledgers created before this table existed expose
 		// their owner as the initial member until the migration is persisted.
 		members = append(members, &models.LedgerMember{LedgerId: ledgerId, Uid: ledger.OwnerUid, Status: models.FAMILY_MEMBER_STATUS_ACTIVE, Role: models.FAMILY_MEMBER_ROLE_OWNER, CreatedUnixTime: ledger.CreatedUnixTime, UpdatedUnixTime: ledger.UpdatedUnixTime})
@@ -332,15 +395,7 @@ func (s *LedgerService) ensureMembers(c core.Context, db *datastore.Database, le
 	}
 	now := time.Now().Unix()
 	members := make([]*models.LedgerMember, 0)
-	if ledger.Type == models.LEDGER_TYPE_FAMILY {
-		legacy := make([]*models.FamilyMember, 0)
-		if err := db.NewSession(c).Where("family_id=?", ledger.FamilyId).Find(&legacy); err != nil {
-			return err
-		}
-		for _, item := range legacy {
-			members = append(members, &models.LedgerMember{LedgerMemberId: s.GenerateUuid(uuid.UUID_TYPE_FAMILY), LedgerId: ledger.LedgerId, Uid: item.Uid, Status: item.Status, Role: item.Role, CreatedUnixTime: item.CreatedUnixTime, UpdatedUnixTime: now})
-		}
-	} else {
+	if ledger.Type == models.LEDGER_TYPE_PERSONAL {
 		members = append(members, &models.LedgerMember{LedgerMemberId: s.GenerateUuid(uuid.UUID_TYPE_FAMILY), LedgerId: ledger.LedgerId, Uid: ledger.OwnerUid, Status: models.FAMILY_MEMBER_STATUS_ACTIVE, Role: models.FAMILY_MEMBER_ROLE_OWNER, CreatedUnixTime: ledger.CreatedUnixTime, UpdatedUnixTime: now})
 	}
 	if len(members) > 0 {
@@ -565,34 +620,54 @@ func (s *LedgerService) AcceptInvitation(c core.Context, uid int64, token string
 		}
 		return nil, errs.ErrLedgerNotFound
 	}
+	targetLedgers := []*models.Ledger{ledger}
+	if item.LegacyFamilyId > 0 {
+		targetLedgers = make([]*models.Ledger, 0)
+		if err := db.NewSession(c).Where("family_id=? AND deleted=?", item.LegacyFamilyId, false).
+			OrderBy("created_unix_time, ledger_id").Find(&targetLedgers); err != nil {
+			return nil, err
+		}
+		if len(targetLedgers) == 0 {
+			return nil, errs.ErrLedgerNotFound
+		}
+	}
 	err = db.DoTransaction(c, func(sess *xorm.Session) error {
-		existing := &models.LedgerMember{}
-		has, e := sess.Where("ledger_id=? AND uid=?", item.LedgerId, uid).Get(existing)
-		if e != nil {
-			return e
-		}
-		if has && existing.Status == models.FAMILY_MEMBER_STATUS_ACTIVE {
-			return errs.ErrLedgerAlreadyMember
-		}
-		if has {
-			existing.Status = models.FAMILY_MEMBER_STATUS_ACTIVE
-			existing.Role = item.Role
-			existing.UpdatedUnixTime = now
-			_, e = sess.ID(existing.LedgerMemberId).Cols("status", "role", "updated_unix_time").Update(existing)
+		allActive := true
+		for _, target := range targetLedgers {
+			existing := &models.LedgerMember{}
+			has, e := sess.Where("ledger_id=? AND uid=?", target.LedgerId, uid).Get(existing)
 			if e != nil {
 				return e
 			}
-		} else {
-			member := &models.LedgerMember{LedgerMemberId: s.GenerateUuid(uuid.UUID_TYPE_FAMILY), LedgerId: item.LedgerId, Uid: uid, Status: models.FAMILY_MEMBER_STATUS_ACTIVE, Role: item.Role, CreatedUnixTime: now, UpdatedUnixTime: now}
-			if _, e = sess.Insert(member); e != nil {
-				return e
+			if has && existing.Status == models.FAMILY_MEMBER_STATUS_ACTIVE {
+				continue
 			}
+			allActive = false
+			if has {
+				existing.Status = models.FAMILY_MEMBER_STATUS_ACTIVE
+				existing.Role = item.Role
+				existing.UpdatedUnixTime = now
+				if _, e = sess.ID(existing.LedgerMemberId).Cols("status", "role", "updated_unix_time").Update(existing); e != nil {
+					return e
+				}
+			} else {
+				member := &models.LedgerMember{LedgerMemberId: s.GenerateUuid(uuid.UUID_TYPE_FAMILY), LedgerId: target.LedgerId, Uid: uid, Status: models.FAMILY_MEMBER_STATUS_ACTIVE, Role: item.Role, CreatedUnixTime: now, UpdatedUnixTime: now}
+				if member.LedgerMemberId < 1 {
+					return errs.ErrSystemIsBusy
+				}
+				if _, e = sess.Insert(member); e != nil {
+					return e
+				}
+			}
+		}
+		if allActive {
+			return errs.ErrLedgerAlreadyMember
 		}
 		item.Status = models.FAMILY_INVITATION_STATUS_ACCEPTED
 		item.UsedUnixTime = now
 		item.UsedByUid = uid
-		_, e = sess.ID(item.InvitationId).Cols("status", "used_unix_time", "used_by_uid").Update(item)
-		return e
+		_, updateErr := sess.ID(item.InvitationId).Cols("status", "used_unix_time", "used_by_uid").Update(item)
+		return updateErr
 	})
 	if err != nil {
 		return nil, err

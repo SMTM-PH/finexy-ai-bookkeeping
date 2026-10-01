@@ -350,7 +350,7 @@ class TransactionConsistencyTest {
                     FinexyDatabase.MIGRATION_11_12, FinexyDatabase.MIGRATION_12_13,
                     FinexyDatabase.MIGRATION_13_14, FinexyDatabase.MIGRATION_14_15,
                     FinexyDatabase.MIGRATION_15_16, FinexyDatabase.MIGRATION_16_17,
-                    FinexyDatabase.MIGRATION_17_18, FinexyDatabase.MIGRATION_18_19
+                    FinexyDatabase.MIGRATION_17_18, FinexyDatabase.MIGRATION_18_19, FinexyDatabase.MIGRATION_19_20, FinexyDatabase.MIGRATION_20_21
                 ).build()
             val row = persisted.dao().findTransaction("v1-row")!!
             assertEquals(1234L, row.sourceAmountMinor)
@@ -393,7 +393,7 @@ class TransactionConsistencyTest {
             persisted = Room.databaseBuilder(context, FinexyDatabase::class.java, name)
                 .addMigrations(FinexyDatabase.MIGRATION_6_7, FinexyDatabase.MIGRATION_7_8, FinexyDatabase.MIGRATION_8_9, FinexyDatabase.MIGRATION_9_10, FinexyDatabase.MIGRATION_10_11, FinexyDatabase.MIGRATION_11_12, FinexyDatabase.MIGRATION_12_13,
                     FinexyDatabase.MIGRATION_13_14, FinexyDatabase.MIGRATION_14_15, FinexyDatabase.MIGRATION_15_16, FinexyDatabase.MIGRATION_16_17,
-                    FinexyDatabase.MIGRATION_17_18, FinexyDatabase.MIGRATION_18_19).build()
+                    FinexyDatabase.MIGRATION_17_18, FinexyDatabase.MIGRATION_18_19, FinexyDatabase.MIGRATION_19_20, FinexyDatabase.MIGRATION_20_21).build()
             val rows = persisted.dao().allTransactions()
             assertEquals(2, rows.size)
             rows.forEach { assertEquals(timeSeconds * 1000, it.time) }
@@ -429,7 +429,7 @@ class TransactionConsistencyTest {
             persisted = Room.databaseBuilder(context, FinexyDatabase::class.java, name)
                 .addMigrations(FinexyDatabase.MIGRATION_7_8, FinexyDatabase.MIGRATION_8_9, FinexyDatabase.MIGRATION_9_10, FinexyDatabase.MIGRATION_10_11, FinexyDatabase.MIGRATION_11_12, FinexyDatabase.MIGRATION_12_13,
                     FinexyDatabase.MIGRATION_13_14, FinexyDatabase.MIGRATION_14_15, FinexyDatabase.MIGRATION_15_16, FinexyDatabase.MIGRATION_16_17,
-                    FinexyDatabase.MIGRATION_17_18, FinexyDatabase.MIGRATION_18_19).build()
+                    FinexyDatabase.MIGRATION_17_18, FinexyDatabase.MIGRATION_18_19, FinexyDatabase.MIGRATION_19_20, FinexyDatabase.MIGRATION_20_21).build()
             val mappings = persisted.dao().observeCategoryMappings().first()
             assertEquals(2, mappings.size)
             assertEquals(TYPE_INCOME, mappings.single { it.localName == "工资" }.transactionType)
@@ -457,7 +457,7 @@ class TransactionConsistencyTest {
             persisted = Room.databaseBuilder(context, FinexyDatabase::class.java, name)
                 .addMigrations(FinexyDatabase.MIGRATION_8_9, FinexyDatabase.MIGRATION_9_10, FinexyDatabase.MIGRATION_10_11, FinexyDatabase.MIGRATION_11_12, FinexyDatabase.MIGRATION_12_13,
                     FinexyDatabase.MIGRATION_13_14, FinexyDatabase.MIGRATION_14_15, FinexyDatabase.MIGRATION_15_16, FinexyDatabase.MIGRATION_16_17,
-                    FinexyDatabase.MIGRATION_17_18, FinexyDatabase.MIGRATION_18_19).build()
+                    FinexyDatabase.MIGRATION_17_18, FinexyDatabase.MIGRATION_18_19, FinexyDatabase.MIGRATION_19_20, FinexyDatabase.MIGRATION_20_21).build()
             assertNull(persisted.dao().findSyncStatus())
             persisted.dao().upsertSyncStatus(SyncStatusEntity(state = SyncRunState.RETRYING, message = "等待重试", attemptCount = 2, nextRetryAt = 1234))
             assertEquals(1234L, persisted.dao().findSyncStatus()!!.nextRetryAt)
@@ -514,7 +514,7 @@ class TransactionConsistencyTest {
             persisted = Room.databaseBuilder(context, FinexyDatabase::class.java, name)
                 .addMigrations(FinexyDatabase.MIGRATION_9_10, FinexyDatabase.MIGRATION_10_11, FinexyDatabase.MIGRATION_11_12, FinexyDatabase.MIGRATION_12_13,
                     FinexyDatabase.MIGRATION_13_14, FinexyDatabase.MIGRATION_14_15, FinexyDatabase.MIGRATION_15_16, FinexyDatabase.MIGRATION_16_17,
-                    FinexyDatabase.MIGRATION_17_18, FinexyDatabase.MIGRATION_18_19).build()
+                    FinexyDatabase.MIGRATION_17_18, FinexyDatabase.MIGRATION_18_19, FinexyDatabase.MIGRATION_19_20, FinexyDatabase.MIGRATION_20_21).build()
             persisted.dao().upsertAccountMapping(AccountMappingEntity(TransactionEntity.LOCAL_ACCOUNT_ID, 10))
             assertEquals(10L, persisted.dao().findAccountMapping(TransactionEntity.LOCAL_ACCOUNT_ID)!!.serverId)
         } finally {

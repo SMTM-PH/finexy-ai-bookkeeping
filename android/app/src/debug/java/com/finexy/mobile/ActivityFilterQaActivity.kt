@@ -18,17 +18,23 @@ class ActivityFilterQaActivity : PrivacyActivity() {
         super.onCreate(savedInstanceState)
         val now = System.currentTimeMillis()
         val rows = listOf(
-            Activity("工作午餐", "-¥ 20.00", "支出", "餐饮", "a", accountId = 10, tagIdsJson = "[\"30\"]", time = now),
-            Activity("私人午餐", "-¥ 15.00", "支出", "餐饮", "b", accountId = 10, tagIdsJson = "[\"31\"]", time = now),
-            Activity("工资到账", "+¥ 8,000.00", "收入", "工资", "c", accountId = 11, tagIdsJson = "[\"30\"]", time = now),
-            Activity("历史工作午餐", "-¥ 10.00", "支出", "餐饮", "d", accountId = 10, tagIdsJson = "[\"30\"]", time = now - 120 * 86_400_000L)
+            Activity("工作午餐", "-¥ 20.00", "支出", "餐饮", "a", accountId = 10, tagIdsJson = "[\"30\"]", time = now, editable = true),
+            Activity("私人午餐", "-¥ 15.00", "支出", "餐饮", "b", accountId = 10, tagIdsJson = "[\"31\"]", time = now, editable = false),
+            Activity("工资到账", "+¥ 8,000.00", "收入", "工资", "c", accountId = 11, tagIdsJson = "[\"30\"]", time = now, editable = true),
+            Activity("历史工作午餐", "-¥ 10.00", "支出", "餐饮", "d", accountId = 10, tagIdsJson = "[\"30\"]", time = now - 120 * 86_400_000L, editable = true)
         )
         setContent { FinexyTheme(true) {
             var selectedLedgerId by remember { mutableLongStateOf(0L) }
             Scaffold(containerColor = CanvasBlack, topBar = {
-                LedgerSwitcher(listOf(LedgerEntity(9, 100, LedgerEntity.TYPE_FAMILY, 7, "温暖小家")), selectedLedgerId) { selectedLedgerId = it }
+                LedgerSwitcher(
+                    listOf(
+                        LedgerEntity(9, 100, LedgerEntity.TYPE_FAMILY, 7, "温暖小家"),
+                        LedgerEntity(10, 100, LedgerEntity.TYPE_FAMILY, 7, "只读账本")
+                    ),
+                    selectedLedgerId
+                ) { selectedLedgerId = it }
             }) { padding ->
-            ActivityScreen(padding, rows, listOf(AccountEntity(10, "日常银行卡", "CNY"), AccountEntity(11, "工资卡", "CNY")), listOf(TagEntity(30, "工作", 0), TagEntity(31, "私人", 0)), {}, {}, readOnly = selectedLedgerId > 0)
+            ActivityScreen(padding, rows, listOf(AccountEntity(10, "日常银行卡", "CNY"), AccountEntity(11, "工资卡", "CNY")), listOf(TagEntity(30, "工作", 0), TagEntity(31, "私人", 0)), {}, {}, readOnly = selectedLedgerId == 10L, onImport = {})
         } } }
     }
 }

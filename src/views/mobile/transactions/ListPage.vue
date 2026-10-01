@@ -16,6 +16,7 @@
                 </f7-link>
             </f7-nav-title>
             <f7-nav-right :class="{ 'navbar-compact-icons': true, 'disabled': loading }">
+                <f7-link v-if="isDataImportingEnabled()" aria-label="导入支付宝或微信账单" @click="showStatementImport = true">导入</f7-link>
                 <f7-link icon-f7="search" @click="toggleSearchbar"></f7-link>
                 <f7-link icon-f7="plus" :class="{ 'disabled': !canAddTransaction }" @click="add"></f7-link>
             </f7-nav-right>
@@ -638,6 +639,7 @@
                 <f7-actions-button bold close>{{ tt('Cancel') }}</f7-actions-button>
             </f7-actions-group>
         </f7-actions>
+        <statement-import-popup v-if="isDataImportingEnabled()" v-model:opened="showStatementImport" @imported="reload()" />
     </f7-page>
 </template>
 
@@ -646,6 +648,8 @@ import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue';
 import type { Router } from 'framework7/types';
 
 import { useI18n } from '@/locales/helpers.ts';
+import { isDataImportingEnabled } from '@/lib/server_settings.ts';
+import StatementImportPopup from './StatementImportPopup.vue';
 import { scrollToSelectedItem } from '@/lib/ui/common.ts';
 import {
     type Framework7Dom,
@@ -786,6 +790,7 @@ const transactionToDelete = ref<Transaction | null>(null);
 const transactionInvisibleYearMonths = ref<Record<TextualYearMonth, boolean>>({});
 const transactionYearMonthListHeights = ref<Record<TextualYearMonth, number>>({});
 const showSearchbar = ref<boolean>(false);
+const showStatementImport = ref<boolean>(false);
 const showCustomDateRangeSheet = ref<boolean>(false);
 const showCustomMonthSheet = ref<boolean>(false);
 const showDeleteActionSheet = ref<boolean>(false);

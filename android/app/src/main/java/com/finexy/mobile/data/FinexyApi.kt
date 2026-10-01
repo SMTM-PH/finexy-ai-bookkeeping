@@ -53,6 +53,28 @@ class FinexyApi(private val store: SecureStore) {
 
     suspend fun addTransaction(payload: JSONObject, clientRequestId: String): String = request("v1/transactions/add.json", payload.put("clientSessionId", clientRequestId).toString())
 
+    suspend fun parseStatement(fileName: String, data: ByteArray, fileType: String): List<StatementRow> {
+        require(fileType in setOf("alipay_app_csv", "wechat_pay_app_xlsx", "wechat_pay_app_csv")) { "不支持的账单格式" }
+        require(data.isNotEmpty() && data.size <= 20 * 1024 * 1024) { "账单文件为空或超过 20 MB" }
+        val body = MultipartBody.Builder().setType(MultipartBody.FORM)
+            .addFormDataPart("fileType", fileType)
+            .addFormDataPart("file", fileName, data.toRequestBody("application/octet-stream".toMediaType()))
+            .build()
+        val result = JSONObject(requestMultipart("v1/transactions/parse_import.json", body)).getJSONObject("result")
+        val items = result.getJSONArray("items")
+        require(items.length() in 1..5000) { "账单没有可导入记录，或记录过多" }
+        return (0 until items.length()).map { StatementRow.from(items.getJSONObject(it)) }
+    }
+
+    suspend fun importStatement(rows: List<StatementRow>, ledgerId: Long, clientSessionId: String): Int {
+        require(rows.isNotEmpty()) { "请先选择要导入的流水" }
+        val payload = JSONObject().put("clientSessionId", clientSessionId).put("transactions", JSONArray().apply {
+            rows.forEach { put(it.toPayload(ledgerId)) }
+        })
+        val result = JSONObject(request("v1/transactions/import.json", payload.toString())).get("result")
+        return when (result) { is Number -> result.toInt(); else -> result.toString().toInt() }
+    }
+
     suspend fun modifyTransaction(payload: JSONObject): String = request("v1/transactions/modify.json", payload.toString())
 
     suspend fun deleteTransaction(id: Long, ledgerId: Long = 0): String = request("v1/transactions/delete.json", JSONObject().put("id", id.toString()).apply {
@@ -116,76 +138,7 @@ class FinexyApi(private val store: SecureStore) {
         request("v1/product/assets/delete.json", JSONObject().put("id", id.toString()).toString())
     }
 
-    // --- 家庭、账本与存钱目标 ------------------------------------------
-
-    suspend fun listFamilyGroups(): List<RemoteFamilyGroup> = parseFamilyGroups(request("v1/family/group/list.json"))
-
-    suspend fun listFamilyMembers(familyId: Long): List<RemoteFamilyMember> {
-        require(familyId > 0) { "家庭 ID 无效" }
-        return parseFamilyMembers(request("v1/family/member/list.json?familyId=$familyId"))
-    }
-
-    /** Returns the caller's own membership, or null when the user has none. */
-    suspend fun getMyFamilyMember(familyId: Long): RemoteFamilyMember? {
-        require(familyId > 0) { "家庭 ID 无效" }
-        return parseOptionalFamilyMember(request("v1/family/member/me.json?familyId=$familyId"))
-    }
-
-    suspend fun createFamilyGroup(name: String, comment: String): RemoteFamilyGroup {
-        require(name.trim().isNotEmpty() && name.trim().length <= 64) { "家庭名称不能为空且最多 64 个字符" }
-        val payload = JSONObject().put("name", name.trim()).put("comment", comment.trim())
-        return parseFamilyGroup(request("v1/family/group/create.json", payload.toString()))
-    }
-
-    suspend fun modifyFamilyGroup(id: Long, name: String, comment: String): RemoteFamilyGroup {
-        require(id > 0) { "家庭 ID 无效" }
-        require(name.trim().isNotEmpty() && name.trim().length <= 64) { "家庭名称不能为空且最多 64 个字符" }
-        val payload = JSONObject().put("id", id.toString()).put("name", name.trim()).put("comment", comment.trim())
-        return parseFamilyGroup(request("v1/family/group/modify.json", payload.toString()))
-    }
-
-    suspend fun deleteFamilyGroup(id: Long) {
-        require(id > 0) { "家庭 ID 无效" }
-        request("v1/family/group/delete.json", JSONObject().put("id", id.toString()).toString())
-    }
-
-    suspend fun changeFamilyMemberRole(familyId: Long, memberId: Long, role: Int) {
-        require(familyId > 0 && memberId > 0) { "家庭成员无效" }
-        require(role in RemoteFamilyMember.ROLE_ADMIN..RemoteFamilyMember.ROLE_VIEWER) { "成员角色无效" }
-        val payload = JSONObject().put("familyId", familyId.toString()).put("memberId", memberId.toString()).put("role", role)
-        request("v1/family/member/change_role.json", payload.toString())
-    }
-
-    suspend fun removeFamilyMember(familyId: Long, memberId: Long) {
-        require(familyId > 0 && memberId > 0) { "家庭成员无效" }
-        val payload = JSONObject().put("familyId", familyId.toString()).put("memberId", memberId.toString())
-        request("v1/family/member/remove.json", payload.toString())
-    }
-
-    suspend fun leaveFamily(familyId: Long) {
-        require(familyId > 0) { "家庭 ID 无效" }
-        request("v1/family/member/leave.json", JSONObject().put("familyId", familyId.toString()).toString())
-    }
-
-    suspend fun createFamilyInvitation(familyId: Long, inviteeName: String, role: Int): RemoteFamilyInvitation {
-        require(familyId > 0) { "家庭 ID 无效" }
-        require(inviteeName.trim().isNotEmpty() && inviteeName.trim().length <= 64) { "邀请备注不能为空且最多 64 个字符" }
-        require(role == RemoteFamilyMember.ROLE_MEMBER || role == RemoteFamilyMember.ROLE_VIEWER) { "邀请角色无效" }
-        val payload = JSONObject().put("familyId", familyId.toString()).put("inviteeName", inviteeName.trim()).put("role", role)
-        return parseFamilyInvitation(request("v1/family/invitation/create.json", payload.toString()))
-    }
-
-    suspend fun revokeFamilyInvitation(familyId: Long, invitationId: Long) {
-        require(familyId > 0 && invitationId > 0) { "邀请无效" }
-        val payload = JSONObject().put("familyId", familyId.toString()).put("invitationId", invitationId.toString())
-        request("v1/family/invitation/revoke.json", payload.toString())
-    }
-
-    suspend fun acceptFamilyInvitation(token: String): RemoteFamilyGroup {
-        require(token.trim().isNotEmpty()) { "请输入邀请码" }
-        val payload = JSONObject().put("token", token.trim())
-        return parseFamilyGroup(request("v1/family/invitation/accept.json", payload.toString()))
-    }
+    // --- 账本与存钱目标 ------------------------------------------
 
     suspend fun listLedgers(): List<RemoteLedger> = parseLedgers(request("v1/ledger/list.json"))
 
@@ -308,18 +261,11 @@ class FinexyApi(private val store: SecureStore) {
         moveGoalFunds(goal, amountMinor, accountId, comment, "v1/savings_goal/withdraw.json")
 
     /**
-     * Family and ledger endpoints are optional server features. Legacy servers
-     * answer 404 ("api not found") or 400/403 for them; returning null keeps
-     * the local cache instead of pretending the server has no families.
+     * Ledger endpoints are optional on legacy servers. Returning null keeps
+     * the local cache instead of treating an unsupported endpoint as an empty list.
      */
     suspend fun listLedgersIfEnabled(): List<RemoteLedger>? = try {
         parseLedgers(request("v1/ledger/list.json"))
-    } catch (error: ApiException) {
-        if (error.status in listOf(400, 403, 404)) null else throw error
-    }
-
-    suspend fun listFamilyGroupsIfEnabled(): List<RemoteFamilyGroup>? = try {
-        parseFamilyGroups(request("v1/family/group/list.json"))
     } catch (error: ApiException) {
         if (error.status in listOf(400, 403, 404)) null else throw error
     }
@@ -1118,7 +1064,10 @@ data class RemoteTransaction(
     val pictureIdsJson: String = "[]",
     val geoLocationJson: String = "",
     val hideAmount: Boolean = false,
-    val ledgerId: Long = 0
+    val ledgerId: Long = 0,
+    val recorderUid: Long = 0,
+    val payerUid: Long = 0,
+    val editable: Boolean = false
 ) {
     fun toJson() = JSONObject().apply {
         put("id", id); put("timeSequenceId", timeSequenceId ?: JSONObject.NULL); put("type", type)
@@ -1128,6 +1077,9 @@ data class RemoteTransaction(
         put("tagIds", JSONArray(tagIdsJson)); put("category", JSONObject().put("name", categoryName))
         put("sourceAccount", JSONObject().put("currency", currency))
         put("pictureIds", stringIds(pictureIdsJson)); put("hideAmount", hideAmount); put("ledgerId", ledgerId.toString())
+        if (recorderUid > 0) put("recorderUid", recorderUid.toString())
+        if (payerUid > 0) put("payerUid", payerUid.toString())
+        put("editable", editable)
         put("geoLocation", geoLocationJson.takeIf { it.isNotBlank() }?.let(::JSONObject) ?: JSONObject.NULL)
     }.toString()
     fun toEntity(existingLocalId: String? = null) = TransactionEntity(
@@ -1181,7 +1133,10 @@ data class RemoteTransaction(
                     }.toString(),
                 geoLocationJson = item.optJSONObject("geoLocation")?.toString().orEmpty(),
                 hideAmount = item.optBoolean("hideAmount", false),
-                ledgerId = item.optString("ledgerId").toLongOrNull() ?: requestedLedgerId
+                ledgerId = item.optString("ledgerId").toLongOrNull() ?: requestedLedgerId,
+                recorderUid = item.optString("recorderUid").toLongOrNull() ?: 0,
+                payerUid = item.optString("payerUid").toLongOrNull() ?: 0,
+                editable = item.optBoolean("editable", false)
             )
         }
     }

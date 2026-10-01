@@ -64,6 +64,10 @@ type LedgerInvitation struct {
 	ExpiredUnixTime int64
 	UsedUnixTime    int64
 	UsedByUid       int64
+	// LegacyFamilyId is set only on invitations migrated from the former
+	// family-wide contract. Accepting one of those tokens grants the same role
+	// on every ledger that belonged to that family, preserving old semantics.
+	LegacyFamilyId int64 `xorm:"INDEX NOT NULL DEFAULT 0"`
 }
 
 func (i *LedgerInvitation) Validate() error {

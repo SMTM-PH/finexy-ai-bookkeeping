@@ -84,7 +84,7 @@
                                                 </v-menu>
                                             </v-btn>
                                             <v-btn class="ms-3" color="default" variant="outlined"
-                                                   :disabled="loading" @click="importTransaction"
+                                                   :disabled="loading" @click="importTransaction()"
                                                    v-if="isDataImportingEnabled()">
                                                 {{ tt('Import') }}
                                                 <v-menu activator="parent" :open-on-hover="true" v-if="isDataExportingEnabled()">
@@ -100,6 +100,12 @@
                                                     </v-list>
                                                 </v-menu>
                                             </v-btn>
+                                            <v-btn class="ms-3" color="default" variant="outlined"
+                                                   :disabled="loading" @click="importTransaction('alipay_app_csv')"
+                                                   v-if="isDataImportingEnabled()">{{ tt('Import Alipay') }}</v-btn>
+                                            <v-btn class="ms-3" color="default" variant="outlined"
+                                                   :disabled="loading" @click="importTransaction('wechat_pay_app')"
+                                                   v-if="isDataImportingEnabled()">{{ tt('Import WeChat Pay') }}</v-btn>
                                             <v-btn class="ms-3" color="default" variant="outlined"
                                                    :disabled="loading || exportingData || !transactions || !transactions.length || transactions.length < 1" v-if="!isDataImportingEnabled() && isDataExportingEnabled()">
                                                 {{ tt('Export') }}
@@ -1795,8 +1801,8 @@ function addByRecognizingImage(): void {
     });
 }
 
-function importTransaction(): void {
-    importDialog.value?.open().then(() => {
+function importTransaction(fileType?: string): void {
+    importDialog.value?.open(fileType).then(() => {
         reload(false, false);
     }).catch(error => {
         if (error) {

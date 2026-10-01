@@ -4,6 +4,13 @@
             <f7-nav-title :title="tt('global.app.title')"></f7-nav-title>
         </f7-navbar>
 
+        <ReleaseUpdateNotice />
+
+        <f7-block class="mobile-ledger-actions">
+            <f7-link href="/ledger/manage" class="mobile-ledger-action" aria-label="管理账本"><f7-icon f7="book"></f7-icon><span>账本</span></f7-link>
+            <f7-link href="/savings/goals" class="mobile-ledger-action" aria-label="查看存钱计划"><f7-icon f7="money_dollar_circle"></f7-icon><span>存钱计划</span></f7-link>
+        </f7-block>
+
         <section v-if="!loading && !mobileWalletAccounts.length" class="mobile-onboarding" aria-labelledby="mobile-onboarding-title">
             <div class="mobile-onboarding-icon"><f7-icon f7="wallet_pass"></f7-icon></div>
             <div class="mobile-onboarding-copy">
@@ -269,6 +276,7 @@
 
 <script setup lang="ts">
 import AIImageRecognitionSheet, { type AIImageRecognitionResult } from '@/components/mobile/AIImageRecognitionSheet.vue';
+import ReleaseUpdateNotice from '@/components/ReleaseUpdateNotice.vue';
 
 import { ref, computed, useTemplateRef } from 'vue';
 import type { Router } from 'framework7/types';
@@ -495,6 +503,8 @@ init();
 </script>
 
 <style>
+.mobile-ledger-actions { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; margin: 12px 16px 4px; padding: 0; }
+.mobile-ledger-action { min-height: 48px; justify-content: center; gap: 8px; border: 1px solid var(--f7-list-border-color); border-radius: 14px; background: var(--f7-card-bg-color); font-weight: 700; }
 .mobile-onboarding {
     display: grid;
     grid-template-columns: 44px minmax(0, 1fr) auto;

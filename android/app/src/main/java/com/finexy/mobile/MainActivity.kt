@@ -1,5 +1,7 @@
 package com.finexy.mobile
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
@@ -43,6 +45,8 @@ import com.finexy.mobile.data.CategoryDraft
 import com.finexy.mobile.data.AIReviewItemEntity
 import com.finexy.mobile.data.RecognizedTransaction
 import com.finexy.mobile.data.AccountSecurity
+import com.finexy.mobile.data.AppUpdateChecker
+import com.finexy.mobile.data.AppUpdateInfo
 import com.finexy.mobile.data.SyncPolicy
 import com.finexy.mobile.data.ThemePreference
 import com.finexy.mobile.data.UserPreferences
@@ -58,7 +62,7 @@ import kotlinx.coroutines.CancellationException
 import org.json.JSONArray
 import org.json.JSONObject
 
-internal data class Activity(val title: String, val amount: String, val kind: String, val category: String = "其他", val id: String = java.util.UUID.randomUUID().toString(), val serverId: Long? = null, val accountId: Long = -1L, val categoryId: Long? = null, val tagIdsJson: String = "[]", val time: Long = System.currentTimeMillis(), val destinationAccountId: Long? = null, val destinationAmountMinor: Long = 0, val sourceAmountMinor: Long = 0)
+internal data class Activity(val title: String, val amount: String, val kind: String, val category: String = "其他", val id: String = java.util.UUID.randomUUID().toString(), val serverId: Long? = null, val accountId: Long = -1L, val categoryId: Long? = null, val tagIdsJson: String = "[]", val time: Long = System.currentTimeMillis(), val utcOffset: Int = 480, val destinationAccountId: Long? = null, val destinationAmountMinor: Long = 0, val sourceAmountMinor: Long = 0, val editable: Boolean = true)
 
 class MainActivity : PrivacyActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -202,6 +206,7 @@ private fun LedgerContent(store: SecureStore, repository: TransactionRepository,
     val preferenceStore = remember(databaseName) { UserPreferenceStore(store, databaseName) }
     var preferences by remember(databaseName) { mutableStateOf(preferenceStore.load()) }
     var preferencesPage by rememberSaveable { mutableStateOf(false) }
+    var statementImportPage by rememberSaveable { mutableStateOf(false) }
     var preferenceRunning by remember { mutableStateOf(false) }
     var preferenceMessage by remember { mutableStateOf<String?>(null) }
     var defaultAccountId by rememberSaveable { mutableStateOf(store.get(defaultAccountKey)?.toLongOrNull() ?: com.finexy.mobile.data.TransactionEntity.LOCAL_ACCOUNT_ID) }
@@ -217,6 +222,7 @@ private fun LedgerContent(store: SecureStore, repository: TransactionRepository,
     var selectedLedgerId by rememberSaveable(databaseName) { mutableStateOf(LedgerEntity.DEFAULT_LEDGER_ID) }
     val ledgerAccounts by remember(repository, selectedLedgerId) { repository.observeLedgerAccounts(selectedLedgerId) }.collectAsState(initial = emptyList())
     val ledgerTransactions by remember(repository, selectedLedgerId) { repository.observeLedgerTransactions(selectedLedgerId) }.collectAsState(initial = emptyList())
+    val ledgerTransactionEditability by remember(repository, selectedLedgerId) { repository.observeLedgerTransactionEditability(selectedLedgerId) }.collectAsState(initial = emptyMap())
     val savingsGoals by remember(repository, selectedLedgerId) { repository.observeSavingsGoals(selectedLedgerId) }.collectAsState(initial = emptyList())
     val familyLedgerSelected = selectedLedgerId != LedgerEntity.DEFAULT_LEDGER_ID
     var ledgerCanWrite by remember(selectedLedgerId) { mutableStateOf(!familyLedgerSelected) }
@@ -242,6 +248,8 @@ private fun LedgerContent(store: SecureStore, repository: TransactionRepository,
     var syncMessage by remember { mutableStateOf("尚未同步") }
     var entrySaveError by remember { mutableStateOf<String?>(null) }
     var entrySaving by remember { mutableStateOf(false) }
+    var activityActionRunning by remember { mutableStateOf(false) }
+    var activityActionMessage by remember { mutableStateOf<String?>(null) }
     var tagActionMessage by remember { mutableStateOf<String?>(null) }
     var tagActionRunning by remember { mutableStateOf(false) }
     var templateActionMessage by remember { mutableStateOf<String?>(null) }
@@ -250,6 +258,8 @@ private fun LedgerContent(store: SecureStore, repository: TransactionRepository,
     var accountActionRunning by remember { mutableStateOf(false) }
     var categoryActionMessage by remember { mutableStateOf<String?>(null) }
     var categoryActionRunning by remember { mutableStateOf(false) }
+    var appUpdate by remember { mutableStateOf<AppUpdateInfo?>(null) }
+    var appUpdateMessage by remember { mutableStateOf<String?>(null) }
     var retryTemplateDraft by remember { mutableStateOf<TemplateEntity?>(null) }
     var retryTemplateDeleteId by remember { mutableStateOf<Long?>(null) }
     var activeAIReviewId by remember(pendingAIReviewItem?.id) { mutableStateOf(pendingAIReviewItem?.id) }
@@ -338,6 +348,9 @@ private fun LedgerContent(store: SecureStore, repository: TransactionRepository,
         catch (error: CancellationException) { throw error }
         catch (error: Exception) { syncMessage = "本地数据迁移失败：${error.message}" }
     }
+    LaunchedEffect(Unit) {
+        appUpdate = runCatching { AppUpdateChecker.check(store) }.getOrNull()
+    }
     LaunchedEffect(devicePreferences.theme, devicePreferences.textSize, devicePreferences.startup) {
         preferences = preferences.copy(theme = devicePreferences.theme, textSize = devicePreferences.textSize, startup = devicePreferences.startup)
     }
@@ -385,8 +398,10 @@ private fun LedgerContent(store: SecureStore, repository: TransactionRepository,
             syncMessage = "账本权限或分类加载失败：${it.message ?: "请稍后重试"}"
         }
     }
-    LaunchedEffect(displayedTransactions) {
-        activities = displayedTransactions.map { it.toActivity() }
+    LaunchedEffect(displayedTransactions, ledgerTransactionEditability, familyLedgerSelected) {
+        activities = displayedTransactions.map { row ->
+            row.toActivity(editable = !familyLedgerSelected || ledgerTransactionEditability[row.serverId] == true)
+        }
         income = displayedTransactions.filter { it.type == TransactionRepository.TYPE_INCOME }.sumOf { it.sourceAmountMinor } / 100.0
         expense = displayedTransactions.filter { it.type == TransactionRepository.TYPE_EXPENSE }.sumOf { it.sourceAmountMinor } / 100.0
         val adjustments = displayedTransactions.filter { it.type == TransactionRepository.TYPE_MODIFY_BALANCE }.sumOf { it.sourceAmountMinor } / 100.0
@@ -425,26 +440,60 @@ private fun LedgerContent(store: SecureStore, repository: TransactionRepository,
         entryAccountOverride = accountId
         selectedTab = 2
     }
-    BackHandler(enabled = preferencesPage || selectedTab != 0) {
-        if (preferencesPage) preferencesPage = false else selectedTab = 0
+    BackHandler(enabled = statementImportPage || preferencesPage || selectedTab != 0) {
+        if (statementImportPage) statementImportPage = false else if (preferencesPage) preferencesPage = false else selectedTab = 0
     }
     Scaffold(
         containerColor = CanvasBlack,
-        topBar = { if (!localMode) LedgerSwitcher(roomLedgers, selectedLedgerId) { ledgerId -> selectedLedgerId = ledgerId; entryAccountOverride = null; editingActivity = null; if (ledgerId != LedgerEntity.DEFAULT_LEDGER_ID && selectedTab == 2) selectedTab = 0 } },
-        bottomBar = { BottomDock(selectedTab, entryEnabled = ledgerCanWrite) { tab -> if (tab != 2) entryAccountOverride = null; selectedTab = tab } }
+        topBar = { if (!localMode && !statementImportPage) LedgerSwitcher(roomLedgers, selectedLedgerId) { ledgerId -> selectedLedgerId = ledgerId; entryAccountOverride = null; editingActivity = null; if (ledgerId != LedgerEntity.DEFAULT_LEDGER_ID && selectedTab == 2) selectedTab = 0 } },
+        bottomBar = { if (!statementImportPage) BottomDock(selectedTab, entryEnabled = ledgerCanWrite) { tab -> if (tab != 2) entryAccountOverride = null; selectedTab = tab } }
     ) { padding ->
-        when (selectedTab) {
-            0 -> Dashboard(padding, balance, income, expense, activities, if (familyLedgerSelected) 0 else pendingReviewCount, savingsGoals = savingsGoals, showAmountsByDefault = preferences.showAmountInHomePage, defaultCurrency = defaultCurrency, onOpenReviews = onOccurrenceReview, onOpenSavingsGoals = { onSavingsGoals(selectedLedgerId) }, onAll = { selectedTab = 1 }, onWallet = { selectedTab = 3 }, onSettings = { selectedTab = 4 }) { incoming -> if (ledgerCanWrite) { entryAccountOverride = null; entryIncome = incoming; selectedTab = 2 } }
-            1 -> ActivityScreen(padding, activities, displayedAccounts, if (familyLedgerSelected) emptyList() else roomTags, readOnly = familyLedgerSelected, onEdit = { target -> entryAccountOverride = null; editingActivity = target; entrySaveError = null; entryIncome = target.kind == "收入"; selectedTab = 2 }, onDelete = { target ->
-                val removed = activities.firstOrNull { it.id == target.id }
-                removed?.let { activity ->
-                    scope.launch {
-                        repository.markDeleted(activity.id)
-                        SyncScheduler.enqueueCurrent(context, store)
+        if (statementImportPage) {
+            StatementImportPage(padding, store, repository, selectedLedgerId, displayedAccounts,
+                if (familyLedgerSelected) ledgerCategories else roomCategories) { statementImportPage = false }
+        } else when (selectedTab) {
+            0 -> Dashboard(padding, balance, income, expense, activities, if (familyLedgerSelected) 0 else pendingReviewCount,
+                savingsGoals = savingsGoals, showAmountsByDefault = preferences.showAmountInHomePage, defaultCurrency = defaultCurrency,
+                appUpdate = appUpdate, appUpdateMessage = appUpdateMessage,
+                onOpenUpdate = { update ->
+                    appUpdateMessage = null
+                    runCatching {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(update.releaseUrl)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }.onFailure { appUpdateMessage = "无法打开更新页面，请稍后重试" }
+                },
+                onDismissUpdate = { update ->
+                    runCatching { AppUpdateChecker.dismiss(store, update.version) }
+                        .onSuccess { appUpdate = null; appUpdateMessage = null }
+                        .onFailure { appUpdateMessage = "暂时无法保存忽略设置" }
+                },
+                onOpenReviews = onOccurrenceReview, onOpenSavingsGoals = { onSavingsGoals(selectedLedgerId) }, onAll = { selectedTab = 1 }, onWallet = { selectedTab = 3 }, onSettings = { selectedTab = 4 }) { incoming -> if (ledgerCanWrite) { entryAccountOverride = null; entryIncome = incoming; selectedTab = 2 } }
+            1 -> ActivityScreen(padding, activities, displayedAccounts, if (familyLedgerSelected) emptyList() else roomTags,
+                readOnly = familyLedgerSelected && !ledgerCanWrite, actionRunning = activityActionRunning,
+                actionMessage = activityActionMessage, onImport = if (!localMode && !familyLedgerSelected && ledgerCanWrite) ({ statementImportPage = true }) else null,
+                onEdit = { target -> entryAccountOverride = null; editingActivity = target; entrySaveError = null; activityActionMessage = null; entryIncome = target.kind == "收入"; selectedTab = 2 }, onDelete = { target ->
+                scope.launch {
+                    activityActionRunning = true
+                    activityActionMessage = null
+                    try {
+                        if (familyLedgerSelected) {
+                            require(ledgerCanWrite && target.editable) { "你没有权限删除这笔流水" }
+                            FinexyApi(store).deleteTransaction(requireNotNull(target.serverId), selectedLedgerId)
+                            SyncEngine(FinexyApi(store), repository, autoUpdateExchangeRates = preferences.autoUpdateExchangeRatesData).sync()
+                        } else {
+                            repository.markDeleted(target.id)
+                            SyncScheduler.enqueueCurrent(context, store)
+                        }
+                        activityActionMessage = "流水已删除"
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        activityActionMessage = "删除失败：${error.message ?: "请稍后重试"}"
+                    } finally {
+                        activityActionRunning = false
                     }
                 }
             })
-            2 -> EntryScreen(padding, entryIncome, editingActivity, if (familyLedgerSelected) emptyList() else categories, displayedAccounts, if (familyLedgerSelected) ledgerCategories else roomCategories, if (familyLedgerSelected) emptyList() else roomTags, roomExchangeRates, entryAccountOverride ?: if (familyLedgerSelected) displayedAccounts.firstOrNull { !it.hidden && it.type == 1 }?.id ?: 0L else defaultAccountId, entrySaving, entrySaveError, ::openAIWithConsent) { amountMinor, note, type, category, categoryId, existingId, accountId, tagIdsJson, destinationAccountId, destinationAmountMinor ->
+            2 -> EntryScreen(padding, entryIncome, editingActivity, if (familyLedgerSelected) emptyList() else categories, displayedAccounts, if (familyLedgerSelected) ledgerCategories else roomCategories, if (familyLedgerSelected) emptyList() else roomTags, roomExchangeRates, entryAccountOverride ?: if (familyLedgerSelected) displayedAccounts.firstOrNull { !it.hidden && it.type == 1 }?.id ?: 0L else defaultAccountId, entrySaving, entrySaveError, ::openAIWithConsent, onlineOnly = familyLedgerSelected) { amountMinor, note, type, category, categoryId, existingId, accountId, tagIdsJson, destinationAccountId, destinationAmountMinor ->
                 val draft = TransactionDraft(
                     localId = existingId ?: java.util.UUID.randomUUID().toString(),
                     type = type,
@@ -461,19 +510,22 @@ private fun LedgerContent(store: SecureStore, repository: TransactionRepository,
                 scope.launch {
                     try {
                         if (familyLedgerSelected) {
-                            require(existingId == null) { "当前账本暂不支持在 Android 编辑既有流水" }
                             require(ledgerCanWrite) { "你在此账本中是只读成员" }
-                            val now = System.currentTimeMillis()
+                            val editingTarget = editingActivity
+                            if (editingTarget != null) require(editingTarget.editable) { "你只能编辑自己记录的流水" }
+                            val now = editingTarget?.time ?: System.currentTimeMillis()
                             val entity = TransactionEntity(
                                 localId = draft.localId, type = draft.type, sourceAccountId = draft.sourceAccountId,
                                 destinationAccountId = draft.destinationAccountId, categoryId = draft.categoryId,
                                 categoryName = draft.categoryName, sourceAmountMinor = draft.sourceAmountMinor,
                                 destinationAmountMinor = draft.destinationAmountMinor, currency = displayedAccounts.firstOrNull { it.id == draft.sourceAccountId }?.currency ?: defaultCurrency,
-                                comment = draft.comment, time = now, utcOffset = java.util.TimeZone.getDefault().getOffset(now) / 60000,
+                                comment = draft.comment, time = now, utcOffset = editingTarget?.utcOffset ?: java.util.TimeZone.getDefault().getOffset(now) / 60000,
                                 tagIdsJson = "[]"
                             )
                             val api = FinexyApi(store)
-                            api.parseWrittenTransaction(api.addTransaction(entity.toApiPayload().put("ledgerId", selectedLedgerId.toString()), draft.localId))
+                            val payload = entity.toApiPayload().put("ledgerId", selectedLedgerId.toString())
+                            if (editingTarget == null) api.parseWrittenTransaction(api.addTransaction(payload, draft.localId))
+                            else api.parseWrittenTransaction(api.modifyTransaction(payload.put("id", requireNotNull(editingTarget.serverId).toString())))
                             SyncEngine(api, repository, autoUpdateExchangeRates = preferences.autoUpdateExchangeRatesData).sync()
                         } else {
                             repository.save(draft)
@@ -767,7 +819,7 @@ private fun parseActivityAmount(activity: Activity): Double = activity.amount
     .toDoubleOrNull()
     ?: 0.0
 
-private fun com.finexy.mobile.data.TransactionEntity.toActivity() = Activity(
+private fun com.finexy.mobile.data.TransactionEntity.toActivity(editable: Boolean = true) = Activity(
     title = comment,
     amount = when (type) {
         TransactionRepository.TYPE_INCOME -> "+¥ %.2f".format(sourceAmountMinor / 100.0)
@@ -783,7 +835,9 @@ private fun com.finexy.mobile.data.TransactionEntity.toActivity() = Activity(
     categoryId = categoryId,
     tagIdsJson = tagIdsJson,
     time = time,
+    utcOffset = utcOffset,
     destinationAccountId = destinationAccountId,
     destinationAmountMinor = destinationAmountMinor,
-    sourceAmountMinor = sourceAmountMinor
+    sourceAmountMinor = sourceAmountMinor,
+    editable = editable
 )
