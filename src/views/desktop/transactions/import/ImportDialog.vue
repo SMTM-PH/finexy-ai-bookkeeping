@@ -1,6 +1,8 @@
 <template>
-    <v-dialog :persistent="!!persistent || loading || submitting" v-model="showState">
-        <v-card class="pa-sm-1 pa-md-2">
+    <v-dialog theme="light" class="finexy-dialog finexy-dialog--import"
+              :max-width="currentStep === 'checkData' || currentStep === 'defineColumn' || currentStep === 'executeCustomScript' ? 1200 : 780"
+              :persistent="!!persistent || loading || submitting" v-model="showState">
+        <v-card>
             <template #title>
                 <div class="d-flex align-center justify-center">
                     <div class="d-flex w-100 align-center">
@@ -90,9 +92,9 @@
                 </div>
             </template>
 
-            <v-card-text>
+            <v-card-text class="import-dialog-body">
                 <div class="cursor-default">
-                    <steps-bar min-width="700" :clickable="false" :steps="allSteps" :current-step="currentStep" />
+                    <steps-bar :min-width="0" :clickable="false" :steps="allSteps" :current-step="currentStep" />
                 </div>
 
                 <v-window class="disable-tab-transition" v-model="currentStep">
@@ -301,7 +303,7 @@
                     </v-window-item>
                 </v-window>
             </v-card-text>
-            <v-card-text>
+            <v-card-text class="import-dialog-actions">
                 <div class="d-flex justify-center justify-sm-space-between flex-wrap mt-sm-1 mt-md-2 gap-4">
                     <v-btn color="secondary" variant="tonal" :disabled="loading || submitting"
                            :prepend-icon="mdiClose" @click="close(false)"
@@ -316,7 +318,7 @@
                         {{ tt('Next') }}
                         <v-progress-circular indeterminate size="22" class="ms-2" v-if="submitting"></v-progress-circular>
                     </v-btn>
-                    <v-btn class="button-icon-with-direction" color="teal"
+                    <v-btn class="button-icon-with-direction" color="primary"
                            :disabled="submitting || importTransactionCheckDataTab?.isEditing || !importTransactionCheckDataTab?.canImport"
                            :append-icon="!submitting ? mdiArrowRight : undefined" @click="submit"
                            v-if="currentStep === 'checkData'">

@@ -1,6 +1,6 @@
 <template>
-    <v-dialog width="600" :persistent="loading || (mode === 'replaceInvalidItems' && !!sourceItem) || !!targetItem" v-model="showState">
-        <v-card class="pa-sm-1 pa-md-2">
+    <v-dialog theme="light" class="finexy-dialog finexy-subdialog finexy-dialog--import" max-width="600" :persistent="loading || (mode === 'replaceInvalidItems' && !!sourceItem) || !!targetItem" v-model="showState">
+        <v-card>
             <template #title>
                 <div class="d-flex flex-wrap align-center">
                     <h4 class="text-h4 text-wrap" v-if="mode === 'batchReplace' && type === 'expenseCategory'">{{ tt('Batch Replace Selected Expense Categories') }}</h4>

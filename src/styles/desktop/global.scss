@@ -1672,6 +1672,78 @@ body { background: #f7f9fc; }
     letter-spacing: .12em;
 }
 
+.v-overlay.finexy-dialog--import .v-card-title::before {
+    content: "FINEXY / 导入";
+}
+
+.v-overlay.finexy-dialog--import .v-card {
+    max-height: calc(100dvh - 36px);
+    display: flex;
+    flex-direction: column;
+}
+
+.v-overlay.finexy-dialog--import .v-card-title,
+.v-overlay.finexy-dialog--import .import-dialog-actions {
+    flex: 0 0 auto;
+}
+
+.v-overlay.finexy-dialog--import .import-dialog-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+}
+
+.v-overlay.finexy-dialog--import .step-number {
+    font-family: inherit !important;
+    font-size: 20px !important;
+}
+
+.v-overlay.finexy-dialog--import .step-number,
+.v-overlay.finexy-dialog--import .step-title {
+    color: var(--finexy-dialog-ink);
+}
+
+.v-overlay.finexy-dialog--import .step-subtitle {
+    color: var(--finexy-dialog-muted);
+}
+
+.v-overlay.finexy-dialog.finexy-dialog--import .v-field:not(.v-field--focused) input::placeholder {
+    color: var(--finexy-dialog-muted) !important;
+    opacity: 1 !important;
+}
+
+.v-overlay.finexy-dialog--import .slide-group-stepper-indicator,
+.v-overlay.finexy-dialog--import .slide-group-stepper-link-line {
+    background: var(--finexy-dialog-line) !important;
+    border-color: var(--finexy-dialog-line) !important;
+    opacity: 1 !important;
+}
+
+.v-overlay.finexy-dialog--import .slide-group-step-active .slide-group-stepper-indicator,
+.v-overlay.finexy-dialog--import .slide-group-step-completed .slide-group-stepper-indicator {
+    background: var(--finexy-dialog-accent) !important;
+    border-color: var(--finexy-dialog-accent) !important;
+}
+
+.v-overlay.finexy-dialog--import .text-primary,
+.v-overlay.finexy-dialog--import a {
+    color: var(--finexy-dialog-ink) !important;
+}
+
+.v-overlay.finexy-dialog--import .v-data-table {
+    color: var(--finexy-dialog-ink);
+    background: rgb(var(--v-theme-surface));
+}
+
+.v-overlay.finexy-dialog--import .v-data-table th {
+    color: var(--finexy-dialog-muted);
+    background: var(--finexy-dialog-panel) !important;
+}
+
+.v-overlay.finexy-dialog--import .v-btn {
+    min-height: 44px;
+}
+
 .v-overlay.finexy-dialog .v-card-title h1,
 .v-overlay.finexy-dialog .v-card-title h2,
 .v-overlay.finexy-dialog .v-card-title h3,

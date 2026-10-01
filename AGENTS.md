@@ -319,6 +319,8 @@ docker stop finexy-android-e2e
 
 34. **登录勾选框尺寸修正（2026-10-01）**：根据用户实际 Edge 截图，将桌面“记住账号和密码”改为原生 18px 复选框，文字间距 8px、整行点击区至少 44px，去掉主题背景色块。未改变保存逻辑；桌面点击区以本项 44px 为准，第 33 项 48px 为此前实现。修改文件 lint、生产/PWA 构建通过；无卷 finexy-remember-checkbox-e2e 的 11 项登录流程与两端主题/四宽度/两缩放含键盘的 32 场景通过，并断言桌面可见输入框 18px。镜像 ai-bookkeeping-bookkeeping:remember-checkbox-20261001 部署至本地 18080，保留 rollback-pre-remember-checkbox-20261001；经用户已授权的 SSH 更新 NAS 容器 finexy-bookkeeping-remember-checkbox，完整沿用原环境、HostConfig 与 data/storage/log 挂载，旧 remember-login 容器停止保留。两处健康 HTTP 200，真实匿名浏览器断言框为 18px、背景透明、无页面异常且勾选操作正常。临时测试容器已停止自动删除，SSH 已退出并清除 sudo 缓存；未向真实账本写入测试数据，未运行 Android 测试。
 
+35. **桌面账单导入视觉统一（2026-10-01）**：修复导入弹窗继承深色主题且未接统一样式的断层。主弹窗及三个批量创建/替换子弹窗接入 light + finexy-dialog；上传/完成最大 780px，核对/自定义列最大 1200px；内容独立滚动、底部操作保持可达，步骤采用语义珊瑚/中性分隔，恢复文件选择占位提示，导入按钮使用与工作台一致的墨黑主操作。相关 Vue lint、生产/PWA 构建通过。无卷 finexy-import-style-e2e 随机账号验证主弹窗浅/深系统主题、375/768/1024/1440px、100%/125% 缩放 16 场景（窄尺寸通过打开后调整视口验证弹窗，不宣称桌面工作台本身适配手机）；真实微信 XLSX 解析、显式分类/账户选择、确认导入、完成页与余额 -234 分联合验收通过。证据 artifacts/import-style-browser-final.json 及 upload/preview/complete 截图；批量子弹窗本轮未逐一执行新增或替换功能 E2E。镜像 ai-bookkeeping-bookkeeping:import-style-20261001 部署本地 18080，保留 rollback-pre-import-style-20261001；经已授权 SSH 切换 NAS 至 finexy-bookkeeping-import-style，环境/HostConfig/三个持久化挂载完全保留，旧容器停止保留。两处健康 HTTP 200，部署 CSS SHA256 与验收产物一致；NAS desktop/mobile 匿名浏览器启动无异常。未登录或向真实 NAS 账本导入测试数据。隔离测试容器已停止自动删除，SSH 已退出并清除 sudo 缓存，未运行 Android 测试。
+
 ### 阶段 E
 
 完成 TalkBack、最大字体、多尺寸/横屏、主题语义色、导航一致性；将 lint、Room migration、关键 instrumentation 和发布签名验证纳入 CI；生成并验证 release APK/AAB。生物识别成功路径需在已录入指纹的设备上人工验收。

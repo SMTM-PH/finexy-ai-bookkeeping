@@ -1,6 +1,6 @@
 <template>
-    <v-dialog width="600" :persistent="submitting || !!selectedNames.length" v-model="showState">
-        <v-card class="pa-sm-1 pa-md-2">
+    <v-dialog theme="light" class="finexy-dialog finexy-subdialog finexy-dialog--import" max-width="600" :persistent="submitting || !!selectedNames.length" v-model="showState">
+        <v-card>
             <template #title>
                 <div class="d-flex flex-wrap">
                     <h4 class="text-h4 text-wrap" v-if="type === 'expenseCategory'">{{ tt('Create Nonexistent Expense Categories') }}</h4>

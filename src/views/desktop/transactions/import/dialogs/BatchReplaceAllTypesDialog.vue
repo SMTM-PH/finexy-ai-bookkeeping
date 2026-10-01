@@ -1,6 +1,6 @@
 <template>
-    <v-dialog width="1000" :persistent="loading || !!rules.length || !!newRule.targetId" v-model="showState">
-        <v-card class="pa-sm-1 pa-md-2">
+    <v-dialog theme="light" class="finexy-dialog finexy-subdialog finexy-dialog--import" max-width="1000" :persistent="loading || !!rules.length || !!newRule.targetId" v-model="showState">
+        <v-card>
             <template #title>
                 <div class="d-flex flex-wrap align-center justify-center">
                     <div class="d-flex flex-wrap align-center">
