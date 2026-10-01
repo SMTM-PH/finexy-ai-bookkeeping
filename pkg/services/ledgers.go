@@ -173,6 +173,9 @@ func (s *LedgerService) locateLedger(c core.Context, ledgerId int64) (*datastore
 // the user grants the capability. The implicit default personal ledger is
 // granted to its owner without a database row.
 func (s *LedgerService) GetLedgerWithAccess(c core.Context, uid, ledgerId int64, capability func(models.FamilyMemberRole) bool) (*datastore.Database, *models.Ledger, error) {
+	if web, ok := c.(*core.WebContext); ok && web.GetTokenClaims() != nil && !web.GetTokenClaims().HasAgentLedger(ledgerId) {
+		return nil, nil, errs.ErrAgentPermissionDenied
+	}
 	if uid <= 0 {
 		return nil, nil, errs.ErrUserIdInvalid
 	}
@@ -341,6 +344,9 @@ func (s *LedgerService) ListLedgers(c core.Context, uid int64, familyId int64) (
 	responses := make([]*models.LedgerInfoResponse, 0, len(ledgers))
 	seen := make(map[int64]bool, len(ledgers))
 	for _, ledger := range ledgers {
+		if web, ok := c.(*core.WebContext); ok && web.GetTokenClaims() != nil && !web.GetTokenClaims().HasAgentLedger(ledger.LedgerId) {
+			continue
+		}
 		if seen[ledger.LedgerId] {
 			continue
 		}

@@ -469,7 +469,7 @@ private fun LedgerContent(store: SecureStore, repository: TransactionRepository,
                 onOpenReviews = onOccurrenceReview, onOpenSavingsGoals = { onSavingsGoals(selectedLedgerId) }, onAll = { selectedTab = 1 }, onWallet = { selectedTab = 3 }, onSettings = { selectedTab = 4 }) { incoming -> if (ledgerCanWrite) { entryAccountOverride = null; entryIncome = incoming; selectedTab = 2 } }
             1 -> ActivityScreen(padding, activities, displayedAccounts, if (familyLedgerSelected) emptyList() else roomTags,
                 readOnly = familyLedgerSelected && !ledgerCanWrite, actionRunning = activityActionRunning,
-                actionMessage = activityActionMessage, onImport = if (!localMode && !familyLedgerSelected && ledgerCanWrite) ({ statementImportPage = true }) else null,
+                actionMessage = activityActionMessage, onImport = if (!localMode && ledgerCanWrite) ({ statementImportPage = true }) else null,
                 onEdit = { target -> entryAccountOverride = null; editingActivity = target; entrySaveError = null; activityActionMessage = null; entryIncome = target.kind == "收入"; selectedTab = 2 }, onDelete = { target ->
                 scope.launch {
                     activityActionRunning = true

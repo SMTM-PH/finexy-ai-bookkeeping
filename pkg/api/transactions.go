@@ -2777,7 +2777,18 @@ func (a *TransactionsApi) TransactionParseImportFileHandler(c *core.WebContext) 
 		return nil, errs.ErrNotPermittedToPerformThisAction
 	}
 
-	accounts, err := a.accounts.GetAllAccountsByUid(c, user.Uid)
+	ledgerID := int64(0)
+	if values := form.Value["ledgerId"]; len(values) > 0 {
+		ledgerID, err = utils.StringToInt64(values[0])
+		if err != nil || ledgerID < 0 {
+			return nil, errs.ErrParameterInvalid
+		}
+	}
+	ledger, err := services.ImportLedger(c, uid, ledgerID)
+	if err != nil {
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+	accounts, err := a.accounts.GetAccountsInLedger(c, uid, ledgerID)
 
 	if err != nil {
 		log.Errorf(c, "[transactions.TransactionParseImportFileHandler] failed to get accounts for user \"uid:%d\", because %s", user.Uid, err.Error())
@@ -2786,7 +2797,7 @@ func (a *TransactionsApi) TransactionParseImportFileHandler(c *core.WebContext) 
 
 	accountMap := a.accounts.GetVisibleAccountNameMapByList(accounts)
 
-	categories, err := a.transactionCategories.GetAllCategoriesByUid(c, user.Uid, 0, -1)
+	categories, err := a.transactionCategories.GetAllCategoriesByUid(c, ledger.OwnerUid, 0, -1)
 
 	if err != nil {
 		log.Errorf(c, "[transactions.TransactionParseImportFileHandler] failed to get categories for user \"uid:%d\", because %s", user.Uid, err.Error())
@@ -2803,6 +2814,9 @@ func (a *TransactionsApi) TransactionParseImportFileHandler(c *core.WebContext) 
 	}
 
 	tagMap := a.transactionTags.GetVisibleTagNameMapByList(tags)
+	if ledger.OwnerUid != uid {
+		tagMap = nil
+	}
 
 	parsedTransactions, _, _, _, _, _, err := dataImporter.ParseImportedData(c, user, fileData, clientTimezone, additionalOptions, accountMap, expenseCategoryMap, incomeCategoryMap, transferCategoryMap, tagMap)
 
@@ -2843,6 +2857,10 @@ func (a *TransactionsApi) TransactionImportHandler(c *core.WebContext) (any, *er
 	}
 
 	uid := c.GetCurrentUid()
+	ledger, err := services.ImportLedger(c, uid, transactionImportReq.LedgerId)
+	if err != nil {
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
 
 	if a.CurrentConfig().EnableDuplicateSubmissionsCheck && transactionImportReq.ClientSessionId != "" {
 		found, remark := a.GetSubmissionRemark(duplicatechecker.DUPLICATE_CHECKER_TYPE_IMPORT_TRANSACTIONS, uid, transactionImportReq.ClientSessionId)
@@ -2871,6 +2889,9 @@ func (a *TransactionsApi) TransactionImportHandler(c *core.WebContext) (any, *er
 
 	for i := 0; i < len(transactionImportReq.Transactions); i++ {
 		transactionCreateReq := transactionImportReq.Transactions[i]
+		if transactionCreateReq == nil || (transactionCreateReq.LedgerId != 0 && transactionCreateReq.LedgerId != transactionImportReq.LedgerId) {
+			return nil, errs.ErrParameterInvalid
+		}
 		tagIds, err := utils.StringArrayToInt64Array(transactionCreateReq.TagIds)
 
 		if err != nil {
@@ -2928,11 +2949,15 @@ func (a *TransactionsApi) TransactionImportHandler(c *core.WebContext) (any, *er
 
 	for i := 0; i < len(transactionImportReq.Transactions); i++ {
 		transactionCreateReq := transactionImportReq.Transactions[i]
-		transaction := a.createNewTransactionModel(uid, transactionCreateReq, c.ClientIP())
+		if transactionCreateReq == nil || (transactionCreateReq.LedgerId != 0 && transactionCreateReq.LedgerId != transactionImportReq.LedgerId) {
+			return nil, errs.ErrParameterInvalid
+		}
+		transaction := a.createNewTransactionModel(ledger.OwnerUid, transactionCreateReq, c.ClientIP())
+		transaction.LedgerId, transaction.RecorderUid, transaction.PayerUid = ledger.LedgerId, uid, uid
 		newTransactions[i] = transaction
 	}
 
-	allUsedAccounts, err := a.getTransactionUsedAccounts(c, uid, newTransactions)
+	allUsedAccounts, err := a.getTransactionUsedAccounts(c, ledger.OwnerUid, newTransactions)
 
 	if err != nil {
 		log.Errorf(c, "[transactions.TransactionImportHandler] failed to get transaction used accounts for user \"uid:%d\", because %s", uid, err.Error())
@@ -2949,7 +2974,7 @@ func (a *TransactionsApi) TransactionImportHandler(c *core.WebContext) (any, *er
 		}
 	}
 
-	err = a.transactions.BatchCreateTransactions(c, user.Uid, newTransactions, newTransactionTagIdsMap, func(currentProcess float64) {
+	err = a.transactions.BatchImportTransactions(c, uid, ledger.LedgerId, newTransactions, newTransactionTagIdsMap, func(currentProcess float64) {
 		a.SetSubmissionRemarkIfEnable(duplicatechecker.DUPLICATE_CHECKER_TYPE_IMPORT_TRANSACTIONS, uid, transactionImportReq.ClientSessionId, fmt.Sprintf("processing:%.2f", currentProcess))
 	})
 	count := len(newTransactions)

@@ -1,4 +1,5 @@
 <template>
+    <StatementMappingPanel v-if="importTransactions?.length" :rows="importTransactions" :accounts="allAccountsMap" :categories="allCategoriesMap" :disabled="disabled || isEditing" @mapped="updateAllTransactionsIsValid" />
     <v-data-table
         fixed-header
         fixed-footer
@@ -403,6 +404,7 @@
 </template>
 
 <script setup lang="ts">
+import StatementMappingPanel from '@/components/StatementMappingPanel.vue';
 import PaginationButtons from '@/components/desktop/PaginationButtons.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
 import BatchReplaceDialog, { type BatchReplaceDialogDataType } from '../dialogs/BatchReplaceDialog.vue';

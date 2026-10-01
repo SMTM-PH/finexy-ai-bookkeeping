@@ -26,6 +26,15 @@ func (a *LedgersApi) LedgerListHandler(c *core.WebContext) (any, *errs.Error) {
 	if err != nil {
 		return nil, errs.Or(err, errs.ErrOperationFailed)
 	}
+	if claims := c.GetTokenClaims(); claims.Type == core.USER_TOKEN_TYPE_API {
+		filtered := make([]*models.LedgerInfoResponse, 0)
+		for _, item := range responses {
+			if claims.HasAgentLedger(item.Id) {
+				filtered = append(filtered, item)
+			}
+		}
+		responses = filtered
+	}
 	return responses, nil
 }
 

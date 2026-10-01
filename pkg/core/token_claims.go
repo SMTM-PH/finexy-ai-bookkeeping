@@ -32,6 +32,9 @@ const (
 
 // UserTokenClaims represents user token
 type UserTokenClaims struct {
+	AgentLedgerId int64 `json:"-"`
+	// Loaded from the database after signature verification; not serialized into JWTs.
+	AgentScopes []string  `json:"-"`
 	UserTokenId string    `json:"userTokenId"`
 	Uid         int64     `json:"jti,string"`
 	Username    string    `json:"username,omitempty"`

@@ -88,6 +88,22 @@ class DockerStatementImportE2ETest {
             val posted = api.parseTransactionResponse(api.listTransactions()).filter { it.type == 3 }
             assertEquals(2, posted.size)
             assertEquals(setOf(123L, 234L), posted.map { it.sourceAmountMinor }.toSet())
+            val ledgerId = post("v1/ledger/create.json", JSONObject().put("type", 1).put("name", "Selected Statement Ledger"))
+                .getJSONObject("result").getString("id").toLong()
+            val selectedAccountId = post("v1/accounts/add.json", JSONObject().put("ledgerId", ledgerId.toString())
+                .put("name", "Selected Wallet").put("category", 1).put("type", 1).put("icon", "1").put("color", "F05537")
+                .put("currency", "CNY").put("balance", 0).put("balanceTime", 946684800))
+                .getJSONObject("result").getString("id").toLong()
+            val selectedPreview = api.parseStatement("支付宝.csv", alipayCsv, "alipay_app_csv", ledgerId)
+            assertEquals(1, selectedPreview.size)
+            val selectedRows = selectedPreview.map { it.copy(sourceAccountId = selectedAccountId, categoryId = categoryId) }
+            assertEquals(1, api.importStatement(selectedRows, ledgerId, UUID.randomUUID().toString()))
+            val selectedPosted = api.parseTransactionResponse(api.listTransactions(ledgerId), ledgerId).filter { it.type == 3 }
+            assertEquals(1, selectedPosted.size)
+            assertEquals(ledgerId, selectedPosted.single().ledgerId)
+            assertEquals(selectedAccountId, selectedPosted.single().sourceAccountId)
+            assertEquals(2, api.parseTransactionResponse(api.listTransactions()).count { it.type == 3 })
+
         } finally {
             store.remove(FinexyApi.KEY_TOKEN)
         }

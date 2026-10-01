@@ -53,10 +53,11 @@ class FinexyApi(private val store: SecureStore) {
 
     suspend fun addTransaction(payload: JSONObject, clientRequestId: String): String = request("v1/transactions/add.json", payload.put("clientSessionId", clientRequestId).toString())
 
-    suspend fun parseStatement(fileName: String, data: ByteArray, fileType: String): List<StatementRow> {
+    suspend fun parseStatement(fileName: String, data: ByteArray, fileType: String, ledgerId: Long = 0): List<StatementRow> {
         require(fileType in setOf("alipay_app_csv", "wechat_pay_app_xlsx", "wechat_pay_app_csv")) { "不支持的账单格式" }
         require(data.isNotEmpty() && data.size <= 20 * 1024 * 1024) { "账单文件为空或超过 20 MB" }
         val body = MultipartBody.Builder().setType(MultipartBody.FORM)
+            .addFormDataPart("ledgerId", ledgerId.toString())
             .addFormDataPart("fileType", fileType)
             .addFormDataPart("file", fileName, data.toRequestBody("application/octet-stream".toMediaType()))
             .build()
@@ -68,7 +69,7 @@ class FinexyApi(private val store: SecureStore) {
 
     suspend fun importStatement(rows: List<StatementRow>, ledgerId: Long, clientSessionId: String): Int {
         require(rows.isNotEmpty()) { "请先选择要导入的流水" }
-        val payload = JSONObject().put("clientSessionId", clientSessionId).put("transactions", JSONArray().apply {
+        val payload = JSONObject().put("ledgerId", ledgerId.toString()).put("clientSessionId", clientSessionId).put("transactions", JSONArray().apply {
             rows.forEach { put(it.toPayload(ledgerId)) }
         })
         val result = JSONObject(request("v1/transactions/import.json", payload.toString())).get("result")

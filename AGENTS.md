@@ -321,6 +321,12 @@ docker stop finexy-android-e2e
 
 35. **桌面账单导入视觉统一（2026-10-01）**：修复导入弹窗继承深色主题且未接统一样式的断层。主弹窗及三个批量创建/替换子弹窗接入 light + finexy-dialog；上传/完成最大 780px，核对/自定义列最大 1200px；内容独立滚动、底部操作保持可达，步骤采用语义珊瑚/中性分隔，恢复文件选择占位提示，导入按钮使用与工作台一致的墨黑主操作。相关 Vue lint、生产/PWA 构建通过。无卷 finexy-import-style-e2e 随机账号验证主弹窗浅/深系统主题、375/768/1024/1440px、100%/125% 缩放 16 场景（窄尺寸通过打开后调整视口验证弹窗，不宣称桌面工作台本身适配手机）；真实微信 XLSX 解析、显式分类/账户选择、确认导入、完成页与余额 -234 分联合验收通过。证据 artifacts/import-style-browser-final.json 及 upload/preview/complete 截图；批量子弹窗本轮未逐一执行新增或替换功能 E2E。镜像 ai-bookkeeping-bookkeeping:import-style-20261001 部署本地 18080，保留 rollback-pre-import-style-20261001；经已授权 SSH 切换 NAS 至 finexy-bookkeeping-import-style，环境/HostConfig/三个持久化挂载完全保留，旧容器停止保留。两处健康 HTTP 200，部署 CSS SHA256 与验收产物一致；NAS desktop/mobile 匿名浏览器启动无异常。未登录或向真实 NAS 账本导入测试数据。隔离测试容器已停止自动删除，SSH 已退出并清除 sudo 缓存，未运行 Android 测试。
 
+36. **前后端版本一致性修正（2026-10-01）**：用户发现关于页显示页面 v1.9.2，但更新提醒显示服务 v1.9.1。实际 `/healthz.json` 返回 1.9.1/02b36b1，原因是此前多个 UI 分层镜像只覆盖前端，后端仍来自 1.9.1；更新比较逻辑正确，不能用页面版本掩盖旧服务。候选镜像 `ai-bookkeeping-bookkeeping:version-sync-1.9.2-20261001` 保留已验收的导入/登录前端，覆盖已发布 `ph97/finexy-bookkeeping:1.9.2-amd64` 中的 1.9.2/374568b 后端。部署脚本 `.github/scripts/verify-release-web.mjs` 增加健康响应版本及 desktop/mobile 页面版本一致性断言；部署前在旧服务上实测拒绝 1.9.1。更新提醒专项 5 项通过；无卷隔离 `finexy-version-sync-e2e` 随机账号登录并手动检查更新，模拟官方同版本 Release 后提示已是 1.9.2 且无误报卡片；两端冷启动无浏览器错误。通过后部署本地 18080 与 NAS 8080，两处 healthz 均为 1.9.2/374568b，两端匿名浏览器版本一致校验通过。本地保留 `rollback-pre-version-sync-20261001`，OCR 与三项数据挂载未变；NAS 经此前授权的 SSH 新建 `finexy-bookkeeping-version-1-9-2`，保持环境、端口、重启策略及挂载，停止旧容器后独立备份 data，升级后真实 SQLite integrity_check=ok，user/account/transaction 三表全部原行哈希一致，旧 import-style 容器保留。用户 Edge 关于页刷新后旧 1.9.1 提示与误报更新卡片均消失。临时测试容器已停止自动删除，NAS 上传镜像临时文件已清理，SSH sudo 缓存已清除。未导入真实账单、未修改账户余额、未运行 Android 验收。
+
+37. **Agent 接入与受控账单导入（2026-10-01，候选实现）**：桌面账户安全设置支持 `?tab=securitySetting` 并新增共用 `AgentAccessPanel`；移动 Web 设置增加 Agent 接入二级页及登录门禁。专用 API/MCP 令牌名称和权限保存于既有 TokenRecord.Context，正常登录会话不变；旧令牌默认只读，损坏授权拒绝权限。API 路径显式白名单和 MCP 工具派发分别检查 read、transactions:write、accounts:manage、bills:import；账户/分类管理当前通过 API，MCP 面板不允许勾选该项，禁止 API 令牌生成其他令牌、清空数据或绕过预览调用旧直接导入。新增 AgentImportBatch/Fingerprint 两表并纳入数据库结构同步；支付宝 CSV、微信 CSV/XLSX 共享 preview/map/confirm 流程，只支持默认个人账本、显式字符串 ID 映射、一小时预览和相同令牌确认。最新预览 hash、重复/疑似重复、期初日期及账户/分类有效性均核对；批次领取、去重、流水、余额同事务，失败回滚，成功删除预览快照并保留幂等回执。同用户确认使用有界条带锁避免真实 SQLite HTTP 并发锁竞争，数据库条件更新和唯一键继续作为最终门禁。Web `npm run check` 通过（38,494 项、类型、lint、生产/PWA 构建），后续类型/lint 复核通过；无卷构建容器中 CGO=1 `go test ./...` 通过，包含过期/跨用户/跨令牌/旧 hash/未确认拒绝、8 路并发一次入账、隐藏账户失败及插入触发器失败的完整事务回滚。`.github/scripts/verify-agent-access.mjs` 在无卷 `finexy-agent-e2e:18110` 随机账号完成 12 组真实 HTTP/MCP/浏览器验收，包括三种合成账单、重启幂等、到期/撤销、密码错误保留、Enter 生成、Esc 取消撤销、18px 勾选框、深浅系统主题、125% 缩放和移动 375/768/1024 布局；证据在忽略的 `artifacts/agent-access/`。用户说明见 `docs/AGENT_ACCESS.md`，更新日志归属“未发布”。本轮没有读写真实财务数据，没有运行 Android/ADB 验收；候选镜像尚未部署到本地用户服务或 NAS，尚未推送 GitHub/Docker 发布源，原真实数据与已有工作树成果保留。
+
+   最终镜像核验：`ai-bookkeeping-bookkeeping:agent-access-candidate`（c742e22c159b）按 `main.Version` / `main.CommitHash` 注入版本并静态链接；最终重新运行上述 12 组验收及 `.github/scripts/verify-release-web.mjs`，desktop/mobile 与后端版本均为 1.9.2，浏览器无错误。测试容器 `finexy-agent-e2e` 已停止自动删除，构建容器 `finexy-agent-build` 已停止删除；原本地账本和 OCR 容器继续健康运行。
+
 ### 阶段 E
 
 完成 TalkBack、最大字体、多尺寸/横屏、主题语义色、导航一致性；将 lint、Room migration、关键 instrumentation 和发布签名验证纳入 CI；生成并验证 release APK/AAB。生物识别成功路径需在已录入指纹的设备上人工验收。
@@ -328,3 +334,22 @@ docker stop finexy-android-e2e
 ## 9. 完成定义与交接格式
 
 每次交接必须写清：改了什么、未改什么、运行了哪些测试及准确结果、哪些测试因参数跳过、使用和清理了哪个临时容器、主账本是否仍为 4 条、仍存在哪些人工验收项。不得用“全部完成”概括只通过构建或局部测试的工作。
+
+38. **当前账本导入、API 令牌入口与 NAS 部署（2026-10-01）**：Web 桌面/移动导入绑定打开时选中的 ledgerId 与名称，所有解析请求和批量提交传同一字符串账本 ID；切换账本后旧预览拒绝提交。账户与分类按目标账本加载，缓存“已是最新”作为正常结果；修复分类缓存跨账本同值比较未记录目标账本的问题。桌面账本切换菜单使用锚定按钮的菜单，支持方向键、Escape、外部点击，避免 Vuetify 菜单首次定位偏出视窗。Android 解除非默认账本导入限制，parseStatement multipart 和 importStatement 顶层 JSON 显式传当前 ledgerId。服务端解析/导入确认成员 CanWrite，账户必须属于目标账本；共享成员数据落到账本所有者分片并保存 RecorderUid/PayerUid。Agent 批次增加 ledgerId，preview/map/confirm 同账本、同用户、同令牌；指纹含账本 ID，同一账本跨成员查重。提交事务先锁账本/成员后重新检查权限，预览后降为只读或移除即拒绝写入；同所有者使用有界条带锁。MCP 增加 query_import_context 返回可访问账本、目标账户和末级分类的字符串 ID；Agent 无法读取浏览器当前选择，须显式指定 ledgerId。
+   验收：npm run check 通过（38,494 项、类型、lint、生产/PWA 构建）；无卷构建容器 CGO=1 go test ./... 通过，追加共享账本所属/记账人及事务内撤权测试通过；14 组无卷 HTTP/MCP/浏览器测试通过，实际选择 API 连接生成令牌，验证密码错误、权限拒绝、关闭完整令牌显示、撤销/到期，并通过 Web 当前账本上传解析预览。Android assembleDebug/lintDebug/assembleDebugAndroidTest 通过，两个 APK 使用 install -r，StatementImportContractTest 与 DockerStatementImportE2ETest 在 18110 无卷容器完成 OK (3 tests)，包括选定账本导入、默认账本流水不变；冷启动无 AndroidRuntime 错误。本轮未重测原主账本“四条”数量，不得据此宣称完整人工验收。
+   NAS 192.168.31.184:8080 已部署经过验收的工作树镜像，版本 1.9.2；新容器 finexy-bookkeeping-agent-1-9-2，原 finexy-bookkeeping-version-1-9-2 保留为回退并关闭自动重启避免端口争用。沿用 data/storage/log 三个原挂载，停机完整备份在 /vol2/1000/Docker/finexy-import-20261001/backup/agent-access-20261001-223034；原财务表行摘要一致、附件哈希一致、SQLite integrity_check=ok、镜像层与本机一致。API/MCP 开关启用；上线桌面/移动登录页面前后端均 1.9.2、浏览器错误零，API/导入/MCP 无令牌请求按既有语义返回 400/202012。证据在忽略的 artifacts/agent-access/（nas-deploy-final.json、nas-online-features-final.json、http-browser-final.json 与各测试日志）。本地 18080 用户容器未替换，本次功能尚未推送 GitHub 或公开镜像源。
+39. **MCP 开启/关闭入口（2026-10-01）**：账户 → 安全设置 → Agent 接入，以及移动 Web 设置 → Agent 接入新增“此账号的 MCP 接入”开关。独立 UserStore AgentAccessSetting 表保存账号偏好，缺少记录时沿用原安装开启行为，不改财务表结构。登录会话可读取/更新，API/MCP Agent 令牌不能修改接入设置；服务器全局 EBK_MCP_ENABLE_MCP 和账号管理员限制继续生效。关闭后所有 MCP 后续请求及新令牌生成被拒绝，API、其他账号和账目不受影响；重新开启恢复未过期且未撤销的令牌，不中断已经执行的请求。界面覆盖未知/加载/保存/错误/重试状态、switch 键盘语义，关闭时按回车也不会生成令牌。手机纵向排列说明与开关，避免通用按钮满宽规则导致横向溢出。
+   验收：npm run check（14 文件、38,494 测试、类型/lint、生产/PWA 构建）通过；CGO=1 go test ./... 与最终 services 回归通过，追加前端守卫后单文件 ESLint、生产构建及最终 18 组隔离 HTTP/MCP/浏览器验收通过。覆盖旧令牌阻断、重启持久化、账号隔离、API 保留、恢复访问、失败不伪装成功、桌面键盘与手机入口及 375/768/1024px 无溢出。未改原生 Android MCP 设置，未在真实 NAS 创建测试账号或录入测试流水。
+   NAS 已部署最终镜像至 finexy-bookkeeping-mcp-1-9-2，服务版本 1.9.2 / commit mcp-switch-20261001；完整备份 /vol2/1000/Docker/finexy-import-20261001/backup/agent-access-20261001-230735，旧容器保留且禁用自动重启。部署中一次挂载数组顺序核验失败已自动回退，修正为按挂载路径排序核验后成功；数据目录没有删除。原财务表摘要、附件哈希、SQLite 完整性全部通过，原 data/storage/log 挂载保留。线上桌面/移动启动零浏览器错误，MCP 开关资源与本地一致，设置与 MCP 未认证请求均被拒绝。证据 artifacts/agent-access/http-browser-final.json、nas-deploy-final.json、nas-online-features-final.json、nas-browser-startup-final.txt。GitHub/公开镜像源及本地 18080 用户容器本轮未更新。
+
+
+### 2026-10-01 1.9.3 账本授权与导入分组映射
+
+- Agent API/MCP 令牌持久授权包含字符串 ledgerId，一个令牌对应一个账本。服务端检查声明的账本、实际账户/流水归属及当前成员权限；旧上下文缺少账本字段时限制为默认个人账本。普通登录会话保持原有权限。
+- MCP 普通账户查询、流水查询、普通记账使用令牌绑定账本。记账经 BatchImportTransactions 的成员权限/归属事务校验，dry_run 不入账；跨所有者共享账本普通记账暂不支持标签。
+- 尚未具备完整账本边界的旧全量导出、资产趋势和金额汇总 API 不向 Agent 开放，使用分页流水/账本统计替代。
+- 桌面及移动 Web 检查数据页新增 StatementMappingPanel，按原账户名/币种及分类名/类型分组，明确点击应用；默认仅补全未映射项，覆盖需勾选，保持选中状态且不提交。
+- 共享 StatementMappingPanel 与 AgentAccessPanel 必须归入 Vite common chunk，避免生产模块初始化循环。账户隐藏接口必须检查真实账本，不能只信任请求的 ledgerId。
+- 本轮验收证据写入 artifacts/agent-access/；发布镜像前必须运行无卷 finexy-agent-e2e（18110）的 API/MCP/真实浏览器门禁。NAS 更新保留三处数据挂载、完整备份及原容器回退，不在真实账本创建验收数据。
+
+   本轮发布前验收：npm run check（14 文件、38,494 测试、类型/lint、生产/PWA 构建）通过；CGO=1 go test ./... 全部通过；21 组无卷 HTTP/MCP/真实浏览器验收通过，包括指定账本 UI 生成、MCP 查询/记账、跨账本账户隐藏与普通记账拒绝、撤销/到期、成员降权/移除、分组应用和覆盖门禁、桌面与移动 Web 布局。发现共享组件生产分块循环及账户隐藏接口归属遗漏后均已修复，并重建最终镜像重新验收。原生 Android 本轮未改新增分组映射或 Agent 设置，未重测主账本四条计数。

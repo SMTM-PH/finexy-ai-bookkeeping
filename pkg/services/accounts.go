@@ -102,6 +102,9 @@ func (s *AccountService) GetTotalAccountCountByUid(c core.Context, uid int64) (i
 
 // GetAllAccountsByUid returns all account models of user
 func (s *AccountService) GetAllAccountsByUid(c core.Context, uid int64) ([]*models.Account, error) {
+	if web, ok := c.(*core.WebContext); ok && web.GetTokenClaims() != nil && web.GetTokenClaims().Type != core.USER_TOKEN_TYPE_NORMAL {
+		return s.GetAccountsInLedger(c, web.GetCurrentUid(), web.GetTokenClaims().AgentLedgerId)
+	}
 	if uid <= 0 {
 		return nil, errs.ErrUserIdInvalid
 	}
@@ -151,6 +154,9 @@ func (s *AccountService) GetAccountByAccountId(c core.Context, uid int64, accoun
 		return nil, errs.ErrAccountNotFound
 	}
 
+	if web, ok := c.(*core.WebContext); ok && web.GetTokenClaims() != nil && !web.GetTokenClaims().HasAgentLedger(account.LedgerId) {
+		return nil, errs.ErrAgentPermissionDenied
+	}
 	return account, err
 }
 
@@ -167,6 +173,13 @@ func (s *AccountService) GetAccountAndSubAccountsByAccountId(c core.Context, uid
 	var accounts []*models.Account
 	err := s.UserDataDB(uid).NewSession(c).Where("uid=? AND deleted=? AND (account_id=? OR parent_account_id=?)", uid, false, accountId, accountId).OrderBy("parent_account_id asc, display_order asc").Find(&accounts)
 
+	if web, ok := c.(*core.WebContext); ok && web.GetTokenClaims() != nil {
+		for _, a := range accounts {
+			if !web.GetTokenClaims().HasAgentLedger(a.LedgerId) {
+				return nil, errs.ErrAgentPermissionDenied
+			}
+		}
+	}
 	return accounts, err
 }
 
@@ -183,6 +196,13 @@ func (s *AccountService) GetSubAccountsByAccountId(c core.Context, uid int64, ac
 	var accounts []*models.Account
 	err := s.UserDataDB(uid).NewSession(c).Where("uid=? AND deleted=? AND parent_account_id=?", uid, false, accountId).OrderBy("display_order asc").Find(&accounts)
 
+	if web, ok := c.(*core.WebContext); ok && web.GetTokenClaims() != nil {
+		for _, account := range accounts {
+			if !web.GetTokenClaims().HasAgentLedger(account.LedgerId) {
+				return nil, errs.ErrAgentPermissionDenied
+			}
+		}
+	}
 	return accounts, err
 }
 
@@ -225,6 +245,13 @@ func (s *AccountService) GetSubAccountsByAccountIds(c core.Context, uid int64, a
 	var accounts []*models.Account
 	err := s.UserDataDB(uid).NewSession(c).Where(condition, conditionParams...).OrderBy("display_order asc").Find(&accounts)
 
+	if web, ok := c.(*core.WebContext); ok && web.GetTokenClaims() != nil {
+		for _, account := range accounts {
+			if !web.GetTokenClaims().HasAgentLedger(account.LedgerId) {
+				return nil, errs.ErrAgentPermissionDenied
+			}
+		}
+	}
 	return accounts, err
 }
 
@@ -246,6 +273,13 @@ func (s *AccountService) GetAccountsByAccountIds(c core.Context, uid int64, acco
 	}
 
 	accountMap := s.GetAccountMapByList(accounts)
+	if web, ok := c.(*core.WebContext); ok && web.GetTokenClaims() != nil {
+		for _, a := range accounts {
+			if !web.GetTokenClaims().HasAgentLedger(a.LedgerId) {
+				return nil, errs.ErrAgentPermissionDenied
+			}
+		}
+	}
 	return accountMap, err
 }
 
@@ -707,6 +741,11 @@ func (s *AccountService) UpdateAccountExtend(c core.Context, uid int64, account 
 func (s *AccountService) HideAccount(c core.Context, uid int64, ids []int64, hidden bool) error {
 	if uid <= 0 {
 		return errs.ErrUserIdInvalid
+	}
+	if web, ok := c.(*core.WebContext); ok && web.GetTokenClaims() != nil && web.GetTokenClaims().Type != core.USER_TOKEN_TYPE_NORMAL {
+		if _, err := s.GetAccountsByAccountIds(c, uid, ids); err != nil {
+			return err
+		}
 	}
 
 	now := time.Now().Unix()

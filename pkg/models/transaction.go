@@ -211,6 +211,7 @@ type TransactionModifyRequest struct {
 
 // TransactionImportRequest represents all parameters of transaction import request
 type TransactionImportRequest struct {
+	LedgerId        int64                       `json:"ledgerId,string"`
 	Transactions    []*TransactionCreateRequest `json:"transactions"`
 	ClientSessionId string                      `json:"clientSessionId"`
 }
