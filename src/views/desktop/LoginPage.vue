@@ -71,11 +71,14 @@
                                     </v-col>
 
                                     <v-col cols="12" class="py-0" v-if="isInternalAuthEnabled()">
-                                        <v-theme-provider theme="light" with-background>
-                                        <v-checkbox v-model="rememberLogin" class="remember-login-checkbox" label="记住账号和密码" hide-details
-                                                    :disabled="show2faInput || loggingInByPassword || loggingInByOAuth2 || verifying" />
-                                        <p class="remember-login-help text-caption mb-0">仅在个人设备使用；取消勾选可清除本机保存内容。</p>
-                                        <p v-if="rememberLoginError" role="alert" class="text-error text-caption">{{ rememberLoginError }}</p>
+                                        <v-theme-provider theme="light" with-background class="remember-login-options">
+                                            <label class="remember-login-toggle">
+                                                <input type="checkbox" v-model="rememberLogin"
+                                                       :disabled="show2faInput || loggingInByPassword || loggingInByOAuth2 || verifying" />
+                                                <span>记住账号和密码</span>
+                                            </label>
+                                            <p class="remember-login-help text-caption mb-0">仅在个人设备使用；取消勾选可清除本机保存内容。</p>
+                                            <p v-if="rememberLoginError" role="alert" class="text-error text-caption">{{ rememberLoginError }}</p>
                                         </v-theme-provider>
                                     </v-col>
 
@@ -363,12 +366,39 @@ oauth2ClientSessionId.value = generateRandomUUID();
 </script>
 
 <style scoped>
-.remember-login-help {
-    color: rgba(var(--v-theme-on-surface), 0.85);
+.remember-login-options {
+    background: transparent !important;
 }
 
-.remember-login-checkbox :deep(.v-selection-control) {
-    min-height: 48px;
+.remember-login-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    font-size: 14px;
+    font-weight: 500;
+    color: rgb(var(--v-theme-on-surface));
+    cursor: pointer;
+}
+
+.auth-card .remember-login-toggle input[type="checkbox"] {
+    appearance: auto;
+    flex: 0 0 18px;
+    width: 18px !important;
+    height: 18px !important;
+    min-height: 18px !important;
+    padding: 0 !important;
+    margin: 0;
+    accent-color: rgb(var(--v-theme-on-surface));
+}
+
+.remember-login-toggle:has(input:disabled) {
+    cursor: default;
+    opacity: 0.55;
+}
+
+.remember-login-help {
+    color: rgba(var(--v-theme-on-surface), 0.85);
 }
 
 .auth-logo h1 {
