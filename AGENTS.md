@@ -313,6 +313,8 @@ docker stop finexy-android-e2e
 
 31. **NAS 账本迁移与导入版部署（2026-10-01）**：用户完成 fnOS OAuth 授权后，在 192.168.31.184 查到旧 `finexy-bookkeeping` 容器已退出（255），且没有持久化挂载；用户明确确认其中账本必须保留。旧容器保持原状，读取其停止状态下的可写层，将 data/storage 复制至 `/vol2/1000/Docker/finexy-import-20261001/backup/`，再复制出独立运行副本。只读 Python 临时容器验证备份与运行副本数据库字节一致、SQLite integrity_check=ok；新版迁移后再次验证两个数据库完整性及 user/account/transaction 三表全部原字段、全部行完全一致。导入本地已通过浏览器 E2E 的镜像包（SHA256 `03AE3DC3BFAFE30E41A7FD63D2734D4699D37686D50B663EC52D0AFE772760CE`），NAS 镜像层与本地逐层一致（不同 Docker 存储实现显示的镜像 ID 不同）。新容器 `finexy-bookkeeping-import` 使用 data/storage/log 三个独立 bind mount、自动重启与原 8080 端口；secret 在进程内随机生成，仅存 NAS 容器配置。健康接口 HTTP 200，版本 1.9.1；全新浏览器上下文验证 NAS `/desktop`、`/mobile` 登录页均挂载正常、控制台无 error。未登录或向真实 NAS 账本写入测试流水，登录后的导入功能依据部署前隔离浏览器 E2E 验证。旧容器及独立备份保留用于回退；数据迁移和附件验证临时容器验收后删除。访问地址 `http://192.168.31.184:8080/desktop`。第 30 项 NAS 待连接描述以本项为准。
 
+32. **忘记密码字体修复与部署（2026-10-01）**：白色表单在深色主题下继承浅色文字，导致标题、说明和邮箱字段难以辨认。页面局部固定浅色主题，使用设计基线的中文正文字体及语义色，保持 Vuetify 浮动标签行为。lint、类型检查、生产/PWA 构建通过；浏览器分别在隔离候选镜像、本地 18080 与 NAS 8080 验证浅/深系统主题、375/768/1024/1440px、100%/125% 缩放各 16 个场景，文字颜色、字体、无横向溢出与无页面异常断言通过。镜像 `ai-bookkeeping-bookkeeping:forgot-password-font-20261001` 仅覆盖前端；本地保留 `rollback-pre-forgot-password-font-20261001`，NAS 新容器 `finexy-bookkeeping-import-fontfix` 沿用原环境变量及 data/storage/log 挂载，原导入容器停止保留。两处健康接口均 HTTP 200；无卷临时容器 `finexy-forgot-font-preview` 已停止并自动删除。未发送重置邮件、未写入真实账本，本轮未运行 Android 测试。1.9.2 GitHub 发布仍等待独立审核或用户明确授权管理员合并。
+
 ### 阶段 E
 
 完成 TalkBack、最大字体、多尺寸/横屏、主题语义色、导航一致性；将 lint、Room migration、关键 instrumentation 和发布签名验证纳入 CI；生成并验证 release APK/AAB。生物识别成功路径需在已录入指纹的设备上人工验收。

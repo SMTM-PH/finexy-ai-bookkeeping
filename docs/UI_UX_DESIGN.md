@@ -98,6 +98,7 @@ Finexy 的体验关键词是：**清晰、克制、可信、温暖、可恢复**
 - 禁用合成字重：`font-synthesis: none`。Windows Chrome 需检查 100% 和 125% 缩放。
 - 金额和数据可使用 `JetBrains Mono Variable` / `Cascadia Mono`，启用等宽数字；正文不要使用等宽字体。
 - 旧版展示字体 `ZCOOL QingKe HuangYou` 不作为现行工作台默认标题字体。
+- 忘记密码页使用局部浅色主题，与浅色表单背景保持一致，不继承系统深色主题的浅色文字；标题沿用正文字体、清晰字重，输入框保留 Vuetify 浮动标签的显示/隐藏逻辑。
 
 ### Android
 
