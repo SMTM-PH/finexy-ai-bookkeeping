@@ -54,7 +54,6 @@ try {
     assert.match(await page.locator('.balance-meta').innerText(), /1 个可见账户 · USD/);
     await page.getByRole('link', { name: '查看全部 15 个账户', exact: true }).click();
     await page.locator('.account-cards article').nth(14).waitFor();
-    assert(await page.getByRole('button', { name: '查看Renamed selected account账户详情', exact: true }).evaluate(el => el.querySelector('small').getBoundingClientRect().bottom <= el.querySelector('strong').getBoundingClientRect().top), 'wrapped account metadata must not overlap money');
     assert.equal(await page.locator('.account-cards article').count(), 15);
     assert.match(await page.locator('.account-detail').innerText(), /Synthetic 01/);
     assert.doesNotMatch(await page.locator('.account-detail').innerText(), /还没有账户/);
@@ -98,6 +97,7 @@ try {
     pass('one unified bill import entry exposes both Alipay and WeChat source selection');
     await page.goto(`${base}/desktop#/account/list`, { waitUntil: 'networkidle' });
     await page.locator('.account-cards article').nth(14).waitFor();
+    assert(await page.getByRole('button', { name: '查看Renamed selected account账户详情', exact: true }).evaluate(el => el.querySelector('small').getBoundingClientRect().bottom <= el.querySelector('strong').getBoundingClientRect().top), 'wrapped account metadata must not overlap money');
     for (const width of [1440, 1250]) for (const zoom of [1, 1.25]) {
         await page.setViewportSize({ width, height: 1000 });
         await page.evaluate(value => document.documentElement.style.zoom = value, zoom);

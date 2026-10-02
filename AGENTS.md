@@ -365,3 +365,12 @@ docker stop finexy-android-e2e
 - 验收：npm run check（14 文件、38,494 测试）及本轮最终类型/lint/生产/PWA 构建通过；无卷构建容器 CGO=1 go test ./... 通过，新增计量/余额/隔离/时区/缓存未知专项通过。最终镜像完成 8 组 AI HTTP/浏览器验收和 21 组 Agent/导入回归，覆盖实际合成模型请求与重启持久化、权限隔离、账单预览/映射/去重、键盘开关、对比度和缩放；余额 UI 成功/失败使用浏览器模拟，未消耗真实 DeepSeek 额度。
 - NAS 已部署源码 7e2cfb273e25fc99ace80818ed76618dfab2b1b7 的 1.9.3 补丁镜像，容器 finexy-bookkeeping-ai-settings-1-9-3；保留三处挂载、完整备份、旧 finexy-bookkeeping-release-1-9-3 容器回退。原财务行哈希、附件哈希、AI 配置和 SQLite 完整性保持一致；前后端 1.9.3 在线启动与静态资源一致性通过。原 NAS 未配置 LLM 模型/密钥，升级不自动复制本机密钥；页面提供配置入口，实际余额须配置后查询。
 - 证据：artifacts/agent-access/ai-settings-http-browser-final.json、ai-settings-agent-regression-final.txt、ai-settings-cgo-final.txt、ai-settings-metering-final.txt、ai-settings-nas-deploy-final.json、ai-settings-nas-online-final.json、ai-settings-nas-browser-final.txt。原生 Android、本地用户 Docker 和公开 1.9.3 镜像本轮未更新。
+
+### 2026-10-02 全部账户、详情一致性与统一导入入口
+
+- Web 管理页取消三个账户的展示截取，列出当前账本所有叶子账户（含隐藏账户）；多子账户父容器不用于记账。选择使用字符串账户 ID，缓存进入时默认显示首个真实账户，刷新与改名后按原 ID 读取新对象和余额；编辑及查看流水均绑定该 ID。加载中与真实空账户区分，账本缓存未匹配时不展示上一账本账户。卡片支持键盘选择；长名称、备注、金额随内容排列，避免重叠。
+- 总览总账户数与管理页同口径，余额汇总明确标注可见账户数，钱包仍预览三个并提供“查看全部”入口。币种选择与汇总取消前五个账户截取，避免漏掉后续账户或币种；共享账本汇总复用 store 的币种换算口径。
+- 流水页统一为“导入账单”，在原导入流程中选择支付宝、微信或其他文件类型；继续使用打开时选定账本的解析、账户映射、校对与确认流程。
+- 门禁：类型/ESLint 通过；前端 14 文件、38,494 项测试通过，最终生产/PWA 构建通过。最终镜像在无卷 finexy-agent-e2e（18110）的随机账号通过 5 组账户专项与 21 组 Agent/导入回归；覆盖 15 个合成账户、隐藏账户、第五个以后币种、缓存进入、键盘选择、服务器改名与余额变化、精确 ID 流水筛选、两种来源选择、100%/125% 缩放、长名称不遮挡金额及最后一个账户可滚动到达。未在 NAS 写入测试账户或流水。
+- NAS 已部署最终前端源码 9aa4b8c85f6edb13ac7dfcbcdf8fa6d44c82403c 的补丁镜像至 finexy-bookkeeping-accounts-layout-1-9-3。后端源码未改，继续使用 7e2cfb273e25fc99ace80818ed76618dfab2b1b7；前后端版本均为 1.9.3。完整备份位于 /vol2/1000/Docker/finexy-import-20261001/backup/accounts-20261002-090950，原 finexy-bookkeeping-accounts-1-9-3 保留并禁用自动重启用于回退。三处挂载、原财务行摘要、附件哈希、AI 配置和 SQLite 完整性均一致；最终线上 JS 与本机资源逐字匹配，桌面/移动登录启动无浏览器错误，未认证设置与 MCP 请求仍被拒绝。
+- 证据在忽略的 artifacts/agent-access/：account-workspace-final.json、accounts-http-browser-final.txt、accounts-agent-regression-final.txt、accounts-unit-final.txt、accounts-build-final.txt、account-workspace-final.png、account-workspace-bottom-final.png、accounts-nas-deploy-final.json、accounts-nas-online-final.json、accounts-nas-browser-final.txt。无卷测试容器验收后停止删除；原生 Android、本地用户 Docker、GitHub 发布及公开镜像本轮未更新，主 Android 账本数量未重测。服务端未改，本轮未重复 Go 回归。
