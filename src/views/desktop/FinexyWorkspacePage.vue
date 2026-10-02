@@ -341,7 +341,18 @@
                                 <label><span>币种</span><select v-model="accountCurrencyFilter" aria-label="币种"><option value="">全部币种</option><option v-for="currency in accountCurrencies" :key="currency" :value="currency">{{ currency }}</option></select></label>
                                 <label><span>状态</span><select v-model="accountVisibilityFilter" aria-label="状态"><option value="">全部状态</option><option value="visible">可见账户</option><option value="hidden">已隐藏</option></select></label>
                             </div>
-                            <div v-if="accountBalanceSummaries.length" class="account-balance-overview">
+                            <div v-if="selectedAccount" class="account-card-navigation">
+                                <label><span>选择账户</span><select v-model="selectedAccountPickerId" aria-label="选择账户"><optgroup v-for="group in accountGroups" :key="group.category" :label="group.name"><option v-for="item in group.items" :key="item.id" :value="item.id">{{ item.title }} · {{ item.raw.currency }}{{ item.hidden ? ' · 已隐藏' : '' }}</option></optgroup></select></label>
+                                <div class="account-card-pager">
+                                    <button type="button" aria-label="上一张账户卡片" :disabled="selectedAccountIndex <= 0" @click="navigateAccount(-1)"><v-icon :icon="mdiChevronLeft" size="20" /></button>
+                                    <span role="status" aria-live="polite">{{ selectedAccountIndex + 1 }} / {{ filteredAccounts.length }}</span>
+                                    <button type="button" aria-label="下一张账户卡片" :disabled="selectedAccountIndex >= filteredAccounts.length - 1" @click="navigateAccount(1)"><v-icon :icon="mdiChevronRight" size="20" /></button>
+                                </div>
+                            </div>
+                            <AccountHoloCard v-if="selectedAccount" :account="selectedAccount.raw" :category-name="selectedAccount.categoryName" :balance-label="selectedAccount.balanceLabel" :display-amount="selectedAccount.displayAmount" :hidden="selectedAccount.hidden" :parent-name="selectedAccount.parentName" @navigate="navigateAccount" />
+                            <details v-if="accountBalanceSummaries.length" class="account-balance-disclosure">
+                                <summary>账本余额汇总 <span>{{ accountBalanceSummaries.length }} 种币种</span></summary>
+                            <div class="account-balance-overview">
                                 <p>当前账本余额 · 仅可见账户，按币种分别统计</p>
                                 <div v-for="summary in accountBalanceSummaries" :key="summary.currency" class="account-summary-row" :data-currency="summary.currency">
                                     <b>{{ summary.currency }}</b>
@@ -351,27 +362,7 @@
                                 </div>
                                 <small class="account-summary-note">净负债已抵减溢缴款；账户列表筛选不影响账本汇总。</small>
                             </div>
-                            <section v-for="group in accountGroups" :key="group.category" class="account-group">
-                                <header><h3>{{ group.name }}</h3><span>{{ group.items.length }} 个账户</span></header>
-                            <article
-                                v-for="item in group.items"
-                                :key="item.id"
-                                :class="{ selected: selectedAccount?.id === item.id, 'account-hidden': item.hidden }"
-                                tabindex="0"
-                                role="button"
-                                :aria-label="`查看${item.title}账户详情`"
-                                :aria-pressed="selectedAccount?.id === item.id"
-                                @click="selectedAccountId = item.id || ''"
-                                @keydown.enter.prevent="selectedAccountId = item.id || ''"
-                                @keydown.space.prevent="selectedAccountId = item.id || ''"
-                            >
-                                <i aria-hidden="true"><ItemIcon icon-type="account" :icon-id="item.raw.icon" :color="item.raw.color" /></i>
-                                <div class="account-row-name"><b>{{ item.title }}</b><small>{{ item.raw.currency }}{{ item.parentName ? ` · ${item.parentName}` : '' }}</small></div>
-                                <div class="account-row-amount"><small>{{ item.balanceLabel }}</small><strong>{{ item.displayAmount }}</strong></div>
-                                <em>{{ item.status }}</em>
-                                <v-icon class="account-row-selection" :icon="selectedAccount?.id === item.id ? mdiCheckCircleOutline : mdiChevronRight" size="20" aria-hidden="true" />
-                            </article>
-                            </section>
+                            </details>
                             <div v-if="!filteredAccounts.length" class="account-list-empty">
                                 <h3>{{ busy ? '正在读取账户' : accounts.length ? '没有符合筛选的账户' : '还没有账户' }}</h3>
                                 <p>{{ accounts.length ? '试试其他名称、类型或状态。' : '添加账户后，在这里统一查看余额与待还款。' }}</p>
@@ -2381,7 +2372,7 @@ import { VIcon } from "vuetify/components";
 import TransactionEditDialog from "@/views/desktop/transactions/list/dialogs/EditDialog.vue";
 import { TransactionEditPageType } from "@/views/base/transactions/TransactionEditPageBase.ts";
 import AccountEditDialog from "@/views/desktop/accounts/list/dialogs/EditDialog.vue";
-import ItemIcon from "@/components/desktop/ItemIcon.vue";
+import AccountHoloCard from "@/components/desktop/AccountHoloCard.vue";
 import CategoryEditDialog from "@/views/desktop/categories/list/dialogs/EditDialog.vue";
 import ConfirmDialog from "@/components/desktop/ConfirmDialog.vue";
 import ImportDialog from "@/views/desktop/transactions/import/ImportDialog.vue";
@@ -3163,6 +3154,15 @@ const selectedAccountId = ref("");
 const selectedAccount = computed<AccountItem | null>(() =>
     filteredAccounts.value.find(item => item.id === selectedAccountId.value) || filteredAccounts.value[0] || null,
 );
+const selectedAccountIndex = computed(() => filteredAccounts.value.findIndex(item => item.id === selectedAccount.value?.id));
+const selectedAccountPickerId = computed({
+    get: () => selectedAccount.value?.id || "",
+    set: (id: string) => { selectedAccountId.value = id; },
+});
+function navigateAccount(direction: number) {
+    const item = filteredAccounts.value[selectedAccountIndex.value + direction];
+    if (item) selectedAccountId.value = item.id;
+}
 const accountLedgerEditorOpen = ref(false);
 const accountLedgerEditorAccount = ref<Account | null>(null);
 const accountLedgerTargetId = ref("");
@@ -9765,6 +9765,17 @@ dl > div {
 .account-detail-note p { margin: 0; color: var(--ink); font-size: 14px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
 .account-browser .split-buttons { grid-template-columns: 1fr; }
 .account-browser .split-buttons :is(a, button) { min-height: 44px; font-size: 14px; }
+.account-card-navigation { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; justify-content: space-between; }
+.account-card-navigation label { display: grid; gap: 7px; min-width: 0; flex: 1; font-size: 13px; color: var(--muted); }
+.account-card-navigation select { width: 100%; min-width: 0; min-height: 44px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--ink); font-size: 14px; }
+.account-card-pager { display: flex; gap: 10px; align-items: center; }
+.account-card-pager button { display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid var(--line); border-radius: 50%; background: var(--panel); color: var(--ink); }
+.account-card-pager button:disabled { opacity: 0.45; cursor: default; }
+.account-card-pager span { min-width: 50px; text-align: center; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.account-balance-disclosure { margin-top: 24px; border-top: 1px solid var(--line); }
+.account-balance-disclosure > summary { display: list-item; min-height: 44px; padding: 14px 0; color: var(--ink); font-size: 14px; cursor: pointer; }
+.account-balance-disclosure > summary span { margin-left: 12px; color: var(--muted); font-size: 12px; }
+.account-balance-disclosure > summary:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 @media (max-width: 1300px) {
     .account-browser { grid-template-columns: minmax(0, 1fr) 280px; }
     .account-search-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
