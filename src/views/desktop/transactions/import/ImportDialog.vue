@@ -294,6 +294,8 @@
                         <import-transaction-check-data-tab
                             ref="importTransactionCheckDataTab"
                             :import-transactions="importTransactions"
+                            :ledger-id="importLedgerId"
+                            :file-type="fileType"
                             :disabled="loading || submitting"
                         />
                     </v-window-item>

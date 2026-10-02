@@ -25,9 +25,9 @@
             <template v-if="rows.length">
                 <f7-block strong inset>
                     <p>共 {{ rows.length }} 笔，已选 {{ chosen.length }} 笔，待补全 {{ invalidCount }} 笔。</p>
-                    <p>未匹配的账户和末级分类须手动选择；可逐笔取消勾选。</p>
-                    <StatementMappingPanel :rows="rows" :accounts="accountsStore.allAccountsMap" :categories="categoriesStore.allTransactionCategoriesMap" :disabled="busy" />
-                    <f7-button fill :disabled="busy || !chosen.length || invalidCount > 0" @click="submit">确认导入 {{ chosen.length }} 笔</f7-button>
+                    <p>可一键关联分类建议，未匹配项按组补全；可逐笔取消勾选。</p>
+                    <StatementMappingPanel :rows="rows" :accounts="accountsStore.allAccountsMap" :categories="categoriesStore.allTransactionCategoriesMap" :ledger-id="importLedgerId" :file-type="provider === 'alipay' ? 'alipay_app_csv' : 'wechat_pay_app'" :disabled="busy" @busy="mappingBusy = $event" />
+                    <f7-button fill :disabled="busy || mappingBusy || !chosen.length || invalidCount > 0" @click="submit">确认导入 {{ chosen.length }} 笔</f7-button>
                 </f7-block>
 
                 <f7-block-title>逐笔核对</f7-block-title>
@@ -98,6 +98,7 @@ const provider = ref<'alipay' | 'wechat'>('alipay');
 const file = ref<File | null>(null);
 const password = ref('');
 const busy = ref(false);
+const mappingBusy = ref(false);
 const message = ref('');
 const rows = ref<ImportTransaction[]>([]);
 const visibleCount = ref(25);
@@ -170,13 +171,13 @@ async function parse(): Promise<void> {
 }
 
 function submit(): void {
-    if (busy.value || !chosen.value.length || invalidCount.value) return;
+    if (busy.value || mappingBusy.value || !chosen.value.length || invalidCount.value) return;
     showConfirm(`确认将 ${chosen.value.length} 笔流水导入「${importLedgerName.value}」？重复导入会产生重复流水。`, () => void submitConfirmed());
 }
 
 async function submitConfirmed(): Promise<void> {
     if (ledgersStore.selectedLedgerId !== importLedgerId.value) { message.value = '账本已切换，请关闭后重新预览账单'; return; }
-    if (busy.value || !chosen.value.length || invalidCount.value) return;
+    if (busy.value || mappingBusy.value || !chosen.value.length || invalidCount.value) return;
     busy.value = true; message.value = '';
     try {
         const count = await transactionsStore.importTransactions({ ledgerId: importLedgerId.value, transactions: chosen.value, clientSessionId: sessionId.value });

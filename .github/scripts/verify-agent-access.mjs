@@ -369,7 +369,7 @@ try {
     const beforeGroupBalance = (await request(`v1/accounts/get.json?id=${otherAccount.id}&ledgerId=${ledger.id}`, a.token)).balance;
     assert.match(await sourceGroup.innerText(), /2 笔/);
     await sourceGroup.getByRole('button').click();
-    await categoryGroup.getByRole('button').click();
+    await categoryGroup.getByRole('button', { name: /^应用/ }).click();
     assert.equal(await sourceGroup.getByRole('button').isDisabled(), true, 'default mapping preserves already mapped rows');
     await mappingPanel.getByLabel('覆盖该组已映射项').check();
     assert.equal(await sourceGroup.getByRole('button').isDisabled(), false, 'overwrite requires explicit opt-in');
