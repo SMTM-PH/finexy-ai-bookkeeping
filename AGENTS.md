@@ -355,3 +355,13 @@ docker stop finexy-android-e2e
    本轮发布前验收：npm run check（14 文件、38,494 测试、类型/lint、生产/PWA 构建）通过；CGO=1 go test ./... 全部通过；21 组无卷 HTTP/MCP/真实浏览器验收通过，包括指定账本 UI 生成、MCP 查询/记账、跨账本账户隐藏与普通记账拒绝、撤销/到期、成员降权/移除、分组应用和覆盖门禁、桌面与移动 Web 布局。发现共享组件生产分块循环及账户隐藏接口归属遗漏后均已修复，并重建最终镜像重新验收。原生 Android 本轮未改新增分组映射或 Agent 设置，未重测主账本四条计数。
 
    发布门禁发现并修复快速重启 ID 冲突：Linux 发布容器在同一 Unix 秒重启后内部 UUID 计数从零重用，导致后续导入触发事务插入失败（HTTP 500），旧财务事务未被部分提交。新增 TestRestartedGeneratorDoesNotReusePredecessorIds 先获得失败证据，再修复为首个有效发号通过 sync.Once 等到启动秒结束（最多不到 1 秒）；保持原 ID 位结构与常规计数不变。此约束适用于正常系统时钟下的单进程替换；多个同时运行的实例仍须各自使用不同 UuidServerId。GitHub 失败门禁已阻止镜像推送，未把失败镜像部署到 NAS。
+
+### 2026-10-02 AI 设置与模型用量
+
+- 工作台账户设置在安全设置下方提供独立 AI 设置（`?tab=aiSetting`）；移动 Web 使用 `/user/ai-settings`，旧 Agent 链接保留。Agent 字体使用清晰正文样式，MCP 开关只显示已开启/已关闭；处理中保持当前状态并使用 aria-busy，未成功读取状态不得假定开启。
+- 新增普通登录会话专用 `/llm/usage/get.json` 与服务器所有者专用 `/llm/balance/get.json`。DeepSeek 余额仅访问固定官方 HTTPS origin，拒绝重定向，不返回上游错误或密钥。Agent 令牌不可访问这些接口。
+- UserStore 新增 AIUsageRecord 计量表，记录当前用户升级后的调用、输入/输出/缓存/推理 token、已知状态、失败与耗时；不保存提示词、响应内容、密钥或财务内容。今天/月统计按客户端时区；缓存与推理属于子集不再次加到总数，缺失用量不伪装为已计量的零。失败的计量写入不阻断模型返回。
+- 新共享 AISettingsPanel 必须与 AgentAccessPanel 同属 Vite common chunk。移动 Web 全局按钮宽度可能污染共享面板，刷新与 Agent 按钮明确 width:auto，已覆盖 375/768/1024px。直达应用 AI 配置时必须立即加载已保存配置；AI 设置顶部操作为刷新用量，不走通用保存。
+- 验收：npm run check（14 文件、38,494 测试）及本轮最终类型/lint/生产/PWA 构建通过；无卷构建容器 CGO=1 go test ./... 通过，新增计量/余额/隔离/时区/缓存未知专项通过。最终镜像完成 8 组 AI HTTP/浏览器验收和 21 组 Agent/导入回归，覆盖实际合成模型请求与重启持久化、权限隔离、账单预览/映射/去重、键盘开关、对比度和缩放；余额 UI 成功/失败使用浏览器模拟，未消耗真实 DeepSeek 额度。
+- NAS 已部署源码 7e2cfb273e25fc99ace80818ed76618dfab2b1b7 的 1.9.3 补丁镜像，容器 finexy-bookkeeping-ai-settings-1-9-3；保留三处挂载、完整备份、旧 finexy-bookkeeping-release-1-9-3 容器回退。原财务行哈希、附件哈希、AI 配置和 SQLite 完整性保持一致；前后端 1.9.3 在线启动与静态资源一致性通过。原 NAS 未配置 LLM 模型/密钥，升级不自动复制本机密钥；页面提供配置入口，实际余额须配置后查询。
+- 证据：artifacts/agent-access/ai-settings-http-browser-final.json、ai-settings-agent-regression-final.txt、ai-settings-cgo-final.txt、ai-settings-metering-final.txt、ai-settings-nas-deploy-final.json、ai-settings-nas-online-final.json、ai-settings-nas-browser-final.txt。原生 Android、本地用户 Docker 和公开 1.9.3 镜像本轮未更新。
