@@ -328,19 +328,35 @@
 
                     <section
                         v-else-if="pageKey === 'manage'"
-                        class="account-layout"
+                        class="account-layout account-browser"
                     >
                         <div class="account-cards">
+                            <header class="account-browser-head">
+                                <div><h2>全部账户</h2><p role="status">显示 {{ filteredAccounts.length }} / {{ accounts.length }} 个账户</p></div>
+                                <button v-if="accountSearch || accountCategoryFilter || accountVisibilityFilter || accountCurrencyFilter" type="button" class="text-btn" @click="resetAccountFilters">清除筛选</button>
+                            </header>
+                            <div class="account-search-row">
+                                <label class="account-search"><span>搜索账户</span><div><v-icon :icon="mdiMagnify" size="20" /><input v-model="accountSearch" type="search" placeholder="账户名称或备注" /></div></label>
+                                <label><span>账户类型</span><select v-model="accountCategoryFilter" aria-label="账户类型"><option value="">全部类型</option><option v-for="category in accountCategoryOptions" :key="category.type" :value="String(category.type)">{{ category.name }}</option></select></label>
+                                <label><span>币种</span><select v-model="accountCurrencyFilter" aria-label="币种"><option value="">全部币种</option><option v-for="currency in accountCurrencies" :key="currency" :value="currency">{{ currency }}</option></select></label>
+                                <label><span>状态</span><select v-model="accountVisibilityFilter" aria-label="状态"><option value="">全部状态</option><option value="visible">可见账户</option><option value="hidden">已隐藏</option></select></label>
+                            </div>
+                            <div v-if="accountBalanceSummaries.length" class="account-balance-overview">
+                                <p>当前账本余额 · 仅可见账户，按币种分别统计</p>
+                                <div v-for="summary in accountBalanceSummaries" :key="summary.currency" class="account-summary-row" :data-currency="summary.currency">
+                                    <b>{{ summary.currency }}</b>
+                                    <div><small>资产余额</small><strong>{{ formatAmountToLocalizedNumeralsWithCurrency(summary.assets, summary.currency) }}</strong></div>
+                                    <div><small>净负债</small><strong>{{ formatAmountToLocalizedNumeralsWithCurrency(summary.liabilities, summary.currency) }}</strong></div>
+                                    <div><small>净余额</small><strong>{{ formatAmountToLocalizedNumeralsWithCurrency(summary.net, summary.currency) }}</strong></div>
+                                </div>
+                                <small class="account-summary-note">净负债已抵减溢缴款；账户列表筛选不影响账本汇总。</small>
+                            </div>
+                            <section v-for="group in accountGroups" :key="group.category" class="account-group">
+                                <header><h3>{{ group.name }}</h3><span>{{ group.items.length }} 个账户</span></header>
                             <article
-                                v-for="(item, index) in accounts"
+                                v-for="item in group.items"
                                 :key="item.id"
-                                :class="[
-                                    `tone-${index % 3}`,
-                                    {
-                                        selected:
-                                            selectedAccount?.id === item.id,
-                                    },
-                                ]"
+                                :class="{ selected: selectedAccount?.id === item.id, 'account-hidden': item.hidden }"
                                 tabindex="0"
                                 role="button"
                                 :aria-label="`查看${item.title}账户详情`"
@@ -349,12 +365,18 @@
                                 @keydown.enter.prevent="selectedAccountId = item.id || ''"
                                 @keydown.space.prevent="selectedAccountId = item.id || ''"
                             >
-                                <i>{{ item.icon }}</i
-                                ><b>{{ item.title }}</b
-                                ><small>{{ item.meta }}</small
-                                ><strong>{{ item.amount }}</strong
-                                ><em>{{ item.status }}</em>
+                                <i aria-hidden="true"><ItemIcon icon-type="account" :icon-id="item.raw.icon" :color="item.raw.color" /></i>
+                                <div class="account-row-name"><b>{{ item.title }}</b><small>{{ item.raw.currency }}{{ item.parentName ? ` · ${item.parentName}` : '' }}</small></div>
+                                <div class="account-row-amount"><small>{{ item.balanceLabel }}</small><strong>{{ item.displayAmount }}</strong></div>
+                                <em>{{ item.status }}</em>
+                                <v-icon class="account-row-selection" :icon="selectedAccount?.id === item.id ? mdiCheckCircleOutline : mdiChevronRight" size="20" aria-hidden="true" />
                             </article>
+                            </section>
+                            <div v-if="!filteredAccounts.length" class="account-list-empty">
+                                <h3>{{ busy ? '正在读取账户' : accounts.length ? '没有符合筛选的账户' : '还没有账户' }}</h3>
+                                <p>{{ accounts.length ? '试试其他名称、类型或状态。' : '添加账户后，在这里统一查看余额与待还款。' }}</p>
+                                <button v-if="accounts.length" type="button" @click="resetAccountFilters">清除筛选</button>
+                            </div>
                         </div>
                         <aside v-if="selectedAccount" class="panel account-detail">
                             <PanelHead
@@ -362,11 +384,13 @@
                                 title="账户详情"
                             />
                             <h2>{{ selectedAccount.title }}</h2>
-                            <p>{{ selectedAccount.meta }}</p>
+                            <p>{{ selectedAccount.categoryName }} · {{ selectedAccount.raw.currency }}</p>
                             <div class="balance">
-                                <small>可用余额</small
-                                ><strong>{{ selectedAccount.amount }}</strong>
+                                <small>{{ selectedAccount.balanceLabel }}</small
+                                ><strong>{{ selectedAccount.displayAmount }}</strong>
                             </div>
+                            <dl class="account-detail-facts"><div><dt>状态</dt><dd>{{ selectedAccount.status }}</dd></div><div v-if="selectedAccount.parentName"><dt>所属账户</dt><dd>{{ selectedAccount.parentName }}</dd></div></dl>
+                            <div class="account-detail-note"><h3>账户备注</h3><p>{{ selectedAccount.raw.comment || '未填写备注' }}</p></div>
                             <div class="split-buttons">
                                 <router-link :to="{ path: '/transaction/list', query: { accountIds: selectedAccount.id } }"
                                     >查看流水</router-link
@@ -376,9 +400,9 @@
                         </aside>
                         <aside v-else class="panel account-detail empty-state">
                             <PanelHead eyebrow="CURRENT ACCOUNT" title="账户详情" />
-                            <h2>{{ busy ? '正在读取账户' : '还没有账户' }}</h2>
-                            <p>{{ busy ? '账户加载完成后，余额和详情会显示在这里。' : '添加第一个真实账户后，余额和账户详情会显示在这里。' }}</p>
-                            <button v-if="!busy" class="primary" type="button" @click="primaryAction">添加账户</button>
+                            <h2>{{ busy ? '正在读取账户' : accounts.length ? '选择账户查看详情' : '还没有账户' }}</h2>
+                            <p>{{ busy ? '账户加载完成后，余额和详情会显示在这里。' : accounts.length ? '调整筛选后，点击账户查看余额、备注和流水。' : '添加第一个账户后，余额和账户详情会显示在这里。' }}</p>
+                            <button v-if="!busy && !accounts.length" class="primary" type="button" @click="primaryAction">添加账户</button>
                         </aside>
                     </section>
 
@@ -2357,6 +2381,7 @@ import { VIcon } from "vuetify/components";
 import TransactionEditDialog from "@/views/desktop/transactions/list/dialogs/EditDialog.vue";
 import { TransactionEditPageType } from "@/views/base/transactions/TransactionEditPageBase.ts";
 import AccountEditDialog from "@/views/desktop/accounts/list/dialogs/EditDialog.vue";
+import ItemIcon from "@/components/desktop/ItemIcon.vue";
 import CategoryEditDialog from "@/views/desktop/categories/list/dialogs/EditDialog.vue";
 import ConfirmDialog from "@/components/desktop/ConfirmDialog.vue";
 import ImportDialog from "@/views/desktop/transactions/import/ImportDialog.vue";
@@ -2390,6 +2415,8 @@ import {
     type ProductAssetInfoResponse,
 } from "@/models/product_asset.ts";
 import { CategoryType } from "@/core/category.ts";
+import { AccountCategory } from "@/core/account.ts";
+import { getAccountBalanceDisplay, summarizeVisibleAccountBalances } from "@/lib/account_presentation.ts";
 import { ScheduledTemplateFrequencyType, TemplateType } from "@/core/template.ts";
 import { TransactionType } from "@/core/transaction.ts";
 import { ScheduledOccurrence } from "@/models/scheduled_occurrence.ts";
@@ -2496,6 +2523,15 @@ interface AssetItem extends Item {
     heldDays: number;
     dailyCost: string;
     raw: ProductAssetInfoResponse;
+}
+interface AccountItem extends Item {
+    id: string;
+    raw: Account;
+    hidden: boolean;
+    categoryName: string;
+    parentName: string;
+    balanceLabel: string;
+    displayAmount: string;
 }
 interface Metric {
     label: string;
@@ -2616,7 +2652,7 @@ const savingsGoalsStore = useSavingsGoalsStore();
 const monthlyBudgetStore = useMonthlyBudgetStore();
 const userStore = useUserStore();
 const rootStore = useRootStore();
-const { formatAmountToLocalizedNumeralsWithCurrency } = useI18n();
+const { tt, formatAmountToLocalizedNumeralsWithCurrency } = useI18n();
 const selectedLedgerId = computed(() => ledgersStore.selectedLedgerId);
 const selectedLedgerName = computed(() => ledgersStore.selectedLedger.name);
 const selectedLedgerCanWrite = computed(() => {
@@ -2878,12 +2914,12 @@ const config = computed<Config>(() => {
             ["净收入", formatBookkeepingMoney(income - expense), "收入减去支出", income >= expense ? "up" : "down"],
         ];
     } else if (pageKey.value === "manage") {
-        const list = accountsStore.allVisiblePlainAccounts;
-        const currencies = new Set(list.map(item => item.currency));
+        const list = accounts.value.filter(item => !item.hidden);
+        const currencies = new Set(list.map(item => item.raw.currency));
         values = [
-            ["账户数量", `${accountsStore.allPlainAccounts.length} 个`, "来自当前账本", "neutral"],
+            ["账户数量", `${accounts.value.length} 个`, "来自当前账本", "neutral"],
             ["可见账户", `${list.length} 个`, "可用于记账", "neutral"],
-            ["已隐藏", `${accountsStore.allPlainAccounts.length - list.length} 个`, "可在账户管理中恢复", "neutral"],
+            ["已隐藏", `${accounts.value.length - list.length} 个`, "可在账户管理中恢复", "neutral"],
             ["账户币种", `${currencies.size} 种`, "不直接混合不同币种余额", "neutral"],
         ];
     } else if (pageKey.value === "program") {
@@ -3070,29 +3106,62 @@ const currentLedgerMonthTotals = computed(() => {
     }
     return { income, expense };
 });
-const accounts = computed<Item[]>(() => {
+const accounts = computed<AccountItem[]>(() => {
     if (accountsStore.accountListLedgerId !== selectedLedgerId.value) return [];
-    const colors = ["#12141A", "#F05537", "#4F46E5"];
-    const live = accountsStore.allPlainAccounts
-        .map((account, index) => ({
-            id: account.id,
-            title: account.name,
-            meta: `${account.currency} · ${account.comment || "资金账户"}`,
-            amount: formatAmountToLocalizedNumeralsWithCurrency(
-                account.balance,
-                account.currency,
-            ),
-            status: account.hidden || accountsStore.allAccountsMap[account.parentId]?.hidden ? "已隐藏" : "正常",
-            tone: (account.hidden ? "warning" : "success") as Tone,
-            icon: account.name.slice(0, 1),
-            color: colors[index % colors.length]!,
-            raw: account,
-        }));
-    return live;
+    return accountsStore.allPlainAccounts.map((account) => {
+            const parent = accountsStore.allAccountsMap[account.parentId];
+            const hidden = account.hidden || !!parent?.hidden;
+            const display = getAccountBalanceDisplay(account.balance, !!account.isLiability);
+            return {
+                id: account.id,
+                title: account.name,
+                meta: `${account.currency} · ${account.comment || "资金账户"}`,
+                amount: formatAmountToLocalizedNumeralsWithCurrency(account.balance, account.currency),
+                status: hidden ? "已隐藏" : "正常",
+                tone: (hidden ? "warning" : "success") as Tone,
+                icon: account.name.slice(0, 1),
+                color: account.color,
+                raw: account,
+                hidden,
+                parentName: parent?.name || "",
+                categoryName: tt(AccountCategory.valueOf(account.category)?.name || "Account"),
+                balanceLabel: display.label,
+                displayAmount: formatAmountToLocalizedNumeralsWithCurrency(display.amount, account.currency),
+            };
+        });
 });
+const accountSearch = ref("");
+const accountCategoryFilter = ref("");
+const accountVisibilityFilter = ref("");
+const accountCurrencyFilter = ref("");
+function resetAccountFilters() {
+    accountSearch.value = "";
+    accountCategoryFilter.value = "";
+    accountVisibilityFilter.value = "";
+    accountCurrencyFilter.value = "";
+}
+watch(selectedLedgerId, resetAccountFilters);
+const accountCategoryOptions = computed(() => AccountCategory.values(settingsStore.appSettings.accountCategoryOrders)
+    .filter(category => accounts.value.some(item => item.raw.category === category.type))
+    .map(category => ({ type: category.type, name: tt(category.name) })));
+const accountCurrencies = computed(() => [...new Set(accounts.value.map(item => item.raw.currency))].sort());
+const filteredAccounts = computed(() => {
+    const search = accountSearch.value.trim().toLocaleLowerCase();
+    return accounts.value.filter(item => (!search || `${item.title} ${item.raw.comment} ${item.parentName}`.toLocaleLowerCase().includes(search))
+        && (!accountCategoryFilter.value || String(item.raw.category) === accountCategoryFilter.value)
+        && (!accountCurrencyFilter.value || item.raw.currency === accountCurrencyFilter.value)
+        && (!accountVisibilityFilter.value || item.hidden === (accountVisibilityFilter.value === "hidden")));
+});
+const accountGroups = computed(() => accountCategoryOptions.value.map(category => ({
+    category: category.type, name: category.name,
+    items: filteredAccounts.value.filter(item => item.raw.category === category.type),
+})).filter(group => group.items.length));
+const accountBalanceSummaries = computed(() => summarizeVisibleAccountBalances(accounts.value.map(item => ({
+    currency: item.raw.currency, balance: item.raw.balance, hidden: item.hidden, isLiability: !!item.raw.isLiability,
+}))));
 const selectedAccountId = ref("");
-const selectedAccount = computed<Item | null>(() =>
-    accounts.value.find(item => item.id === selectedAccountId.value) || accounts.value[0] || null,
+const selectedAccount = computed<AccountItem | null>(() =>
+    filteredAccounts.value.find(item => item.id === selectedAccountId.value) || filteredAccounts.value[0] || null,
 );
 const accountLedgerEditorOpen = ref(false);
 const accountLedgerEditorAccount = ref<Account | null>(null);
@@ -9596,7 +9665,115 @@ dl > div {
     font-size: 13px;
 }
 
-.account-cards .tone-1 { color: var(--ink); }
-.account-cards article :is(b, small, strong, em) { color: inherit; -webkit-text-fill-color: currentColor; }
-.account-cards b, .account-cards small { overflow-wrap: anywhere; }
+.account-browser {
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 0.42fr);
+    gap: 20px;
+}
+.account-browser .account-cards {
+    display: block;
+    min-width: 0;
+    padding: 20px;
+    border: 1px solid var(--line);
+    background: var(--finexy-surface, #fff);
+}
+.account-browser-head, .account-group > header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+.account-browser-head h2 { margin: 0; font-size: 20px; }
+.account-browser-head p, .account-balance-overview > p {
+    margin: 6px 0 0;
+    color: var(--muted);
+    font-size: 13px;
+}
+.account-search-row {
+    display: grid;
+    grid-template-columns: minmax(160px, 1fr) 120px 100px 110px;
+    gap: 10px;
+    margin: 20px 0;
+}
+.account-search-row label { display: grid; gap: 7px; min-width: 0; font-size: 13px; color: var(--muted); }
+.account-search-row select, .account-search > div {
+    min-width: 0;
+    min-height: 44px;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--panel);
+    color: var(--ink);
+    font-size: 14px;
+}
+.account-search > div { display: flex; align-items: center; gap: 6px; }
+.account-search input { width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--ink); font-size: 14px; }
+.account-search > div:focus-within { outline: 2px solid var(--ink); outline-offset: 2px; }
+.account-balance-overview { padding: 14px; border-radius: 12px; background: var(--panel); }
+.account-balance-overview > p { margin: 0 0 12px; }
+.account-summary-row { display: grid; grid-template-columns: 42px repeat(3, minmax(0, 1fr)); gap: 12px; align-items: center; }
+.account-summary-row + .account-summary-row { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.account-summary-row > b { font-size: 12px; color: var(--muted); }
+.account-summary-row > div { display: grid; gap: 4px; min-width: 0; }
+.account-summary-row small { font-size: 12px; color: var(--muted); }
+.account-summary-row strong { color: var(--ink); font-size: 15px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.account-summary-note { display: block; margin-top: 12px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.account-group { margin-top: 22px; }
+.account-group > header { margin-bottom: 8px; }
+.account-group h3 { margin: 0; font-size: 14px; }
+.account-group > header span { color: var(--muted); font-size: 12px; }
+.account-browser .account-cards article {
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr) minmax(130px, auto) 50px 20px;
+    align-items: center;
+    gap: 12px;
+    min-height: 84px;
+    padding: 14px 12px;
+    border: 1px solid transparent;
+    border-left: 3px solid transparent;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--ink);
+    box-shadow: none;
+    transform: none;
+}
+.account-browser .account-cards article + article { margin-top: 4px; }
+.account-browser .account-cards article:hover { background: var(--panel); transform: none; box-shadow: none; }
+.account-browser .account-cards article.selected { border-color: var(--line); border-left-color: var(--orange); background: var(--panel); box-shadow: none; transform: none; }
+.account-browser .account-cards article:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.account-browser .account-cards article > i { display: grid; place-items: center; width: 40px; height: 40px; margin: 0; border-radius: 10px; background: var(--finexy-surface, #fff); color: var(--ink); }
+.account-row-name, .account-row-amount { display: grid; min-width: 0; gap: 5px; }
+.account-browser .account-cards article b { color: var(--ink); font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; -webkit-text-fill-color: currentColor; }
+.account-browser .account-cards article small { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; -webkit-text-fill-color: currentColor; }
+.account-row-amount { text-align: right; }
+.account-browser .account-cards article strong { position: static; margin: 0; padding: 0; color: var(--ink); font-size: 17px; line-height: 1.5; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; -webkit-text-fill-color: currentColor; }
+.account-browser .account-cards article em { margin: 0; color: var(--muted); font-size: 12px; font-style: normal; -webkit-text-fill-color: currentColor; }
+.account-browser .account-hidden > i { background: var(--panel); }
+.account-row-selection { color: var(--muted); }
+.selected .account-row-selection { color: var(--orange); }
+.account-list-empty { padding: 32px 0; text-align: center; }
+.account-list-empty h3 { margin: 0 0 8px; font-size: 16px; }
+.account-list-empty p { color: var(--muted); font-size: 14px; }
+.account-list-empty button, .account-browser-head button { min-height: 44px; }
+.account-browser .account-detail { position: sticky; top: 20px; min-width: 0; }
+.account-browser .account-detail > h2 { font-size: 22px; line-height: 1.5; overflow-wrap: anywhere; }
+.account-browser .account-detail .balance strong { font-size: 28px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.account-detail-facts { font-size: 14px; }
+.account-detail-facts > div { gap: 12px; font-size: 14px; }
+.account-detail-facts dd { overflow-wrap: anywhere; text-align: right; }
+.account-detail-note { margin-top: 20px; }
+.account-detail-note h3 { margin: 0 0 8px; color: var(--muted); font-size: 13px; font-weight: 500; }
+.account-detail-note p { margin: 0; color: var(--ink); font-size: 14px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.account-browser .split-buttons { grid-template-columns: 1fr; }
+.account-browser .split-buttons :is(a, button) { min-height: 44px; font-size: 14px; }
+@media (max-width: 1300px) {
+    .account-browser { grid-template-columns: minmax(0, 1fr) 280px; }
+    .account-search-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .account-browser .account-cards article { grid-template-columns: 32px minmax(0, 1fr) minmax(100px, auto) 20px; gap: 8px; }
+    .account-browser .account-cards article > i { width: 32px; height: 32px; }
+    .account-browser .account-cards article em { grid-column: 2; grid-row: 2; }
+    .account-row-amount { grid-column: 3; grid-row: 1 / 3; }
+    .account-row-selection { grid-column: 4; grid-row: 1 / 3; }
+    .account-summary-row { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .account-summary-row > b { grid-column: 1 / -1; }
+}
 </style>

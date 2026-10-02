@@ -20,6 +20,7 @@ async function request(path, token, body) {
     return json.result;
 }
 let browser;
+let page;
 try {
     for (let i = 0; i < 60; i++) { try { if ((await fetch(`${base}/healthz.json`)).ok) break; } catch {} await new Promise(resolve => setTimeout(resolve, 250)); }
     const owner = await request('register.json', '', { username, password, email: `${username}@example.invalid`, nickname: '账户隔离测试', language: 'zh-Hans', defaultCurrency: 'CNY', categories: [] });
@@ -36,7 +37,8 @@ try {
     await request('v1/transactions/add.json', owner.token, { ...transactionDraft, sourceAccountId: accounts[0].id, sourceAmount: 11, comment: 'Other account expense' });
     const { chromium } = await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE).href);
     browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH });
-    const page = await browser.newPage({ locale: 'zh-CN', viewport: { width: 1440, height: 1000 } });
+    page = await browser.newPage({ locale: 'zh-CN', viewport: { width: 1440, height: 1000 } });
+    page.setDefaultTimeout(15000);
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(`${base}/desktop#/login`, { waitUntil: 'networkidle' });
@@ -45,6 +47,7 @@ try {
     await page.getByRole('button', { name: '登录', exact: true }).click();
     await page.waitForURL(/#\/$/);
     await page.locator('.wallet-view-all').waitFor();
+    await page.waitForFunction(() => document.querySelector('.whead')?.textContent?.includes('共 15 个账户'));
     assert.match(await page.locator('.whead').innerText(), /共 15 个账户/);
     assert.match(await page.locator('.balance-meta').innerText(), /14 个可见账户/);
     assert.equal(await page.locator('.wrow .w').count(), 3);
@@ -95,9 +98,46 @@ try {
     }
     await dialog.getByRole('button', { name: /取消/ }).click();
     pass('one unified bill import entry exposes both Alipay and WeChat source selection');
+    await request('v1/accounts/add.json', owner.token, { ...accountDraft, category: 3, name: 'Synthetic credit owed', balance: -1200 });
+    await request('v1/accounts/add.json', owner.token, { ...accountDraft, category: 3, name: 'Synthetic credit prepaid', balance: 300 });
+    await request('v1/accounts/modify.json', owner.token, { id: accounts[6].id, name: 'Synthetic 07', category: 7, icon: '1', color: '000000', comment: 'Synthetic investment purpose' });
     await page.goto(`${base}/desktop#/account/list`, { waitUntil: 'networkidle' });
-    await page.locator('.account-cards article').nth(14).waitFor();
-    assert(await page.getByRole('button', { name: '查看Renamed selected account账户详情', exact: true }).evaluate(el => el.querySelector('small').getBoundingClientRect().bottom <= el.querySelector('strong').getBoundingClientRect().top), 'wrapped account metadata must not overlap money');
+    await page.getByRole('button', { name: '刷新', exact: true }).click();
+    await page.locator('.account-cards article').nth(16).waitFor();
+    const search = page.getByRole('searchbox', { name: '搜索账户', exact: true });
+    await search.fill('investment purpose');
+    assert.equal(await page.locator('.account-cards article').count(), 1);
+    assert.match(await page.locator('.account-detail').innerText(), /Synthetic 07/);
+    assert.match(await page.locator('.account-detail-note').innerText(), /Synthetic investment purpose/);
+    await search.fill('does-not-exist');
+    assert.match(await page.locator('.account-cards').innerText(), /没有符合筛选的账户/);
+    assert.doesNotMatch(await page.locator('.account-detail').innerText(), /还没有账户/);
+    await page.locator('.account-browser-head').getByRole('button', { name: '清除筛选', exact: true }).click();
+    assert.equal(await page.locator('.account-cards article').count(), 17);
+    pass('search includes names and notes; filtered empty state preserves actual account existence and clear restores all');
+    await page.getByLabel('账户类型', { exact: true }).selectOption('3');
+    assert.equal(await page.locator('.account-cards article').count(), 2);
+    await page.getByRole('button', { name: '查看Synthetic credit owed账户详情', exact: true }).click();
+    assert.match(await page.locator('.account-detail .balance').innerText(), /待还款\s*¥\s*12\.00/);
+    await page.getByRole('button', { name: '查看Synthetic credit prepaid账户详情', exact: true }).click();
+    assert.match(await page.locator('.account-detail .balance').innerText(), /溢缴款\s*¥\s*3\.00/);
+    assert.equal(await page.locator('.account-group').count(), 1);
+    pass('actual account category groups and filters; negative debt and credit overpayment receive distinct correct labels');
+    await page.locator('.account-browser-head').getByRole('button', { name: '清除筛选', exact: true }).click();
+    await page.getByLabel('币种', { exact: true }).selectOption('USD');
+    assert.equal(await page.locator('.account-cards article').count(), 1);
+    assert.match(await page.locator('.account-detail').innerText(), /Synthetic 13/);
+    await page.locator('.account-browser-head').getByRole('button', { name: '清除筛选', exact: true }).click();
+    await page.getByLabel('状态', { exact: true }).selectOption('hidden');
+    assert.equal(await page.locator('.account-cards article').count(), 1);
+    assert.match(await page.locator('.account-detail').innerText(), /Synthetic hidden/);
+    await page.getByLabel('状态', { exact: true }).selectOption('visible');
+    assert.equal(await page.locator('.account-cards article').count(), 16);
+    assert.match(await page.locator('.account-summary-row[data-currency="CNY"]').innerText(), /资产余额\s*¥\s*91\.59\s*净负债\s*¥\s*9\.00\s*净余额\s*¥\s*82\.59/);
+    assert.match(await page.locator('.account-summary-row[data-currency="USD"]').innerText(), /净余额\s*\$\s*13\.00/);
+    pass('currency and visibility filters compose; summary excludes hidden balance and separates currencies and signed net liabilities');
+    await page.locator('.account-browser-head').getByRole('button', { name: '清除筛选', exact: true }).click();
+    assert(await page.getByRole('button', { name: '查看Renamed selected account账户详情', exact: true }).evaluate(el => el.querySelector('.account-row-name').getBoundingClientRect().right <= el.querySelector('.account-row-amount').getBoundingClientRect().left), 'account names must not overlap money');
     for (const width of [1440, 1250]) for (const zoom of [1, 1.25]) {
         await page.setViewportSize({ width, height: 1000 });
         await page.evaluate(value => document.documentElement.style.zoom = value, zoom);
@@ -111,11 +151,15 @@ try {
     await finalAccount.scrollIntoViewIfNeeded();
     const bounds = await finalAccount.boundingBox();
     assert(bounds.y >= 0 && bounds.y + bounds.height <= 1001, 'last account can be scrolled fully into view');
-    await page.screenshot({ path: 'artifacts/agent-access/account-workspace-bottom-final.png' });
+    await page.screenshot({ path: 'artifacts/agent-access/account-presentation-bottom-final.png' });
     await page.locator('.account-cards article').first().scrollIntoViewIfNeeded();
-    await page.screenshot({ path: 'artifacts/agent-access/account-workspace-final.png' });
+    await page.screenshot({ path: 'artifacts/agent-access/account-presentation-final.png' });
     assert.deepEqual(errors, []);
     pass('full account cards remain reachable and do not overflow at desktop widths and 125% zoom');
-    await writeFile('artifacts/agent-access/account-workspace-final.json', JSON.stringify({ passed: checks.length, checks }, null, 2));
+    await writeFile('artifacts/agent-access/account-presentation-final.json', JSON.stringify({ passed: checks.length, checks }, null, 2));
     console.log(`Account workspace acceptance: ${checks.length} groups passed`);
+} catch (error) {
+    await mkdir('artifacts/agent-access', { recursive: true });
+    await page?.screenshot({ path: 'artifacts/agent-access/account-presentation-failure.png' });
+    throw error;
 } finally { await browser?.close(); }
