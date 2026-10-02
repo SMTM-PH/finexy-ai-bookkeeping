@@ -148,8 +148,7 @@
                         </div>
                         <div>
                             <template v-if="pageKey === 'activity' && selectedLedgerCanWrite && isDataImportingEnabled()">
-                                <button class="secondary" :disabled="busy" @click="importStatement('alipay_app_csv')">导入支付宝</button>
-                                <button class="secondary" :disabled="busy" @click="importStatement('wechat_pay_app')">导入微信</button>
+                                <button class="secondary" :disabled="busy" @click="importStatement()">导入账单</button>
                             </template>
                             <button
                                 v-if="pageKey !== 'rates'"
@@ -233,11 +232,11 @@
                                 >账户<select v-model="accountFilter">
                                     <option value="all">全部账户</option>
                                     <option
-                                        v-for="name in transactionAccounts"
-                                        :key="name"
-                                        :value="name"
+                                        v-for="account in transactionAccounts"
+                                        :key="account.id"
+                                        :value="account.id"
                                     >
-                                        {{ name }}
+                                        {{ account.name }} · {{ account.currency }}
                                     </option>
                                 </select></label
                             ><label
@@ -334,17 +333,21 @@
                         <div class="account-cards">
                             <article
                                 v-for="(item, index) in accounts"
-                                :key="item.title"
+                                :key="item.id"
                                 :class="[
-                                    `tone-${index}`,
+                                    `tone-${index % 3}`,
                                     {
                                         selected:
-                                            selectedAccount?.title === item.title,
+                                            selectedAccount?.id === item.id,
                                     },
                                 ]"
                                 tabindex="0"
-                                @click="selectedAccount = item"
-                                @keyup.enter="selectedAccount = item"
+                                role="button"
+                                :aria-label="`查看${item.title}账户详情`"
+                                :aria-pressed="selectedAccount?.id === item.id"
+                                @click="selectedAccountId = item.id || ''"
+                                @keydown.enter.prevent="selectedAccountId = item.id || ''"
+                                @keydown.space.prevent="selectedAccountId = item.id || ''"
                             >
                                 <i>{{ item.icon }}</i
                                 ><b>{{ item.title }}</b
@@ -365,7 +368,7 @@
                                 ><strong>{{ selectedAccount.amount }}</strong>
                             </div>
                             <div class="split-buttons">
-                                <router-link to="/transaction/list"
+                                <router-link :to="{ path: '/transaction/list', query: { accountIds: selectedAccount.id } }"
                                     >查看流水</router-link
                                 ><button @click="editAccount">编辑账户</button>
                                 <button @click="openAccountLedgerEditor">迁移到账本</button>
@@ -373,9 +376,9 @@
                         </aside>
                         <aside v-else class="panel account-detail empty-state">
                             <PanelHead eyebrow="CURRENT ACCOUNT" title="账户详情" />
-                            <h2>还没有账户</h2>
-                            <p>添加第一个真实账户后，余额和账户详情会显示在这里。</p>
-                            <button class="primary" type="button" @click="primaryAction">添加账户</button>
+                            <h2>{{ busy ? '正在读取账户' : '还没有账户' }}</h2>
+                            <p>{{ busy ? '账户加载完成后，余额和详情会显示在这里。' : '添加第一个真实账户后，余额和账户详情会显示在这里。' }}</p>
+                            <button v-if="!busy" class="primary" type="button" @click="primaryAction">添加账户</button>
                         </aside>
                     </section>
 
@@ -2466,6 +2469,9 @@ type PageKey =
     | "about";
 type Tone = "success" | "warning" | "neutral";
 interface Item {
+    id?: string;
+    sourceAccountId?: string;
+    destinationAccountId?: string;
     title: string;
     meta: string;
     amount: string;
@@ -2877,7 +2883,7 @@ const config = computed<Config>(() => {
         values = [
             ["账户数量", `${accountsStore.allPlainAccounts.length} 个`, "来自当前账本", "neutral"],
             ["可见账户", `${list.length} 个`, "可用于记账", "neutral"],
-            ["已隐藏", `${accountsStore.allPlainAccounts.filter(item => item.hidden).length} 个`, "可在账户管理中恢复", "neutral"],
+            ["已隐藏", `${accountsStore.allPlainAccounts.length - list.length} 个`, "可在账户管理中恢复", "neutral"],
             ["账户币种", `${currencies.size} 种`, "不直接混合不同币种余额", "neutral"],
         ];
     } else if (pageKey.value === "program") {
@@ -3065,25 +3071,29 @@ const currentLedgerMonthTotals = computed(() => {
     return { income, expense };
 });
 const accounts = computed<Item[]>(() => {
+    if (accountsStore.accountListLedgerId !== selectedLedgerId.value) return [];
     const colors = ["#12141A", "#F05537", "#4F46E5"];
-    const live = accountsStore.allVisiblePlainAccounts
-        .slice(0, 3)
+    const live = accountsStore.allPlainAccounts
         .map((account, index) => ({
+            id: account.id,
             title: account.name,
             meta: `${account.currency} · ${account.comment || "资金账户"}`,
             amount: formatAmountToLocalizedNumeralsWithCurrency(
                 account.balance,
                 account.currency,
             ),
-            status: account.hidden ? "已隐藏" : "正常",
+            status: account.hidden || accountsStore.allAccountsMap[account.parentId]?.hidden ? "已隐藏" : "正常",
             tone: (account.hidden ? "warning" : "success") as Tone,
             icon: account.name.slice(0, 1),
-            color: colors[index]!,
+            color: colors[index % colors.length]!,
             raw: account,
         }));
     return live;
 });
-const selectedAccount = ref<Item | null>(null);
+const selectedAccountId = ref("");
+const selectedAccount = computed<Item | null>(() =>
+    accounts.value.find(item => item.id === selectedAccountId.value) || accounts.value[0] || null,
+);
 const accountLedgerEditorOpen = ref(false);
 const accountLedgerEditorAccount = ref<Account | null>(null);
 const accountLedgerTargetId = ref("");
@@ -3276,7 +3286,7 @@ const accountActionBusy = ref(false);
 const filterOpen = ref(false);
 const compact = ref(false);
 const typeFilter = ref("all");
-const accountFilter = ref("all");
+const accountFilter = ref(typeof route.query["accountIds"] === "string" ? route.query["accountIds"] : "all");
 const monthFilter = ref("");
 const currentPage = ref(1);
 const pageSize = 10;
@@ -3474,19 +3484,13 @@ const activityTransactions = computed(() => [
 const settingsMenu = computed(() =>
     pageKey.value === "account" ? accountMenu : appMenu,
 );
-const transactionAccounts = computed(() => [
-    ...new Set(
-        activityTransactions.value
-            .map((item) => item.account)
-            .filter((name): name is string => !!name),
-    ),
-]);
+const transactionAccounts = computed(() => accountsStore.allPlainAccounts);
 const filteredTransactions = computed(() =>
     activityTransactions.value.filter(
         (i) =>
             (typeFilter.value === "all" || i.kind === typeFilter.value) &&
             (accountFilter.value === "all" ||
-                i.account === accountFilter.value) &&
+                i.sourceAccountId === accountFilter.value || i.destinationAccountId === accountFilter.value) &&
             (!monthFilter.value || i.month === monthFilter.value) &&
             (!query.value ||
                 `${i.title}${i.meta}${i.category}${i.account}`
@@ -3714,6 +3718,8 @@ function reviewItemToItem(item: AIReviewItemInfoResponse): Item {
     return {
         title:
             recognized?.comment || item.sourceText.slice(0, 24) || "待确认记录",
+        sourceAccountId: recognized?.sourceAccountId,
+        destinationAccountId: recognized?.destinationAccountId,
         meta: item.failureReason || "AI 识别结果需要人工核对",
         amount: recognized?.sourceAmount
             ? `${kind === "收入" ? "+" : "-"}${amount}`
@@ -3854,7 +3860,7 @@ async function changeSelectedLedger(ledgerId: string) {
     try {
         ledgersStore.select(ledgerId);
         detail.value = null;
-        selectedAccount.value = null;
+        selectedAccountId.value = "";
         accountFilter.value = "all";
         currentPage.value = 1;
         ledgerReportTrends.value = [];
@@ -4012,6 +4018,8 @@ function transactionToItem(transaction: Transaction): Item {
         : transaction.sourceAccount?.name || "无备注";
     return {
         title,
+        sourceAccountId: transaction.sourceAccountId,
+        destinationAccountId: transaction.destinationAccountId,
         meta:
             meta === title
                 ? transaction.sourceAccount?.name || kind
@@ -4039,7 +4047,7 @@ function transactionToItem(transaction: Transaction): Item {
 function refresh() {
     void loadPageData(true);
 }
-function importStatement(fileType: string): void {
+function importStatement(fileType?: string): void {
     if (busy.value || !selectedLedgerCanWrite.value || !isDataImportingEnabled()) return;
     statementImportDialog.value?.open(fileType).then(() => {
         void loadPageData(false, false);
@@ -4048,6 +4056,7 @@ function importStatement(fileType: string): void {
     });
 }
 function resetFilters() {
+    void router.replace({ query: { ...route.query, accountIds: undefined } });
     typeFilter.value = "all";
     accountFilter.value = "all";
     monthFilter.value = "";
@@ -4911,12 +4920,8 @@ function editAccount() {
         primaryAction();
         return;
     }
-    const selectedAccountName = selectedAccount.value.title;
-    const account =
-        accountsStore.allVisiblePlainAccounts.find(
-            (item) => item.name === selectedAccountName,
-        ) || accountsStore.allVisiblePlainAccounts[0];
-    if (!account) {
+    const account = selectedAccount.value.raw;
+    if (!(account instanceof Account)) {
         primaryAction();
         return;
     }
@@ -4960,7 +4965,7 @@ async function submitAccountLedgerEditor() {
         accountLedgerEditorBusy.value = false;
         accountLedgerEditorOpen.value = false;
         accountLedgerEditorAccount.value = null;
-        selectedAccount.value = null;
+        selectedAccountId.value = "";
         ledgersStore.select(targetLedgerId);
         showToast(`账户已迁移到「${ledgersStore.selectedLedger.name}」`);
         try {
@@ -5257,15 +5262,8 @@ watch([typeFilter, accountFilter, monthFilter, query], () => {
 watch(totalPages, (value) => {
     if (currentPage.value > value) currentPage.value = value;
 });
-watch(accounts, (value) => {
-    if (!value.length) {
-        selectedAccount.value = null;
-    } else if (
-        !selectedAccount.value ||
-        !value.some((item) => item.title === selectedAccount.value?.title)
-    ) {
-        selectedAccount.value = value[0]!;
-    }
+watch(() => route.query["accountIds"], value => {
+    accountFilter.value = typeof value === "string" ? value : "all";
 });
 </script>
 
@@ -5816,6 +5814,7 @@ tr.compact td {
     gap: 14px;
     margin-top: 14px;
 }
+.account-layout { align-items: start; }
 .account-cards {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -5826,7 +5825,7 @@ tr.compact td {
 }
 .account-cards article {
     position: relative;
-    min-height: 230px;
+    min-height: 200px;
     padding: 18px;
     border: 3px solid transparent;
     border-radius: 18px;
@@ -5839,6 +5838,7 @@ tr.compact td {
     transform: translateY(-4px);
     box-shadow: 0 12px 25px rgba(18, 20, 26, 0.14);
 }
+.account-cards article:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
 .account-cards article.selected {
     border-color: rgba(255, 255, 255, 0.7);
 }
@@ -9592,4 +9592,8 @@ dl > div {
     color: #b42318;
     font-size: 13px;
 }
+
+.account-cards .tone-1 { color: var(--ink); }
+.account-cards article :is(b, small, strong, em) { color: inherit; -webkit-text-fill-color: currentColor; }
+.account-cards b, .account-cards small { overflow-wrap: anywhere; }
 </style>

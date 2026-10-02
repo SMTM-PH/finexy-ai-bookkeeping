@@ -1,0 +1,110 @@
+import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
+
+const base = 'http://127.0.0.1:18110';
+const container = JSON.parse(execFileSync('docker', ['inspect', 'finexy-agent-e2e'], { encoding: 'utf8' }))[0];
+assert.deepEqual(container.Mounts, []);
+assert(container.Config.Env.includes('EBK_AUTH_ENABLE_REGISTER=true'));
+const password = randomBytes(18).toString('hex');
+const username = `accounts_${randomBytes(6).toString('hex')}`;
+const checks = [];
+const pass = name => { checks.push(name); console.log(`PASS ${name}`); };
+async function request(path, token, body) {
+    const response = await fetch(`${base}/api/${path}`, { method: body === undefined ? 'GET' : 'POST', headers: { 'Content-Type': 'application/json', 'X-Timezone-Offset': '480', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    const json = await response.json();
+    assert.equal(response.status, 200, `HTTP ${path}`);
+    assert(json.success, `success ${path}`);
+    return json.result;
+}
+let browser;
+try {
+    for (let i = 0; i < 60; i++) { try { if ((await fetch(`${base}/healthz.json`)).ok) break; } catch {} await new Promise(resolve => setTimeout(resolve, 250)); }
+    const owner = await request('register.json', '', { username, password, email: `${username}@example.invalid`, nickname: '账户隔离测试', language: 'zh-Hans', defaultCurrency: 'CNY', categories: [] });
+    const accounts = [];
+    const accountDraft = { category: 2, type: 1, icon: '1', color: '000000', currency: 'CNY', balanceTime: 946684800 };
+    for (let i = 1; i <= 14; i++) accounts.push(await request('v1/accounts/add.json', owner.token, { ...accountDraft, currency: i === 13 ? 'USD' : 'CNY', name: `Synthetic ${String(i).padStart(2, '0')}`, balance: i * 100 }));
+    const hidden = await request('v1/accounts/add.json', owner.token, { ...accountDraft, name: 'Synthetic hidden', balance: 9900 });
+    await request('v1/accounts/hide.json', owner.token, { id: hidden.id, hidden: true });
+    const root = await request('v1/transaction/categories/add.json', owner.token, { name: 'Synthetic root', type: 2, icon: '1', color: '000000' });
+    const category = await request('v1/transaction/categories/add.json', owner.token, { name: 'Synthetic expense', type: 2, parentId: root.id, icon: '1', color: '000000' });
+    const selected = accounts[13];
+    const transactionDraft = { type: 3, time: Math.floor(Date.now() / 1000), utcOffset: 480, categoryId: category.id };
+    await request('v1/transactions/add.json', owner.token, { ...transactionDraft, sourceAccountId: selected.id, sourceAmount: 23, comment: 'Selected account expense' });
+    await request('v1/transactions/add.json', owner.token, { ...transactionDraft, sourceAccountId: accounts[0].id, sourceAmount: 11, comment: 'Other account expense' });
+    const { chromium } = await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE).href);
+    browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH });
+    const page = await browser.newPage({ locale: 'zh-CN', viewport: { width: 1440, height: 1000 } });
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto(`${base}/desktop#/login`, { waitUntil: 'networkidle' });
+    await page.getByLabel('用户名', { exact: true }).fill(username);
+    await page.getByLabel('密码', { exact: true }).fill(password);
+    await page.getByRole('button', { name: '登录', exact: true }).click();
+    await page.waitForURL(/#\/$/);
+    await page.locator('.wallet-view-all').waitFor();
+    assert.match(await page.locator('.whead').innerText(), /共 15 个账户/);
+    assert.match(await page.locator('.balance-meta').innerText(), /14 个可见账户/);
+    assert.equal(await page.locator('.wrow .w').count(), 3);
+    await page.locator('.currency-switch .cur').click();
+    await page.locator('.balance-menu').getByRole('button').filter({ hasText: 'USD' }).click();
+    assert.match(await page.locator('.balance-card > .amount').innerText(), /13\.00/);
+    assert.match(await page.locator('.balance-meta').innerText(), /1 个可见账户 · USD/);
+    await page.getByRole('link', { name: '查看全部 15 个账户', exact: true }).click();
+    await page.locator('.account-cards article').nth(14).waitFor();
+    assert.equal(await page.locator('.account-cards article').count(), 15);
+    assert.match(await page.locator('.account-detail').innerText(), /Synthetic 01/);
+    assert.doesNotMatch(await page.locator('.account-detail').innerText(), /还没有账户/);
+    pass('home total count matches all management accounts; warm cached navigation selects real details');
+    await page.getByRole('button', { name: '查看Synthetic 14账户详情', exact: true }).focus();
+    await page.keyboard.press('Space');
+    assert.match(await page.locator('.account-detail').innerText(), /Synthetic 14/);
+    assert.match(await page.locator('.account-detail .balance').innerText(), /13\.77/);
+    await request('v1/accounts/modify.json', owner.token, { ...accountDraft, id: selected.id, name: 'Renamed selected account' });
+    await request('v1/transactions/add.json', owner.token, { ...transactionDraft, sourceAccountId: selected.id, sourceAmount: 7, comment: 'Refreshed account expense' });
+    await page.getByRole('button', { name: '刷新', exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('.account-detail h2')?.textContent === 'Renamed selected account');
+    assert.match(await page.locator('.account-detail .balance').innerText(), /13\.70/);
+    await page.getByRole('button', { name: '编辑账户', exact: true }).click();
+    assert.equal(await page.getByLabel('账户名称', { exact: true }).inputValue(), 'Renamed selected account');
+    await page.getByRole('dialog').getByRole('button', { name: /取消/ }).click();
+    pass('keyboard selection and ID-based details survive server rename, balance change and refresh; edit uses same account');
+    await page.getByRole('button', { name: '查看Synthetic hidden账户详情', exact: true }).click();
+    assert.match(await page.locator('.account-detail').innerText(), /Synthetic hidden/);
+    assert.match(await page.getByRole('button', { name: '查看Synthetic hidden账户详情', exact: true }).innerText(), /已隐藏/);
+    await page.getByRole('button', { name: '查看Renamed selected account账户详情', exact: true }).click();
+    await page.getByRole('link', { name: '查看流水', exact: true }).click();
+    assert.equal(new URL(page.url().split('#')[1], base).searchParams.get('accountIds'), selected.id);
+    await page.getByText('Refreshed account expense', { exact: true }).waitFor();
+    assert.equal(await page.getByText('Other account expense', { exact: true }).count(), 0);
+    pass('hidden accounts remain viewable and detail transaction link filters exact string account ID');
+    assert.equal(await page.getByRole('button', { name: '导入账单', exact: true }).count(), 1);
+    assert.equal(await page.getByRole('button', { name: /导入支付宝|导入微信/ }).count(), 0);
+    await page.getByRole('button', { name: '导入账单', exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    const type = dialog.getByRole('combobox', { name: '文件类型', exact: true });
+    for (const source of ['支付宝 (App) 交易流水文件', '微信支付账单流水文件']) {
+        await type.click();
+        await page.getByRole('option', { name: source, exact: true }).click();
+        assert((await dialog.innerText()).includes(source));
+    }
+    await dialog.getByRole('button', { name: /取消/ }).click();
+    pass('one unified bill import entry exposes both Alipay and WeChat source selection');
+    await page.goto(`${base}/desktop#/account/list`, { waitUntil: 'networkidle' });
+    await page.locator('.account-cards article').nth(14).waitFor();
+    for (const width of [1440, 1250]) for (const zoom of [1, 1.25]) {
+        await page.setViewportSize({ width, height: 1000 });
+        await page.evaluate(value => document.documentElement.style.zoom = value, zoom);
+        assert(await page.locator('.account-cards').evaluate(el => el.scrollWidth <= el.clientWidth + 1));
+    }
+    await page.evaluate(() => document.documentElement.style.zoom = '1');
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await mkdir('artifacts/agent-access', { recursive: true });
+    await page.screenshot({ path: 'artifacts/agent-access/account-workspace-final.png', fullPage: true });
+    assert.deepEqual(errors, []);
+    pass('full account cards remain reachable and do not overflow at desktop widths and 125% zoom');
+    await writeFile('artifacts/agent-access/account-workspace-final.json', JSON.stringify({ passed: checks.length, checks }, null, 2));
+    console.log(`Account workspace acceptance: ${checks.length} groups passed`);
+} finally { await browser?.close(); }

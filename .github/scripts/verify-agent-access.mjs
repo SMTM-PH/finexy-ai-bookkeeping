@@ -339,7 +339,9 @@ try {
     await page.goto(`${base}/desktop#/transaction/list`, { waitUntil: 'networkidle' });
     await page.getByRole('button', { name: '切换当前账本', exact: true }).click();
     await page.getByRole('option').filter({ hasText: 'Selected import ledger' }).click();
-    await page.getByRole('button', { name: '导入支付宝', exact: true }).click();
+    await page.getByRole('button', { name: '导入账单', exact: true }).click();
+    await page.getByRole('combobox', { name: '文件类型', exact: true }).click();
+    await page.getByRole('option', { name: '支付宝 (App) 交易流水文件', exact: true }).click();
     await page.getByRole('dialog').getByText('账单将导入「Selected import ledger」', { exact: false }).waitFor();
     await page.evaluate(() => {
         const send = XMLHttpRequest.prototype.send;

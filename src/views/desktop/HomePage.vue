@@ -131,6 +131,7 @@
                                     </button>
                                 </div>
                                 <div v-else class="wallet-empty"><span>还没有可用账户</span><button type="button" @click="openAccountEditor()">添加第一个账户</button></div>
+                                <router-link class="wallet-view-all" to="/account/list">查看全部 {{ displayAccountCount }} 个账户</router-link>
                             </div>
                         </section>
 
@@ -359,13 +360,13 @@ const selectedLedgerSummary = computed<string>(() => {
     const activeMembers = ledgersStore.members.filter(member => member.status === 1).length;
     return activeMembers > 0 ? `${ledgerRoleLabel.value} · ${activeMembers} 位成员` : '共享账本';
 });
-const walletAccounts = computed<Account[]>(() => accountsStore.allVisiblePlainAccounts.slice(0, 5));
+const walletAccounts = computed<Account[]>(() => accountsStore.allVisiblePlainAccounts);
 const pendingReviewCount = computed<number>(() => familyLedgerSelected.value ? 0 : aiReviewItemsStore.items.length);
 const featuredSavingsGoal = computed(() => savingsGoalsStore.goals.find(goal => !goal.achieved) ?? savingsGoalsStore.goals[0] ?? null);
 const featuredSavingsGoalProgress = computed(() => Math.min(100, Math.max(0, featuredSavingsGoal.value?.progressPercent ?? 0)));
 
 const defaultCurrency = computed<string>(() => userStore.currentUserDefaultCurrency || 'CNY');
-const displayAccountCount = computed<string>(() => formatNumberToLocalizedNumerals(walletAccounts.value.length));
+const displayAccountCount = computed<string>(() => formatNumberToLocalizedNumerals(accountsStore.allPlainAccounts.length));
 const balanceCurrencies = computed<string[]>(() => Array.from(new Set([defaultCurrency.value, ...walletAccounts.value.map(account => account.currency)])));
 const balanceDisplayAmount = computed<string>(() => {
     if (!showAmountInHomePage.value) {
@@ -373,9 +374,7 @@ const balanceDisplayAmount = computed<string>(() => {
     }
 
     if (balanceCurrency.value === defaultCurrency.value) {
-        return familyLedgerSelected.value
-            ? formatAmountToLocalizedNumeralsWithCurrency(walletAccounts.value.reduce((sum, account) => sum + account.balance, 0), defaultCurrency.value)
-            : netAssets.value;
+        return netAssets.value;
     }
 
     const currencyBalance = walletAccounts.value.filter(account => account.currency === balanceCurrency.value).reduce((total, account) => total + account.balance, 0);
@@ -383,7 +382,7 @@ const balanceDisplayAmount = computed<string>(() => {
 });
 const balanceAccountSummary = computed<string>(() => {
     const count = balanceCurrency.value === defaultCurrency.value ? walletAccounts.value.length : walletAccounts.value.filter(account => account.currency === balanceCurrency.value).length;
-    return `${formatNumberToLocalizedNumerals(count)} 个账户 · ${balanceCurrency.value}`;
+    return `${formatNumberToLocalizedNumerals(count)} 个可见账户 · ${balanceCurrency.value}`;
 });
 const currentYearMonth = computed<number>(() => {
     const now = new Date();
@@ -398,9 +397,7 @@ const budgetPercentage = computed<number>(() => monthlyBudget.value ? currentMon
 const thisMonthNet = computed<string>(() => formatAmountToLocalizedNumeralsWithCurrency(currentMonthNet.value, defaultCurrency.value));
 const thisMonthIncome = computed<string>(() => formatAmountToLocalizedNumeralsWithCurrency(currentMonthIncome.value, defaultCurrency.value));
 const thisMonthExpense = computed<string>(() => formatAmountToLocalizedNumeralsWithCurrency(currentMonthExpense.value, defaultCurrency.value));
-const homeTotalAssets = computed<string>(() => familyLedgerSelected.value
-    ? formatAmountToLocalizedNumeralsWithCurrency(walletAccounts.value.reduce((sum, account) => sum + account.balance, 0), defaultCurrency.value)
-    : totalAssets.value);
+const homeTotalAssets = computed<string>(() => totalAssets.value);
 
 const overviewMonthKeys = [
     'monthBeforeLast6Months',
@@ -801,4 +798,7 @@ table th{font-size:12.5px;color:var(--muted)}table td{font-size:13px}.status{fon
 @media(max-width:1250px){.finance-home{padding:28px 40px}.tabs{gap:22px;margin-left:38px}}
 @media(prefers-reduced-motion:reduce){.finance-home *{transition:none!important}}
 .finance-tasks .mhead>div{display:grid;gap:3px}.finance-tasks h3{display:flex;align-items:center;gap:8px;margin:0;color:#12141a;font-size:17px;font-weight:800}.finance-tasks .mhead p{margin:0;color:#475467;font-size:12.5px;line-height:1.45}.finance-tasks .add{margin-left:auto;padding:8px 14px!important;border-radius:999px;background:#f3f4f6!important;font-size:13px;font-weight:700}.finance-tasks .add:hover{background:#e9ebee!important}.task-list{display:grid;gap:8px;margin-top:14px}.task-list>button{display:grid;width:100%;grid-template-columns:36px minmax(0,1fr) auto 18px;align-items:center;gap:10px;padding:11px!important;border:1px solid #e7eaf0!important;border-radius:13px!important;background:#fff!important;text-align:left}.task-list>button:hover{border-color:#cfd5df!important;box-shadow:0 6px 16px rgba(18,20,26,.06);transform:translateY(-1px)}.task-list>button.done{background:#f8faf9!important}.task-list>button.done>strong{color:#087a49}.task-icon{display:grid;width:36px;height:36px;place-items:center;border-radius:10px;font-size:11px;font-style:normal;font-weight:850}.task-icon.pending{color:#b54708;background:#fff4e5}.task-list>button.done .task-icon.pending{color:#087a49;background:#eaf8f1}.task-icon.plan{color:#3f3ac4;background:#eeedff}.task-list span{display:grid;gap:3px;min-width:0}.task-list span b{color:#12141a;font-size:13.5px}.task-list span small{overflow:hidden;color:#475467;font-size:12.5px;text-overflow:ellipsis;white-space:nowrap}.task-list>button>strong{color:#12141a;font-size:13px}.task-list>button>.v-icon{color:#667085}
+
+.wallet-view-all { display: flex; align-items: center; min-height: 44px; margin-top: 8px; color: var(--ink); font-size: 13px; font-weight: 600; text-decoration: underline; }
+.wallet-view-all:focus-visible { outline: 2px solid var(--orange); outline-offset: 3px; }
 </style>
