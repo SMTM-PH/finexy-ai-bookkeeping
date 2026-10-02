@@ -88,11 +88,13 @@ function flip() {
 }
 function startDrag(event: PointerEvent) {
     if (event.button !== 0 || reducedMotion.value) return;
+    if (event.target instanceof Element && event.target.closest('.holo-back-note')) return;
     dragging.value = true;
     card.value?.setPointerCapture(event.pointerId);
 }
 function movePointer(event: PointerEvent) {
     if (reducedMotion.value || (!dragging.value && event.pointerType !== 'mouse')) return;
+    if (!dragging.value && event.target instanceof Element && event.target.closest('.holo-back-note')) return;
     const bounds = card.value?.getBoundingClientRect();
     if (!bounds?.width || !bounds.height) return;
     const x = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
@@ -154,7 +156,7 @@ onBeforeUnmount(() => motionQuery?.removeEventListener('change', updateMotion));
 .holo-stage { display: flex; justify-content: center; padding: 30px 24px 20px; perspective: 1200px; }
 .holo-card {
     --holo-foil: conic-gradient(from 35deg at var(--light-x) var(--light-y), var(--holo-ice), var(--holo-mint), var(--holo-gold), var(--holo-coral), var(--holo-ice));
-    width: min(100%, 340px); margin: 0; outline: none; transform: rotateX(var(--tilt-x)) rotateY(var(--tilt-y)); transform-style: preserve-3d; transition: transform 160ms ease-out; touch-action: pan-y; cursor: grab;
+    width: min(100%, 340px); margin: 0; outline: none; transform: rotateX(var(--tilt-x)) rotateY(var(--tilt-y)); transform-style: preserve-3d; transition: transform 160ms ease-out; touch-action: pan-y; cursor: grab; user-select: none;
 }
 .holo-card:active { cursor: grabbing; }
 .holo-card:focus-visible { outline: 2px solid var(--holo-ink); outline-offset: 10px; border-radius: 22px; }
@@ -188,7 +190,7 @@ onBeforeUnmount(() => motionQuery?.removeEventListener('change', updateMotion));
 .holo-back-facts dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
 .holo-back-note { margin: 24px 0; }
 .holo-back-note > span { color: var(--holo-soft); font-size: 13px; }
-.holo-back-note p { max-height: 180px; margin: 9px 0 0; overflow: auto; color: var(--holo-paper); font-size: 14px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
+.holo-back-note p { max-height: 180px; margin: 9px 0 0; overflow: auto; color: var(--holo-paper); font-size: 14px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; cursor: text; }
 .holo-back .holo-card-footer { margin-top: auto; padding-top: 20px; }
 .holo-card-footer b { color: var(--holo-paper); font-size: 17px; font-variant-numeric: tabular-nums; }
 .holo-hint { margin: 0; color: var(--muted); font-size: 12px; text-align: center; }

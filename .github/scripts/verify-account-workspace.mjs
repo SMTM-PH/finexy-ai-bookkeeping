@@ -160,6 +160,7 @@ try {
     await page.mouse.down();
     await page.mouse.move(cardBounds.x + cardBounds.width * 0.2, cardBounds.y + cardBounds.height * 0.6, { steps: 3 });
     await page.mouse.up();
+    assert.equal(await page.evaluate(() => window.getSelection()?.toString()), '', 'dragging the card must not select its title');
     assert.notEqual(await page.locator('.holo-card').evaluate(el => el.style.getPropertyValue('--light-x')), '50%');
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.mouse.move(cardBounds.x + cardBounds.width * 0.9, cardBounds.y + cardBounds.height * 0.2);
@@ -201,8 +202,11 @@ try {
     await page.waitForFunction(() => !document.querySelector('.toast'));
     await page.screenshot({ path: 'artifacts/agent-access/account-holo-front-final.png' });
     await page.getByRole('button', { name: '翻看背面', exact: true }).click();
+    await page.waitForFunction(() => new DOMMatrix(getComputedStyle(document.querySelector('.holo-card-turn')).transform).m11 < -0.999);
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     await page.screenshot({ path: 'artifacts/agent-access/account-holo-back-final.png' });
     await page.getByRole('button', { name: '复位卡片', exact: true }).click();
+    await page.waitForFunction(() => new DOMMatrix(getComputedStyle(document.querySelector('.holo-card-turn')).transform).m11 > 0.999);
     await page.locator('.workspace').evaluate(el => el.scrollTop = 0);
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     await page.screenshot({ path: 'artifacts/agent-access/account-holo-page-final.png' });
@@ -221,6 +225,7 @@ try {
     assert.match(await page.locator('.account-detail .balance').innerText(), /55\.00/);
     assert.doesNotMatch(await page.locator('.account-cards').innerText(), /Synthetic 01|Synthetic credit/);
     assert.equal(await page.locator('.account-summary-row').count(), 1);
+    await page.locator('.account-balance-disclosure > summary').click();
     assert.match(await page.locator('.account-summary-row').innerText(), /净余额\s*¥\s*55\.00/);
     pass('ledger switch resets browsing filters and excludes previous ledger accounts, summaries and details');
     await writeFile('artifacts/agent-access/account-holo-final.json', JSON.stringify({ passed: checks.length, checks }, null, 2));
