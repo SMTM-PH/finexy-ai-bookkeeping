@@ -151,11 +151,35 @@ try {
     await finalAccount.scrollIntoViewIfNeeded();
     const bounds = await finalAccount.boundingBox();
     assert(bounds.y >= 0 && bounds.y + bounds.height <= 1001, 'last account can be scrolled fully into view');
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    const detailBounds = await page.locator('.account-detail').boundingBox();
+    assert(detailBounds.y >= 0 && detailBounds.y < 1000, 'account details remain visible when the last account is reached');
+    assert(await page.locator('.account-detail').evaluate(el => {
+        const bounds = el.getBoundingClientRect();
+        return el.contains(document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + 30));
+    }), 'sticky details remain reachable during scrolling');
+    await page.waitForFunction(() => !document.querySelector('.toast'));
     await page.screenshot({ path: 'artifacts/agent-access/account-presentation-bottom-final.png' });
     await page.locator('.account-cards article').first().scrollIntoViewIfNeeded();
+    await page.locator('.workspace').evaluate(el => el.scrollTop = 0);
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     await page.screenshot({ path: 'artifacts/agent-access/account-presentation-final.png' });
     assert.deepEqual(errors, []);
     pass('full account cards remain reachable and do not overflow at desktop widths and 125% zoom');
+    const ledger = await request('v1/ledger/create.json', owner.token, { type: 1, name: 'Synthetic second ledger' });
+    await request('v1/accounts/add.json', owner.token, { ...accountDraft, ledgerId: ledger.id, name: 'Second ledger account', balance: 5500 });
+    await page.getByRole('button', { name: '刷新', exact: true }).click();
+    await search.fill('Synthetic 01');
+    await page.getByRole('button', { name: '切换当前账本', exact: true }).click();
+    await page.getByRole('option').filter({ hasText: 'Synthetic second ledger' }).click();
+    await page.getByRole('button', { name: '查看Second ledger account账户详情', exact: true }).waitFor();
+    assert.equal(await search.inputValue(), '');
+    assert.equal(await page.locator('.account-cards article').count(), 1);
+    assert.match(await page.locator('.account-detail .balance').innerText(), /55\.00/);
+    assert.doesNotMatch(await page.locator('.account-cards').innerText(), /Synthetic 01|Synthetic credit/);
+    assert.equal(await page.locator('.account-summary-row').count(), 1);
+    assert.match(await page.locator('.account-summary-row').innerText(), /净余额\s*¥\s*55\.00/);
+    pass('ledger switch resets browsing filters and excludes previous ledger accounts, summaries and details');
     await writeFile('artifacts/agent-access/account-presentation-final.json', JSON.stringify({ passed: checks.length, checks }, null, 2));
     console.log(`Account workspace acceptance: ${checks.length} groups passed`);
 } catch (error) {
