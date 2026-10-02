@@ -340,8 +340,11 @@ try {
     await page.getByRole('button', { name: '切换当前账本', exact: true }).click();
     await page.getByRole('option').filter({ hasText: 'Selected import ledger' }).click();
     await page.getByRole('button', { name: '导入账单', exact: true }).click();
-    await page.getByRole('combobox', { name: '文件类型', exact: true }).click();
-    await page.getByRole('option', { name: '支付宝 (App) 交易流水文件', exact: true }).click();
+    await page.getByRole('combobox', { name: '文件类型', exact: true }).locator('xpath=ancestor::div[contains(@class,"v-field")][1]').click();
+    const fileMenu = page.locator('.two-column-select-menu:visible');
+    await fileMenu.getByPlaceholder('查找文件类型').fill('支付宝 (App) 交易流水文件');
+    await fileMenu.locator('.primary-list-container .v-list-item').first().click();
+    await fileMenu.locator('.secondary-list-container').getByText('支付宝 (App) 交易流水文件', { exact: true }).click();
     await page.getByRole('dialog').getByText('账单将导入「Selected import ledger」', { exact: false }).waitFor();
     await page.evaluate(() => {
         const send = XMLHttpRequest.prototype.send;

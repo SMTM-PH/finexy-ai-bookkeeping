@@ -5824,6 +5824,9 @@ tr.compact td {
     background: var(--panel);
 }
 .account-cards article {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
     position: relative;
     min-height: 200px;
     padding: 18px;
@@ -5875,15 +5878,15 @@ tr.compact td {
 }
 .account-cards strong,
 .account-cards em {
-    position: absolute;
-    left: 18px;
+    position: static;
 }
 .account-cards strong {
-    bottom: 44px;
+    margin-top: auto;
+    padding-top: 20px;
     font-size: 20px;
 }
 .account-cards em {
-    bottom: 19px;
+    margin-top: 8px;
     color: rgba(255, 255, 255, 0.72);
     font-size: 9.5px;
     font-style: normal;

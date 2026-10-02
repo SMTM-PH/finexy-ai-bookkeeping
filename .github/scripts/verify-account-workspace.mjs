@@ -15,7 +15,7 @@ const pass = name => { checks.push(name); console.log(`PASS ${name}`); };
 async function request(path, token, body) {
     const response = await fetch(`${base}/api/${path}`, { method: body === undefined ? 'GET' : 'POST', headers: { 'Content-Type': 'application/json', 'X-Timezone-Offset': '480', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     const json = await response.json();
-    assert.equal(response.status, 200, `HTTP ${path}`);
+    assert.equal(response.status, 200, `HTTP ${path} (error ${json.errorCode || 'none'})`);
     assert(json.success, `success ${path}`);
     return json.result;
 }
@@ -54,6 +54,7 @@ try {
     assert.match(await page.locator('.balance-meta').innerText(), /1 个可见账户 · USD/);
     await page.getByRole('link', { name: '查看全部 15 个账户', exact: true }).click();
     await page.locator('.account-cards article').nth(14).waitFor();
+    assert(await page.getByRole('button', { name: '查看Renamed selected account账户详情', exact: true }).evaluate(el => el.querySelector('small').getBoundingClientRect().bottom <= el.querySelector('strong').getBoundingClientRect().top), 'wrapped account metadata must not overlap money');
     assert.equal(await page.locator('.account-cards article').count(), 15);
     assert.match(await page.locator('.account-detail').innerText(), /Synthetic 01/);
     assert.doesNotMatch(await page.locator('.account-detail').innerText(), /还没有账户/);
@@ -62,10 +63,10 @@ try {
     await page.keyboard.press('Space');
     assert.match(await page.locator('.account-detail').innerText(), /Synthetic 14/);
     assert.match(await page.locator('.account-detail .balance').innerText(), /13\.77/);
-    await request('v1/accounts/modify.json', owner.token, { ...accountDraft, id: selected.id, name: 'Renamed selected account' });
+    await request('v1/accounts/modify.json', owner.token, { id: selected.id, name: 'Renamed selected account', category: 2, icon: '1', color: '000000' });
     await request('v1/transactions/add.json', owner.token, { ...transactionDraft, sourceAccountId: selected.id, sourceAmount: 7, comment: 'Refreshed account expense' });
     await page.getByRole('button', { name: '刷新', exact: true }).click();
-    await page.waitForFunction(() => document.querySelector('.account-detail h2')?.textContent === 'Renamed selected account');
+    await page.waitForFunction(() => document.querySelector('.account-detail > h2')?.textContent?.trim() === 'Renamed selected account');
     assert.match(await page.locator('.account-detail .balance').innerText(), /13\.70/);
     await page.getByRole('button', { name: '编辑账户', exact: true }).click();
     assert.equal(await page.getByLabel('账户名称', { exact: true }).inputValue(), 'Renamed selected account');
@@ -85,9 +86,12 @@ try {
     await page.getByRole('button', { name: '导入账单', exact: true }).click();
     const dialog = page.getByRole('dialog');
     const type = dialog.getByRole('combobox', { name: '文件类型', exact: true });
-    for (const source of ['支付宝 (App) 交易流水文件', '微信支付账单流水文件']) {
-        await type.click();
-        await page.getByRole('option', { name: source, exact: true }).click();
+    for (const source of ['支付宝 (App) 交易流水文件', '微信支付账单文件']) {
+        await type.locator('xpath=ancestor::div[contains(@class,"v-field")][1]').click();
+        const menu = page.locator('.two-column-select-menu:visible');
+        await menu.getByPlaceholder('查找文件类型').fill(source);
+        await menu.locator('.primary-list-container .v-list-item').first().click();
+        await menu.locator('.secondary-list-container').getByText(source, { exact: true }).click();
         assert((await dialog.innerText()).includes(source));
     }
     await dialog.getByRole('button', { name: /取消/ }).click();
@@ -102,7 +106,14 @@ try {
     await page.evaluate(() => document.documentElement.style.zoom = '1');
     await page.setViewportSize({ width: 1440, height: 1000 });
     await mkdir('artifacts/agent-access', { recursive: true });
-    await page.screenshot({ path: 'artifacts/agent-access/account-workspace-final.png', fullPage: true });
+    await page.waitForFunction(() => !document.querySelector('.v-overlay__scrim'));
+    const finalAccount = page.locator('.account-cards article').last();
+    await finalAccount.scrollIntoViewIfNeeded();
+    const bounds = await finalAccount.boundingBox();
+    assert(bounds.y >= 0 && bounds.y + bounds.height <= 1001, 'last account can be scrolled fully into view');
+    await page.screenshot({ path: 'artifacts/agent-access/account-workspace-bottom-final.png' });
+    await page.locator('.account-cards article').first().scrollIntoViewIfNeeded();
+    await page.screenshot({ path: 'artifacts/agent-access/account-workspace-final.png' });
     assert.deepEqual(errors, []);
     pass('full account cards remain reachable and do not overflow at desktop widths and 125% zoom');
     await writeFile('artifacts/agent-access/account-workspace-final.json', JSON.stringify({ passed: checks.length, checks }, null, 2));
