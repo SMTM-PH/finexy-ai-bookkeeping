@@ -262,6 +262,9 @@ try {
     await page.getByRole('button', { name: '登录', exact: true }).click();
     await page.waitForURL(/#\/$/);
     await page.goto(`${base}/desktop#/user/settings?tab=securitySetting`, { waitUntil: 'networkidle' });
+    assert.equal(await page.getByRole('heading', { name: 'Agent 接入', exact: true }).count(), 0);
+    await page.getByRole('button').filter({ hasText: 'AI 设置' }).click();
+    await page.waitForURL(/tab=aiSetting/);
     await page.getByRole('heading', { name: 'Agent 接入', exact: true }).waitFor();
     const mcpSwitch = page.getByRole('switch', { name: '此账号的 MCP 接入' });
     await page.waitForFunction(() => !document.querySelector('[role="switch"]').disabled);
@@ -375,7 +378,7 @@ try {
     pass('grouped account/category mappings apply without posting; preserve existing mappings and require overwrite opt-in');
     await page.screenshot({ path: 'artifacts/agent-access/selected-ledger-import-final.png' });
     await page.getByRole('dialog').getByRole('button', { name: /取消/ }).click();
-    await page.goto(`${base}/desktop#/user/settings?tab=securitySetting`, { waitUntil: 'networkidle' });
+    await page.goto(`${base}/desktop#/user/settings?tab=aiSetting`, { waitUntil: 'networkidle' });
     await page.getByRole('heading', { name: 'Agent 接入', exact: true }).waitFor();
     pass('Web import entry and preview show the currently selected ledger');
 
@@ -402,7 +405,7 @@ try {
         await mobile.getByText('登录', { exact: true }).click();
     }
     await mobile.locator('a[href="/settings"]').click();
-    await mobile.locator('a[href="/user/agent-access"]').click();
+    await mobile.locator('a[href="/user/ai-settings"]').click();
     await mobile.getByRole('heading', { name: 'Agent 接入', exact: true }).waitFor();
     const mobileSwitch = mobile.getByRole('switch', { name: '此账号的 MCP 接入' });
     await mobileSwitch.click();

@@ -311,6 +311,11 @@ const routes: Router.RouteParameters[] = [
         beforeEnter: [checkLogin]
     },
     {
+        path: '/user/ai-settings',
+        async: asyncResolve(AgentAccessPage),
+        beforeEnter: [checkLogin]
+    },
+    {
         path: '/user/sessions',
         async: asyncResolve(SessionListPage),
         beforeEnter: [checkLogin]

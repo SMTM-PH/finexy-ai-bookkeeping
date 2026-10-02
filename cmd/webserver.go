@@ -545,6 +545,8 @@ func startWebServer(c *core.CliContext) error {
 
 			// Large Language Models
 			apiV1Route.GET("/llm/configuration/get.json", bindApi(api.AIConfigurations.GetHandler, config))
+			apiV1Route.GET("/llm/usage/get.json", bindApi(api.AIConfigurations.UsageGetHandler, config))
+			apiV1Route.GET("/llm/balance/get.json", bindApi(api.AIConfigurations.BalanceGetHandler, config))
 			apiV1Route.POST("/llm/configuration/update.json", bindApi(api.AIConfigurations.UpdateHandler, config))
 			apiV1Route.POST("/llm/transactions/recognize_text.json", bindApi(api.LargeLanguageModels.RecognizeTransactionTextHandler, config))
 

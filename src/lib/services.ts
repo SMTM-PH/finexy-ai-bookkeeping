@@ -218,6 +218,7 @@ import type {
     AIConfigurationResponse,
     AIConfigurationUpdateRequest
 } from '@/models/ai_configuration.ts';
+import type { AIUsageResponse, AIBalanceResponse } from '@/models/ai_usage.ts';
 
 import {
     getCurrentToken,
@@ -1073,6 +1074,12 @@ export default {
     },
     getAIConfiguration: (): ApiResponsePromise<AIConfigurationResponse> => {
         return axios.get<ApiResponse<AIConfigurationResponse>>('v1/llm/configuration/get.json');
+    },
+    getAIUsage: (): ApiResponsePromise<AIUsageResponse> => {
+        return axios.get<ApiResponse<AIUsageResponse>>('v1/llm/usage/get.json');
+    },
+    getAIBalance: (): ApiResponsePromise<AIBalanceResponse> => {
+        return axios.get<ApiResponse<AIBalanceResponse>>('v1/llm/balance/get.json');
     },
     updateAIConfiguration: (req: AIConfigurationUpdateRequest): ApiResponsePromise<AIConfigurationResponse> => {
         return axios.post<ApiResponse<AIConfigurationResponse>>('v1/llm/configuration/update.json', req);

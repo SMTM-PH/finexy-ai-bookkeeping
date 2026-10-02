@@ -716,7 +716,7 @@
                                     active: selectedSetting === item.title,
                                 }"
                                 :aria-current="selectedSetting === item.title ? 'page' : undefined"
-                                @click="selectedSetting = item.title"
+                                @click="selectSetting(item.title)"
                             >
                                 <i :style="{ background: item.color }">{{
                                     item.icon
@@ -825,7 +825,8 @@
                                     >
                                         退出登录
                                     </button>
-                                </div><AgentAccessPanel /></template
+                                </div></template
+                            ><template v-else-if="selectedSetting === 'AI 设置'"><AISettingsPanel ref="aiSettingsPanel" /></template
                             ><template
                                 v-else-if="selectedSetting === '基础设置'"
                                 ><div class="form-grid">
@@ -946,6 +947,7 @@
                                         '数据管理',
                                         '本地服务',
                                         'AI 配置',
+                                        'AI 设置',
                                     ].includes(selectedSetting)
                                 "
                                 class="primary save"
@@ -2355,7 +2357,7 @@ import AccountEditDialog from "@/views/desktop/accounts/list/dialogs/EditDialog.
 import CategoryEditDialog from "@/views/desktop/categories/list/dialogs/EditDialog.vue";
 import ConfirmDialog from "@/components/desktop/ConfirmDialog.vue";
 import ImportDialog from "@/views/desktop/transactions/import/ImportDialog.vue";
-import AgentAccessPanel from "@/components/AgentAccessPanel.vue";
+import AISettingsPanel from "@/components/AISettingsPanel.vue";
 import ReleaseUpdateNotice from "@/components/ReleaseUpdateNotice.vue";
 import GlobalLedgerSwitcher from "@/components/desktop/GlobalLedgerSwitcher.vue";
 import { useAccountsStore } from "@/stores/account.ts";
@@ -3238,6 +3240,7 @@ const accountMenu = [
     },
     { title: "通知设置", meta: "提醒和消息渠道", icon: "通", color: "#F05537" },
     { title: "安全设置", meta: "密码与应用锁", icon: "安", color: "#149C63" },
+    { title: "AI 设置", meta: "模型用量与 Agent 接入", icon: "AI", color: "#12141A" },
 ];
 const appMenu = [
     {
@@ -3279,8 +3282,21 @@ const currentPage = ref(1);
 const pageSize = 10;
 const allSelected = ref(false);
 const reportPeriod = ref("近 6 个月");
-const selectedSetting = ref(route.query["tab"] === "securitySetting" ? "安全设置" : "个人资料");
-watch(() => route.query["tab"], tab => { if (tab === "securitySetting") selectedSetting.value = "安全设置"; });
+function settingFromRoute(): string {
+    if (pageKey.value === "account") {
+        return ({ securitySetting: "安全设置", aiSetting: "AI 设置", displaySetting: "显示偏好", notificationSetting: "通知设置" } as Record<string,string>)[String(route.query["tab"])] || "个人资料";
+    }
+    return route.query["tab"] === "aiSetting" ? "AI 配置" : "基础设置";
+}
+const selectedSetting = ref(settingFromRoute());
+function selectSetting(title: string): void {
+    selectedSetting.value = title;
+    if (pageKey.value === "account") {
+        const tab = ({ "安全设置": "securitySetting", "AI 设置": "aiSetting", "显示偏好": "displaySetting", "通知设置": "notificationSetting" } as Record<string,string>)[title] || "basicSetting";
+        void router.replace({ query: { ...route.query, tab } });
+    }
+}
+watch(() => route.query["tab"], () => { selectedSetting.value = settingFromRoute(); });
 const profileName = ref(userStore.currentUserNickname || "当前用户");
 const profileEmail = ref(userStore.currentUserBasicInfo?.email || "");
 const currency = ref(userStore.currentUserDefaultCurrency || "CNY");
@@ -3417,7 +3433,11 @@ const currentUserInitial = computed(
 );
 const clientDisplayVersion = getClientDisplayVersion();
 const clientBuildTime = getClientBuildTime();
+const aiSettingsPanel = ref<InstanceType<typeof AISettingsPanel>>();
 const primaryActionLabel = computed(() =>
+    selectedSetting.value === "AI 设置"
+        ? "刷新用量"
+        :
     selectedSetting.value === "安全设置"
         ? "切换账号"
         : selectedSetting.value === "数据管理"
@@ -3429,6 +3449,9 @@ const primaryActionLabel = computed(() =>
               : config.value.action,
 );
 const primaryActionIcon = computed(() =>
+    selectedSetting.value === "AI 设置"
+        ? mdiRefresh
+        :
     selectedSetting.value === "安全设置"
         ? mdiSwapHorizontal
         : selectedSetting.value === "数据管理"
@@ -3622,6 +3645,7 @@ const expenseBreakdown = computed(() => {
 });
 const reportExpenseTotal = computed(() => currentLedgerMonthTotals.value.expense);
 const settingsDescription = computed(() => {
+    if (selectedSetting.value === "AI 设置") return "查看模型用量，管理当前账号的 Agent 授权与 MCP 接入。";
     if (pageKey.value === "account") return "更改会保存到当前个人账本。";
     if (selectedSetting.value === "AI 配置")
         return "在页面中维护服务端 OpenAI 兼容接口，保存后立即生效且重启后保留。";
@@ -5122,6 +5146,10 @@ function postReviewItem() {
         });
 }
 async function saveSettings() {
+    if (selectedSetting.value === "AI 设置") {
+        await aiSettingsPanel.value?.refresh();
+        return;
+    }
     if (saving.value) return;
     if (selectedSetting.value === "个人资料" && !profileName.value) {
         nameTouched.value = true;
@@ -5213,14 +5241,13 @@ watch(selectedSetting, (value) => {
     if (pageKey.value === "settings" && value === "AI 配置") {
         void loadAIConfiguration();
     }
-});
+}, { immediate: true });
 watch(pageKey, () => {
     detail.value = null;
     assetDetail.value = null;
     query.value = "";
     currentPage.value = 1;
-    selectedSetting.value =
-        pageKey.value === "account" ? "个人资料" : "基础设置";
+    selectedSetting.value = settingFromRoute();
     void loadPageData(true, false);
 });
 watch(() => route.query["action"], openQuickTransactionFromRoute);

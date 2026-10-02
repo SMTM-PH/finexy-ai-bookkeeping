@@ -6,7 +6,7 @@
         </header>
         <div class="agent-mcp-control">
             <div><b>此账号的 MCP 接入</b><p id="agent-mcp-help">关闭后，已有 MCP 令牌暂停访问，不能生成新 MCP 令牌。重新开启后，未过期且未撤销的令牌恢复使用。</p><small>API 令牌与已有账目不受影响。{{ !accessLoaded ? '正在读取状态…' : !mcpAvailable ? '管理员未允许 MCP 接入。' : mcpEnabled ? '当前已开启' : '当前已关闭' }}</small></div>
-            <button type="button" role="switch" :aria-checked="mcpEnabled" aria-label="此账号的 MCP 接入" aria-describedby="agent-mcp-help" :disabled="busy || accessBusy || !accessLoaded || !mcpAvailable" @click="toggleMCP">{{ accessBusy ? '处理中…' : !accessLoaded ? '状态未知' : mcpEnabled ? '已开启 · 关闭' : '已关闭 · 开启' }}</button>
+            <button type="button" role="switch" :aria-checked="mcpEnabled" :aria-busy="accessBusy" aria-label="此账号的 MCP 接入" aria-describedby="agent-mcp-help" :disabled="busy || accessBusy || !accessLoaded || !mcpAvailable" @click="toggleMCP">{{ !accessLoaded ? '状态未知' : mcpEnabled ? '已开启' : '已关闭' }}</button>
         </div>
         <p v-if="accessError" class="agent-error" role="alert">{{ accessError }} <button type="button" :disabled="accessBusy" @click="loadAccess">重试读取状态</button></p>
         <p v-if="!apiEnabled || !serverMCPEnabled" class="agent-note">
@@ -206,7 +206,10 @@ onUnmounted(clearSecret);
 </script>
 
 <style scoped>
-.agent-access { color: var(--ink, #12141a); background: var(--surface, #fff); margin-top: 24px; }
+.agent-access { --agent-ink: var(--card-ink, #12141a); --agent-copy: var(--card-copy, #475467); color: var(--agent-ink); background: var(--surface, #fff); margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--line, #dfe3e9); font-family: var(--ledger-font-body, "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif); font-synthesis: none; }
+.agent-access :is(h3,h4,b,legend,label,input,select,textarea,summary,button) { font-family: inherit; color: var(--agent-ink); -webkit-text-fill-color: currentColor; opacity: 1; font-size: 14px; line-height: 1.6; }
+.agent-access :is(h3,h4,b,legend,summary) { font-weight: 700; }
+.agent-access label span small { color: var(--agent-copy); font-size: 13px; font-weight: 400; }
 .agent-head { display: flex; justify-content: space-between; align-items: start; gap: 16px; }
 .agent-mcp-control { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin: 16px 0 24px; padding: 20px; border: 1px solid var(--line, #dfe3e9); border-radius: 14px; }
 .agent-mcp-control p { margin-bottom: 8px; }
@@ -216,7 +219,7 @@ onUnmounted(clearSecret);
 .agent-access h3 { font-size: 20px; margin: 0 0 8px; }
 .agent-access h4 { font-size: 16px; margin: 0 0 12px; }
 .agent-access p { font-size: 14px; line-height: 1.6; margin: 8px 0 16px; }
-.agent-access button { min-height: 44px; padding: 8px 16px; border: 1px solid var(--line, #dfe3e9); border-radius: 12px; background: var(--surface, #fff); color: inherit; cursor: pointer; }
+.agent-access button { min-height: 44px; width: auto; max-width: 100%; padding: 8px 16px; border: 1px solid var(--line, #dfe3e9); border-radius: 12px; background: var(--surface, #fff); color: inherit; cursor: pointer; }
 .agent-access button:disabled { opacity: .5; cursor: default; }
 .agent-access :is(button, input, select, textarea, summary):focus-visible { outline: 2px solid var(--orange, #f45b40); outline-offset: 3px; }
 .agent-fields { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
@@ -226,7 +229,7 @@ onUnmounted(clearSecret);
 .agent-scopes legend { font-size: 14px; font-weight: 600; }
 .agent-access .agent-permission { display: flex; align-items: center; min-height: 48px; gap: 12px; }
 .agent-permission input[type=checkbox] { flex: 0 0 18px; width: 18px; height: 18px; min-height: 18px; margin: 0; accent-color: var(--ink, #12141a); }
-.agent-access small { display: block; color: var(--muted, #475467); font-size: 12px; line-height: 1.6; }
+.agent-access small { display: block; color: var(--agent-copy); -webkit-text-fill-color: currentColor; font-size: 13px; line-height: 1.6; }
 .agent-password { max-width: 400px; margin-bottom: 16px; }
 .agent-ledger { max-width: 400px; margin: 16px 0; }
 .agent-access .agent-primary { background: var(--ink, #12141a); color: #fff; border-color: var(--ink, #12141a); }
