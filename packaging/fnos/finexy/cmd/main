@@ -1,0 +1,135 @@
+#!/bin/bash
+set -u
+
+APP_DIR="$TRIM_APPDEST/finexy"
+CONF_DIR="$TRIM_PKGETC"
+CONF_FILE="$CONF_DIR/finexy.ini"
+DATA_DIR="$TRIM_PKGVAR"
+LOG_DIR="$DATA_DIR/log"
+LOG_FILE="$LOG_DIR/app.log"
+PID_FILE="$DATA_DIR/app.pid"
+TEMP_LOG="${TRIM_TEMP_LOGFILE:-/dev/null}"
+TEMPLATE="$APP_DIR/conf/finexy.ini.template"
+
+export TZ="${TZ:-Asia/Shanghai}"
+
+log_msg() {
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"
+}
+
+fail() {
+  echo "Finexy start failed: $1" > "$TEMP_LOG"
+  return 1
+}
+
+is_running() {
+  [ -f "$PID_FILE" ] || return 1
+  pid="$(tr -d '[:space:]' < "$PID_FILE")"
+  [ -n "$pid" ] || return 1
+  kill -0 "$pid" 2>/dev/null
+}
+
+# fnOS 在 install_init 阶段尚未创建 @appdata/@appconf，且脚本以 package 用户运行，
+# 那里创建目录一定失败。运行期目录与首次配置因此统一在 start 时创建。
+ensure_runtime() {
+  mkdir -p "$DATA_DIR" "$DATA_DIR/data" "$DATA_DIR/log" "$DATA_DIR/storage" 2>/dev/null
+  if [ ! -d "$LOG_DIR" ]; then
+    fail "无法创建数据目录 $DATA_DIR（当前用户 $(id -un 2>/dev/null || echo unknown)）"
+    return 1
+  fi
+
+  if [ ! -f "$CONF_FILE" ]; then
+    mkdir -p "$CONF_DIR" 2>/dev/null
+    if [ ! -d "$CONF_DIR" ]; then
+      fail "无法创建配置目录 $CONF_DIR"
+      return 1
+    fi
+    if [ ! -f "$TEMPLATE" ]; then
+      fail "缺少配置模板 $TEMPLATE"
+      return 1
+    fi
+
+    secret_key="$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')"
+    sed \
+      -e "s|^db_path = .*|db_path = $DATA_DIR/data/ezbookkeeping.db|" \
+      -e "s|^log_path = .*|log_path = $DATA_DIR/log/ezbookkeeping.log|" \
+      -e "s|^log_file_rotate = false|log_file_rotate = true|" \
+      -e "s|^local_filesystem_path = .*|local_filesystem_path = $DATA_DIR/storage/|" \
+      -e "s|^secret_key =.*|secret_key = $secret_key|" \
+      "$TEMPLATE" > "$CONF_FILE"
+    if [ ! -s "$CONF_FILE" ]; then
+      fail "生成配置文件失败 $CONF_FILE"
+      return 1
+    fi
+    chmod 600 "$CONF_FILE" 2>/dev/null || true
+  fi
+
+  return 0
+}
+
+start_app() {
+  if is_running; then
+    return 0
+  fi
+
+  ensure_runtime || return 1
+
+  if [ ! -x "$APP_DIR/ezbookkeeping" ]; then
+    fail "找不到可执行文件 $APP_DIR/ezbookkeeping"
+    return 1
+  fi
+
+  log_msg "启动 Finexy ${TRIM_APPVER:-1.9.3}，端口 ${TRIM_SERVICE_PORT:-8080}"
+
+  cd "$APP_DIR" || return 1
+  ./ezbookkeeping server run --conf-path="$CONF_FILE" >> "$LOG_FILE" 2>&1 &
+  echo "$!" > "$PID_FILE"
+  return 0
+}
+
+stop_app() {
+  is_running || {
+    rm -f "$PID_FILE"
+    return 0
+  }
+
+  pid="$(tr -d '[:space:]' < "$PID_FILE")"
+  log_msg "停止 Finexy（PID $pid）"
+  kill -TERM "$pid" 2>/dev/null || true
+
+  i=0
+  while [ "$i" -lt 20 ]; do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.5
+    i=$((i + 1))
+  done
+
+  if kill -0 "$pid" 2>/dev/null; then
+    log_msg "进程未在 10 秒内退出，强制结束（PID $pid）"
+    kill -KILL "$pid" 2>/dev/null || true
+  fi
+
+  rm -f "$PID_FILE"
+  return 0
+}
+
+case "$1" in
+  start)
+    start_app
+    exit $?
+    ;;
+  stop)
+    stop_app
+    exit $?
+    ;;
+  status)
+    if is_running; then
+      exit 0
+    fi
+    exit 3
+    ;;
+  *)
+    echo "未知操作：$1" > "$TEMP_LOG"
+    exit 1
+    ;;
+esac

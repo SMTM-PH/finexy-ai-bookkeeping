@@ -1,0 +1,11 @@
+#!/bin/bash
+set -u
+
+# install_init 在应用文件落地、@appdata/@appconf 等卷目录创建之前执行，
+# 且以 package 用户身份运行，无法在 root 拥有的 /vol1/@appdata 下创建目录，
+# 会得到 "mkdir: cannot create directory '/vol1/@appdata/finexy': Permission denied"，
+# 应用中心报 10237（APP_INSTALL_FAILED_INSTALL_INIT_EXCEPTION）并回滚安装。
+# 因此本脚本只做无副作用的检查，不写任何文件。
+# 运行期目录与首次配置生成统一由 cmd/main start 负责。
+
+exit 0
