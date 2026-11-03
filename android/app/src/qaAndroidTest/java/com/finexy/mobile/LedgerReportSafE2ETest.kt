@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Rect
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -310,30 +311,56 @@ class LedgerReportSafE2ETest {
     }
     private fun clickSystem(node: AccessibilityNodeInfo) {
         var target = node
-        while (!target.isClickable) { val parent = target.parent ?: break; target = parent }
-        check(target.isVisibleToUser && target.isEnabled && target.isClickable && target.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+        var clicked = false
+        while (true) {
+            if (target.isVisibleToUser && target.isEnabled && target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                clicked = true
+                break
+            }
+            target = target.parent ?: break
+        }
+        if (!clicked) {
+            // API 35 DocumentsUI 把根目录行交给 ListView 处理，行节点本身标记 clickable=false；
+            // 此处用真实坐标点击，不使用语义 ACTION_CLICK，也不改变任何产品代码。
+            val bounds = Rect()
+            node.getBoundsInScreen(bounds)
+            check(!bounds.isEmpty)
+            val x = bounds.centerX()
+            val y = bounds.centerY()
+            automation.executeShellCommand("input tap $x $y").close()
+            SystemClock.sleep(500)
+        }
     }
     private fun selectRoot(labels: Set<String>) {
         check(isDocumentsUiForeground())
-        fun root(): AccessibilityNodeInfo? {
-            val matches = nodes().filter { it.isVisibleToUser && it.text?.toString() in labels }
-            return matches.firstOrNull { node -> generateSequence(node) { it.parent }.take(10).any {
-                it.viewIdResourceName?.substringAfterLast(":id/") in setOf("roots_list", "roots_drawer", "roots_container")
-            } } ?: matches.lastOrNull()
+        fun inDrawer(node: AccessibilityNodeInfo): Boolean = generateSequence(node) { it.parent }.take(10).any {
+            it.viewIdResourceName?.substringAfterLast(":id/") in
+                setOf("roots_list", "roots_drawer", "roots_container", "drawer_roots")
         }
-        // Open locations even if the current breadcrumb happens to say "Downloads".
-        // A matching toolbar title alone is not the selectable root row.
-        val opener = nodes().firstOrNull { it.isVisibleToUser &&
-            it.contentDescription?.toString() in setOf("Show roots", "显示根目录", "显示位置", "Open navigation drawer") }
-        if (opener != null) clickSystem(opener)
-        val deadline = SystemClock.elapsedRealtime() + 30_000
-        var selected = root()
-        var scrolls = 0
-        while (selected == null && SystemClock.elapsedRealtime() < deadline) {
-            if (scrolls < 2) { nodes().firstOrNull { it.isVisibleToUser && it.isScrollable }?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD); scrolls++ }
-            SystemClock.sleep(100); selected = root()
+        fun drawerRow(): AccessibilityNodeInfo? =
+            nodes().firstOrNull { it.isVisibleToUser && it.text?.toString() in labels && inDrawer(it) }
+        // 选择成功的判据：目标标签出现在抽屉之外的工具栏/面包屑，而不是仍停留在抽屉行。
+        fun switched(): Boolean = nodes().any { it.isVisibleToUser && it.text?.toString() in labels && !inDrawer(it) }
+        repeat(3) {
+            if (switched()) return
+            val opener = nodes().firstOrNull { it.isVisibleToUser &&
+                it.contentDescription?.toString() in setOf("Show roots", "显示根目录", "显示位置", "Open navigation drawer") }
+            if (opener != null) clickSystem(opener)
+            val deadline = SystemClock.elapsedRealtime() + 10_000
+            var row = drawerRow()
+            var scrolls = 0
+            while (row == null && SystemClock.elapsedRealtime() < deadline) {
+                if (scrolls < 2) nodes().firstOrNull { it.isVisibleToUser && it.isScrollable }
+                    ?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+                scrolls++
+                SystemClock.sleep(100)
+                row = drawerRow()
+            }
+            if (row != null) clickSystem(row)
+            val settle = SystemClock.elapsedRealtime() + 5_000
+            while (!switched() && SystemClock.elapsedRealtime() < settle) SystemClock.sleep(100)
         }
-        clickSystem(requireNotNull(selected) { "DocumentsUI did not expose the selected synthetic root" })
+        check(switched()) { "DocumentsUI did not switch to the requested root: $labels" }
         rule.waitUntil(10_000) { nodes().any { it.isVisibleToUser && it.isEditable } }
     }
     private fun setDocumentName(name: String) {

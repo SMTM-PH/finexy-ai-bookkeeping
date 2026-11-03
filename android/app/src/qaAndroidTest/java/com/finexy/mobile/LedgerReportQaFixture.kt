@@ -213,7 +213,9 @@ internal class LedgerReportQaFixture(
         clickText("返回")
         waitFor(if (entry == LedgerReportQaEntry.OVERVIEW) "查看当前账本报告" else "查看当前账本报告与导出")
         assertSelectedLedger(targets().single { it.id == ledgerId })
-        rule.onNodeWithText(if (entry == LedgerReportQaEntry.OVERVIEW) "总览" else "账户").assertIsSelected()
+        // 报告页同时展示标题文本与可选择的 Tab；断言必须落在可交互的 Tab 上。
+        rule.onNode(hasText(if (entry == LedgerReportQaEntry.OVERVIEW) "总览" else "账户", substring = false) and
+            hasClickAction()).assertIsSelected()
         rule.onNodeWithText("当前账本报告", substring = false).assertDoesNotExist()
         openedLedgerId = null
     }
@@ -264,14 +266,14 @@ internal class LedgerReportQaFixture(
     }
 
     private fun selectLedger(target: ReportLedgerTarget) {
-        val node = if (target.id == 0L) rule.onNodeWithText("个人账本", substring = false)
+        val node = if (target.id == 0L) rule.onNode(hasText("个人账本", substring = false) and hasClickAction())
             else rule.onNodeWithContentDescription("切换到账本：${target.name}")
         node.performScrollTo().assertIsDisplayed().assertIsEnabled().performClick()
         assertSelectedLedger(target)
     }
 
     private fun assertSelectedLedger(target: ReportLedgerTarget) {
-        if (target.id == 0L) rule.onNodeWithText("个人账本", substring = false).assertIsSelected()
+        if (target.id == 0L) rule.onNode(hasText("个人账本", substring = false) and hasClickAction()).assertIsSelected()
         else rule.onNodeWithContentDescription("切换到账本：${target.name}").assertIsSelected()
     }
 
