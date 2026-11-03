@@ -674,6 +674,11 @@ private fun LedgerContent(store: SecureStore, repository: TransactionRepository,
                 onAll = { pendingModel.leave(); selectedTab = 1 }, onWallet = { pendingModel.leave(); selectedTab = 3 }, onSettings = { pendingModel.leave(); selectedTab = 4 },
                 pendingContent = { LedgerBootstrapNotice(bootstrapState, bootstrapModel::retry); LedgerPendingHomePanel(pendingState, pendingOpening,
                     onNotifications = { section -> pendingInitialSection = section; pendingNotifications = true }, onRefresh = pendingModel::refresh, preparing = pendingPreparing) },
+                monthlyOverviewContent = { showAmounts ->
+                    MonthlyOverviewHome(store, selectedLedgerId, showAmounts, ledgerCanWrite,
+                        onReport = { onReport(showAmounts) },
+                        onBudget = { ledgerId, _ -> onMonthlyBudget(ledgerId, showAmounts) })
+                },
                 onOpenNotifications = { pendingInitialSection = null; pendingNotifications = true }) { incoming -> if (ledgerCanWrite) {
                     pendingModel.leave(); abandonAIReviewEditing(); editingActivity = null; entrySaveError = null; entryAccountOverride = null; entryIncome = incoming; selectedTab = 2
                 } }

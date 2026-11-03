@@ -31,6 +31,14 @@
             <f7-link href="/settings/budget" class="mobile-ledger-action" aria-label="查看当前账本预算"><f7-icon f7="chart_pie"></f7-icon><span>月度预算</span></f7-link>
         </f7-block>
 
+        <div class="mobile-monthly-overview">
+            <MonthlyOverviewPanel :scope="monthlyOverviewScope" :ledger-name="ledgersStore.selectedLedger.name"
+                                  :username="userStore.currentUserBasicInfo?.username ?? ''" :show-amounts="showAmountInHomePage"
+                                  :can-manage-budget="canWriteLedger" :active="pendingPageActive"
+                                  @month="monthlyOverviewMonth = $event" @timezone="monthlyOverviewTimezone = $event"
+                                  @report="openMonthlyReport" @budget="openMonthlyBudget" />
+        </div>
+
         <template v-if="isDefaultLedger">
         <section v-if="!loading && !loadError && !mobileWalletAccounts.length" class="mobile-onboarding" aria-labelledby="mobile-onboarding-title">
             <div class="mobile-onboarding-icon"><f7-icon f7="wallet_pass"></f7-icon></div>
@@ -297,6 +305,8 @@
 import ReleaseUpdateNotice from '@/components/ReleaseUpdateNotice.vue';
 import LedgerContextNotice from '@/components/mobile/LedgerContextNotice.vue';
 import LedgerPendingPanel from '@/components/common/LedgerPendingPanel.vue';
+import MonthlyOverviewPanel from '@/components/common/MonthlyOverviewPanel.vue';
+import { monthInTimezone, type MonthlyOverviewScope } from '@/lib/monthly_overview.ts';
 import { mobileLedgerPendingLocation } from '@/lib/ledger_pending_navigation.ts';
 import type { LedgerPendingTarget } from '@/models/ledger_pending.ts';
 
@@ -324,7 +334,7 @@ import type { Account } from '@/models/account.ts';
 import { TransactionTemplate } from '@/models/transaction_template.ts';
 
 import { isFunction } from '@/lib/common.ts';
-import { isUserLogined, isUserUnlocked } from '@/lib/userstate.ts';
+import { getTransactionStateIdentity, isUserLogined, isUserUnlocked } from '@/lib/userstate.ts';
 import { getShareCacheImageBlob } from '@/lib/cache.ts';
 import {
     isTransactionFromAITextRecognitionEnabled,
@@ -354,6 +364,19 @@ const overviewStore = useOverviewStore();
 const ledgersStore = useLedgersStore();
 const userStore = useUserStore();
 const pendingPageActive = ref(true);
+const monthlyOverviewTimezone = ref<string>(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+const monthlyOverviewMonth = ref<string>(monthInTimezone(new Date(), monthlyOverviewTimezone.value));
+const monthlyOverviewScope = computed<MonthlyOverviewScope>(() => ({
+    identity: getTransactionStateIdentity() ?? '',
+    sessionEpoch: 0,
+    ledgerId: ledgersStore.selectedLedgerId,
+    month: monthlyOverviewMonth.value,
+    timezone: monthlyOverviewTimezone.value,
+    hidden: 'include',
+    mode: navigator.onLine === false ? 'offline' : 'online'
+}));
+function openMonthlyReport(): void { props.f7router.navigate('/statistic/transaction'); }
+function openMonthlyBudget(): void { props.f7router.navigate('/settings/budget'); }
 function openPendingTarget(target: LedgerPendingTarget): void { props.f7router.navigate(mobileLedgerPendingLocation(target)); }
 const isDefaultLedger = computed(() => ledgersStore.selectedLedgerId === DefaultLedgerId);
 const ledgerRole = ref<number | null>(null);
@@ -511,6 +534,7 @@ init();
 <style>
 .mobile-pending-entry { margin: 16px; }
 .mobile-ledger-actions { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; margin: 12px 16px 4px; padding: 0; }
+.mobile-monthly-overview { margin: 12px 16px; }
 .mobile-ledger-action { min-height: 48px; justify-content: center; gap: 8px; border: 1px solid var(--f7-list-border-color); border-radius: 14px; background: var(--f7-card-bg-color); font-weight: 700; }
 .mobile-onboarding {
     display: grid;

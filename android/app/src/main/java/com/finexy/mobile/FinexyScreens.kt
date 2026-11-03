@@ -201,7 +201,7 @@ private fun ResponsivePair(first: @Composable (Modifier) -> Unit, second: @Compo
 }
 
 @Composable
-internal fun Dashboard(padding: PaddingValues, currencyAmounts: List<CurrencyAmounts>, activities: List<Activity>, pendingReviews: Int = 0, ledgerName: String = "个人账本", savingsGoals: List<SavingsGoalEntity> = emptyList(), showAmountsByDefault: Boolean = true, defaultCurrency: String = "CNY", appUpdate: AppUpdateInfo? = null, appUpdateMessage: String? = null, onOpenUpdate: (AppUpdateInfo) -> Unit = {}, onDismissUpdate: (AppUpdateInfo) -> Unit = {}, onOpenReviews: () -> Unit = {}, onOpenSavingsGoals: () -> Unit = {}, onOpenReport: (() -> Unit)? = null, onAll: () -> Unit, onWallet: () -> Unit, onSettings: () -> Unit, pendingContent: (@Composable () -> Unit)? = null, onOpenNotifications: (() -> Unit)? = null, onEntry: (Boolean) -> Unit) {
+internal fun Dashboard(padding: PaddingValues, currencyAmounts: List<CurrencyAmounts>, activities: List<Activity>, pendingReviews: Int = 0, ledgerName: String = "个人账本", savingsGoals: List<SavingsGoalEntity> = emptyList(), showAmountsByDefault: Boolean = true, defaultCurrency: String = "CNY", appUpdate: AppUpdateInfo? = null, appUpdateMessage: String? = null, onOpenUpdate: (AppUpdateInfo) -> Unit = {}, onDismissUpdate: (AppUpdateInfo) -> Unit = {}, onOpenReviews: () -> Unit = {}, onOpenSavingsGoals: () -> Unit = {}, onOpenReport: (() -> Unit)? = null, onAll: () -> Unit, onWallet: () -> Unit, onSettings: () -> Unit, pendingContent: (@Composable () -> Unit)? = null, monthlyOverviewContent: (@Composable (Boolean) -> Unit)? = null, onOpenNotifications: (() -> Unit)? = null, onEntry: (Boolean) -> Unit) {
     var hidden by rememberSaveable { mutableStateOf(!showAmountsByDefault) }
     LaunchedEffect(showAmountsByDefault) { hidden = !showAmountsByDefault }
     Screen(padding) {
@@ -274,6 +274,7 @@ internal fun Dashboard(padding: PaddingValues, currencyAmounts: List<CurrencyAmo
                 second = { MetricCard("累计支出 · ${amount.currency}", if (hidden) "••••" else amount.expenseMinor?.let { value -> currencyMoney(value, amount.currency) } ?: "无法汇总", "out", Coral, it) }
             )
         }
+        monthlyOverviewContent?.invoke(!hidden)
         onOpenReport?.let { open -> TextButton(onClick = open, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("查看当前账本报告") } }
         if (pendingContent != null) pendingContent()
         else if (pendingReviews > 0) {

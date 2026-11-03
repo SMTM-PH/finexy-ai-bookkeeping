@@ -172,6 +172,12 @@
                                 </div>
                             </section>
 
+                            <MonthlyOverviewPanel class="home-monthly-overview" :scope="monthlyOverviewScope"
+                                                   :ledger-name="selectedLedgerName" :username="userStore.currentUserBasicInfo?.username ?? ''"
+                                                   :show-amounts="showAmountInHomePage" :can-manage-budget="canManageMonthlyBudget"
+                                                   @month="monthlyOverviewMonth = $event" @timezone="monthlyOverviewTimezone = $event"
+                                                   @report="openMonthlyReport" @budget="openMonthlyBudget" />
+
                             <section class="card chart-card">
                                 <h3>近八个月同币种收支 <small>{{ summaryCurrency }}</small></h3>
                                 <p v-if="chartIncompleteCount" class="scope-copy" role="status">{{ chartIncompleteCount }} 项趋势数据缺少有效账户币种、分类或金额，趋势未完整计算。</p>
@@ -231,6 +237,8 @@ import TransactionEditDialog from '@/views/desktop/transactions/list/dialogs/Edi
 import AccountEditDialog from '@/views/desktop/accounts/list/dialogs/EditDialog.vue';
 import LedgerPendingPanel from '@/components/common/LedgerPendingPanel.vue';
 import LedgerPendingDialog from '@/components/common/LedgerPendingDialog.vue';
+import MonthlyOverviewPanel from '@/components/common/MonthlyOverviewPanel.vue';
+import { monthInTimezone, type MonthlyOverviewScope } from '@/lib/monthly_overview.ts';
 import { useLedgerPendingStore } from '@/stores/ledgerPending.ts';
 import { desktopLedgerPendingLocation } from '@/lib/ledger_pending_navigation.ts';
 import type { LedgerPendingTarget } from '@/models/ledger_pending.ts';
@@ -252,7 +260,7 @@ import { useSavingsGoalsStore } from '@/stores/savingsGoal.ts';
 import { DefaultLedgerId } from '@/models/ledger.ts';
 import { AccountCategory } from '@/core/account.ts';
 import type { Account } from '@/models/account.ts';
-import { isUserLogined, isUserUnlocked } from '@/lib/userstate.ts';
+import { getTransactionStateIdentity, isUserLogined, isUserUnlocked } from '@/lib/userstate.ts';
 import type { MonthlyBudgetInfoResponse } from '@/models/monthly_budget.ts';
 import { Transaction, type TransactionStatisticTrendsResponseItem } from '@/models/transaction.ts';
 import { TransactionType } from '@/core/transaction.ts';
@@ -394,6 +402,20 @@ const currentYearMonth = computed<number>(() => {
     const now = new Date();
     return now.getFullYear() * 100 + now.getMonth() + 1;
 });
+const monthlyOverviewTimezone = ref<string>(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+const monthlyOverviewMonth = ref<string>(monthInTimezone(new Date(), monthlyOverviewTimezone.value));
+const monthlyOverviewScope = computed<MonthlyOverviewScope>(() => ({
+    identity: getTransactionStateIdentity() ?? '',
+    sessionEpoch: 0,
+    ledgerId: selectedLedgerId.value,
+    month: monthlyOverviewMonth.value,
+    timezone: monthlyOverviewTimezone.value,
+    hidden: 'include',
+    mode: navigator.onLine === false ? 'offline' : 'online'
+}));
+const canManageMonthlyBudget = computed<boolean>(() => !familyLedgerSelected.value || (currentLedgerMember.value?.role ?? 4) <= 3);
+function openMonthlyReport(): void { router.push('/statistics/transaction'); }
+function openMonthlyBudget(): void { router.push('/schedule/list?panel=budget'); }
 const monthlyBudget = computed<MonthlyBudgetInfoResponse | null>(() => monthlyBudgetStore.budgetFor(currentYearMonth.value, selectedLedgerId.value) ?? null);
 const budgetCurrency = computed(() => monthlyBudget.value?.currency || defaultCurrency.value);
 const monthlyTransactions = ref<Transaction[]>([]);
@@ -893,6 +915,7 @@ table th{font-size:12.5px;color:var(--muted)}table td{font-size:13px}.status{fon
 .balance-card .amount { font-size: 28px; }
 .balance-card .bactions { margin-top: 14px; gap: 8px; }
 .home-right-column .stats, .home-right-column .chart-card { grid-column: 1 / -1; }
+.home-right-column .home-monthly-overview { grid-column: 1 / -1; min-width: 0; }
 .stats { grid-template-columns: repeat(4, minmax(0, 1fr)); grid-auto-rows: minmax(116px, auto); padding: 8px; gap: 8px; }
 .stat { padding: 12px; }
 .stat strong { font-size: clamp(18px, 1.4vw, 22px); white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; font-weight: 650; }

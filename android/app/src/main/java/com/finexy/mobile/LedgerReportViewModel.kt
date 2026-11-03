@@ -80,7 +80,7 @@ internal class LedgerReportViewModel : ViewModel() {
     }
 }
 
-private class AndroidLedgerReportEnvironment(context: Context, val store: SecureStore, private val changed: () -> Unit) : AutoCloseable {
+internal class AndroidLedgerReportEnvironment(context: Context, val store: SecureStore, private val changed: () -> Unit) : AutoCloseable {
     private val connectivity = context.getSystemService(ConnectivityManager::class.java)
     private val sessionObservation = store.observeSessionChanges(changed)
     private val syncObservation = SyncActivity.observe(changed)
