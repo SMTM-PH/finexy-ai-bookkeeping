@@ -29,6 +29,7 @@
         <a href="#screenshots">界面</a>
         <a href="#sync">联动</a>
         <a href="#deploy">部署</a>
+        <a href="#fnos">飞牛 NAS</a>
         <a href="#download">下载</a>
         <a href="https://github.com/SMTM-PH/finexy-ai-bookkeeping#readme" target="_blank" rel="noopener">文档</a>
       </nav>
@@ -338,7 +339,7 @@
             <span class="step-no">1</span>
             <h3>拉取镜像</h3>
             <div class="code-block">
-              <code>docker pull ph97/finexy-bookkeeping:latest-amd64</code>
+              <code>docker pull ph97/finexy-bookkeeping:1.9.2-amd64</code>
               <button class="copy-btn" type="button" aria-label="复制拉取镜像命令">复制</button>
             </div>
             <p>公开镜像，无需登录。搜索时请使用完整名称 <code class="inline-code">ph97/finexy-bookkeeping</code>。</p>
@@ -369,6 +370,225 @@
           <li>默认端口 8080</li>
           <li>AI 服务可选 DeepSeek API Key</li>
         </ul>
+        <p class="deploy-more">使用飞牛 NAS（fnOS）？<a href="#fnos">查看 fnOS 安装部署步骤 →</a></p>
+      </div>
+    </section>
+
+    <!-- ============ 飞牛 NAS（fnOS） ============ -->
+    <section class="section section-tint" id="fnos">
+      <div class="container">
+        <div class="section-head">
+          <p class="eyebrow">飞牛 NAS · fnOS</p>
+          <h2>在飞牛 NAS 上安装部署</h2>
+          <p class="section-sub">使用 fnOS 自带的 Docker / 容器管理，从公开仓库拉取 AMD64 镜像，把数据目录挂载到 NAS 存储空间。下列命令与仓库的 <a href="https://github.com/SMTM-PH/finexy-ai-bookkeeping/blob/main/deploy/nas-amd64/compose.yaml" target="_blank" rel="noopener">deploy/nas-amd64 配置包</a>一致。</p>
+        </div>
+
+        <ol class="fnos-steps">
+          <li class="fnos-card reveal">
+            <span class="step-no">1</span>
+            <h3>准备 Docker 与终端</h3>
+            <p>在 fnOS「应用中心」安装 Docker，或直接使用系统自带的容器管理 / Compose 项目功能。SSH 入口通常在「系统设置 → SSH」，具体名称以你的 fnOS 版本为准。</p>
+            <ul>
+              <li>SSH 登录后执行 <code class="inline-code">uname -m</code>，输出必须是 <code class="inline-code">x86_64</code>；当前镜像不支持 ARM64。</li>
+              <li>建议 8 GB 内存：OCR 服务预留 5 GB，记账服务预留 1.5 GB。</li>
+              <li>确认默认端口 <code class="inline-code">8080</code> 未被其他套件占用。</li>
+            </ul>
+          </li>
+          <li class="fnos-card reveal">
+            <span class="step-no">2</span>
+            <h3>创建目录并授权</h3>
+            <div class="code-block">
+              <code>mkdir -p /vol1/1000/docker/finexy/{data,log,storage}</code>
+              <button class="copy-btn" type="button" aria-label="复制创建目录命令">复制</button>
+            </div>
+            <div class="code-block">
+              <code>cd /vol1/1000/docker/finexy &amp;&amp; chown -R 1000:1000 data log storage</code>
+              <button class="copy-btn" type="button" aria-label="复制授权命令">复制</button>
+            </div>
+            <p><code class="inline-code">/vol1/1000/docker/finexy</code> 是 fnOS 存储空间的示例路径，<strong>需按实际情况填写</strong>你 NAS 的挂载路径，不要放在系统盘。容器内以 UID/GID 1000 运行，因此三个目录都要可写。</p>
+          </li>
+          <li class="fnos-card reveal">
+            <span class="step-no">3</span>
+            <h3>获取镜像</h3>
+            <p>公开仓库，无需登录：</p>
+            <div class="code-block">
+              <code>docker pull ph97/finexy-bookkeeping:1.9.2-amd64</code>
+              <button class="copy-btn" type="button" aria-label="复制拉取记账镜像命令">复制</button>
+            </div>
+            <div class="code-block">
+              <code>docker pull ph97/finexy-bookkeeping:ocr-1.0-amd64</code>
+              <button class="copy-btn" type="button" aria-label="复制拉取 OCR 镜像命令">复制</button>
+            </div>
+            <p>NAS 无法访问 Docker Hub 时，改用离线导入：</p>
+            <div class="fnos-pre"><code># 在有 Docker 的电脑上导出
+docker save -o finexy-1.9.2-amd64.tar ph97/finexy-bookkeeping:1.9.2-amd64
+docker save -o finexy-ocr-1.0-amd64.tar ph97/finexy-bookkeeping:ocr-1.0-amd64
+
+# 上传到 NAS 后导入，tag 会保留
+docker load -i finexy-1.9.2-amd64.tar
+docker load -i finexy-ocr-1.0-amd64.tar</code></div>
+          </li>
+          <li class="fnos-card reveal">
+            <span class="step-no">4</span>
+            <h3>写入环境变量</h3>
+            <div class="code-block">
+              <code>cp .env.example .env &amp;&amp; chmod 600 .env</code>
+              <button class="copy-btn" type="button" aria-label="复制创建环境文件命令">复制</button>
+            </div>
+            <div class="fnos-pre"><code>APP_PORT=8080
+APP_DOMAIN=192.168.1.10
+APP_SECRET_KEY=替换为随机生成的长密钥
+ENABLE_AI_TEXT_RECOGNITION=false
+DEEPSEEK_API_KEY=
+DEEPSEEK_MODEL=deepseek-v4-flash</code></div>
+            <p><code class="inline-code">APP_DOMAIN</code> 填 NAS 的局域网 IP；<code class="inline-code">APP_SECRET_KEY</code> 用 <code class="inline-code">openssl rand -hex 32</code> 生成后长期保存。需要 AI 记账时把 <code class="inline-code">ENABLE_AI_TEXT_RECOGNITION</code> 改为 <code class="inline-code">true</code>，并填写 <code class="inline-code">DEEPSEEK_API_KEY</code>。</p>
+          </li>
+          <li class="fnos-card reveal">
+            <span class="step-no">5</span>
+            <h3>启动并验证</h3>
+            <div class="code-block">
+              <code>docker compose pull &amp;&amp; docker compose up -d</code>
+              <button class="copy-btn" type="button" aria-label="复制启动命令">复制</button>
+            </div>
+            <div class="code-block">
+              <code>docker compose ps &amp;&amp; curl http://127.0.0.1:8080/healthz.json</code>
+              <button class="copy-btn" type="button" aria-label="复制验证命令">复制</button>
+            </div>
+            <p>两个服务最终都应为 <code class="inline-code">healthy</code>，健康检查返回 <code class="inline-code">{"success":true}</code>。首次启动 OCR 会下载中文模型，可能持续数分钟，用 <code class="inline-code">docker compose logs -f ocr bookkeeping</code> 观察进度。</p>
+          </li>
+          <li class="fnos-card reveal">
+            <span class="step-no">6</span>
+            <h3>初始化管理员与账本</h3>
+            <p>浏览器打开 <code class="inline-code">http://NAS的IP:8080/</code>，首次进入注册页；注册的本地用户即管理员（单用户模型）。</p>
+            <ul>
+              <li>登录后默认进入「个人账本」，按引导创建账户并录入当前余额。</li>
+              <li>需要区分生活、家庭或独立目标时，可再新建账本并邀请成员。</li>
+              <li>账本数据写入 <code class="inline-code">data/</code>，附件写入 <code class="inline-code">storage/</code>。</li>
+            </ul>
+          </li>
+        </ol>
+
+        <h3 class="fnos-h3">完整 compose.yaml（与 deploy/nas-amd64 一致）</h3>
+        <p class="fnos-lead">把以下内容保存为部署目录下的 <code class="inline-code">compose.yaml</code>，与 <code class="inline-code">.env</code> 放在同一目录。OCR 不映射端口，只在 Compose 内网提供服务。</p>
+        <div class="fnos-code fnos-full">
+          <button class="copy-btn" type="button" aria-label="复制完整 compose 配置">复制</button>
+          <pre class="fnos-pre"><code>services:
+  bookkeeping:
+    image: ph97/finexy-bookkeeping:1.9.2-amd64
+    platform: linux/amd64
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    environment:
+      TZ: Asia/Shanghai
+      EBK_SERVER_DOMAIN: "${APP_DOMAIN:-localhost}"
+      EBK_SERVER_ROOT_URL: "http://${APP_DOMAIN:-localhost}:${APP_PORT:-8080}/"
+      EBK_SECURITY_SECRET_KEY: "${APP_SECRET_KEY:?set APP_SECRET_KEY in .env}"
+      EBK_LLM_TRANSACTION_FROM_AI_TEXT_RECOGNITION: "${ENABLE_AI_TEXT_RECOGNITION:-false}"
+      EBK_LLM_TEXT_RECOGNITION_LLM_PROVIDER: openai_compatible
+      EBK_LLM_TEXT_RECOGNITION_OPENAI_COMPATIBLE_BASE_URL: https://api.deepseek.com
+      EBK_LLM_TEXT_RECOGNITION_OPENAI_COMPATIBLE_API_KEY: "${DEEPSEEK_API_KEY:-}"
+      EBK_LLM_TEXT_RECOGNITION_OPENAI_COMPATIBLE_MODEL_ID: "${DEEPSEEK_MODEL:-deepseek-v4-flash}"
+      EBK_LLM_TEXT_RECOGNITION_REQUEST_TIMEOUT: "120000"
+      EBK_OCR_SERVER_URL: http://ocr:8000
+      EBK_OCR_REQUEST_TIMEOUT: "120000"
+      EBK_MCP_ENABLE_MCP: "true"
+    volumes:
+      - ./data:/ezbookkeeping/data
+      - ./log:/ezbookkeeping/log
+      - ./storage:/ezbookkeeping/storage
+    depends_on:
+      ocr:
+        condition: service_healthy
+    mem_limit: 1536m
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/healthz.json"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  ocr:
+    image: ph97/finexy-bookkeeping:ocr-1.0-amd64
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - ocr-models:/root/.paddlex
+    mem_limit: 5g
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 180s
+
+volumes:
+  ocr-models:</code></pre>
+        </div>
+
+        <div class="fnos-two">
+          <div class="fnos-block reveal">
+            <h3>数据备份与恢复</h3>
+            <p><strong>应用内完整备份：</strong>登录后进入「设置 → 数据管理 → 完整备份与恢复」，下载一个 ZIP，内含一致的 SQLite 快照与本地附件。恢复时校验清单、路径、展开大小与 SQLite 头，并重启容器。</p>
+            <ol>
+              <li>恢复前的数据库与 <code class="inline-code">storage/</code> 会保留为 <code class="inline-code">.pre-restore-&lt;时间戳&gt;</code>，可作为回退点。</li>
+              <li><code class="inline-code">.env</code> 不在 ZIP 内，请单独保存密钥与 API 配置。</li>
+              <li>离线备份：先 <code class="inline-code">docker compose stop bookkeeping</code>，复制 <code class="inline-code">data/</code>、<code class="inline-code">storage/</code>、<code class="inline-code">.env</code>（可选 <code class="inline-code">log/</code>），再 <code class="inline-code">docker compose start bookkeeping</code>。</li>
+              <li>不要执行 <code class="inline-code">docker compose down -v</code>，它会删除 Docker 管理的 <code class="inline-code">ocr-models</code> 卷。</li>
+            </ol>
+          </div>
+          <div class="fnos-block reveal">
+            <h3>版本升级与回退</h3>
+            <ol>
+              <li>升级前备份 <code class="inline-code">data/</code>、<code class="inline-code">storage/</code>、<code class="inline-code">.env</code>，保持挂载路径与 <code class="inline-code">APP_SECRET_KEY</code> 不变。</li>
+              <li>把 <code class="inline-code">compose.yaml</code> 中的镜像 tag 改为新版本，例如 <code class="inline-code">1.9.3-amd64</code>。</li>
+              <li>执行 <code class="inline-code">docker compose pull bookkeeping</code>、<code class="inline-code">docker compose up -d --no-deps bookkeeping</code>，再用 <code class="inline-code">docker compose ps</code> 确认健康。</li>
+              <li>回退时把 tag 改回旧版本并重复上述命令；旧镜像需仍在本机或仓库中。若新版本已迁移数据库结构，直接回退可能无法读取，此时用升级前的完整备份恢复。</li>
+              <li>不要使用浮动的 <code class="inline-code">latest</code>，固定版本 tag 更便于回退。</li>
+            </ol>
+          </div>
+        </div>
+
+        <div class="fnos-block fnos-full reveal">
+          <h3>反向代理与 HTTPS 对外访问</h3>
+          <ol>
+            <li>在 fnOS 的反向代理 / 网关功能中新建规则（入口名称以你的 fnOS 版本为准），目标填 <code class="inline-code">http://127.0.0.1:8080</code>。</li>
+            <li>绑定域名并启用证书，例如 <code class="inline-code">https://finance.example.com</code>；证书通过 fnOS 证书管理申请或导入，<strong>域名与证书需按实际情况填写</strong>。</li>
+            <li>把 Compose 的 <code class="inline-code">EBK_SERVER_ROOT_URL</code> 改为 <code class="inline-code">"https://finance.example.com/"</code>，然后执行 <code class="inline-code">docker compose up -d</code> 重建容器。</li>
+            <li>只对外开放反向代理的 443 端口，不要把 <code class="inline-code">8080</code> 直接映射到公网；局域网仍可用 <code class="inline-code">http://NAS的IP:8080/</code>。</li>
+          </ol>
+        </div>
+
+        <h3 class="fnos-h3">常见问题</h3>
+        <div class="faq-grid">
+          <div class="faq-item">
+            <h4>容器反复重启 / 提示权限不足</h4>
+            <p>确认三个目录在 NAS 存储空间而不是系统盘，并执行 <code class="inline-code">chown -R 1000:1000 data log storage</code>。仍失败时查看 <code class="inline-code">docker compose logs --tail=200 bookkeeping</code>。</p>
+          </div>
+          <div class="faq-item">
+            <h4>8080 端口冲突</h4>
+            <p>用 <code class="inline-code">ss -lntp | grep 8080</code>（或 <code class="inline-code">netstat -lntp</code>）确认占用进程，然后修改 <code class="inline-code">.env</code> 的 <code class="inline-code">APP_PORT</code> 并重启。访问地址和反向代理目标也要同步改端口。</p>
+          </div>
+          <div class="faq-item">
+            <h4>数据卷没有挂上，担心数据丢失</h4>
+            <p>执行 <code class="inline-code">docker compose config</code> 检查 <code class="inline-code">volumes</code>，或用 <code class="inline-code">docker inspect 容器名 --format '{{json .Mounts}}'</code> 核对绑定目录。若曾未挂载启动，必须先迁出容器内 <code class="inline-code">/ezbookkeeping/data</code> 与 <code class="inline-code">storage</code>，再重建服务。</p>
+          </div>
+          <div class="faq-item">
+            <h4>时区导致账目日期偏差</h4>
+            <p>Compose 已固定 <code class="inline-code">TZ: Asia/Shanghai</code>。用 <code class="inline-code">docker compose exec bookkeeping date</code> 与 NAS、浏览器时间对比；修改时区不会自动修正已写入账目的日期，需要逐条核对。</p>
+          </div>
+          <div class="faq-item">
+            <h4>拉取镜像提示 denied 或超时</h4>
+            <p>先 <code class="inline-code">docker logout</code> 再重试；检查 NAS 的 DNS、系统时间与防火墙。仍不可达时改用上文的 <code class="inline-code">docker save</code> / <code class="inline-code">docker load</code> 离线导入。</p>
+          </div>
+          <div class="faq-item">
+            <h4>OCR 长时间显示 starting</h4>
+            <p>首次启动需要下载中文 OCR 模型。查看 <code class="inline-code">docker compose logs --tail=200 ocr</code> 和 <code class="inline-code">docker stats</code>，确认内存与磁盘空间充足（OCR 预留 5 GB）。</p>
+          </div>
+        </div>
+
+        <p class="fnos-note">本页命令与仓库中的 <a href="https://github.com/SMTM-PH/finexy-ai-bookkeeping/blob/main/deploy/nas-amd64/compose.yaml" target="_blank" rel="noopener">deploy/nas-amd64/compose.yaml</a>、<a href="https://github.com/SMTM-PH/finexy-ai-bookkeeping/blob/main/docs/NAS_PUBLIC_IMAGE_DEPLOYMENT.md" target="_blank" rel="noopener">NAS 公开镜像部署指南</a>保持一致；镜像版本号以仓库当前发布 tag 为准。fnOS 的 SSH、反向代理与证书入口名称可能随系统版本变化。</p>
       </div>
     </section>
 
@@ -497,6 +717,7 @@
         <a href="https://github.com/SMTM-PH/finexy-ai-bookkeeping#readme" target="_blank" rel="noopener">产品介绍</a>
         <a href="https://github.com/SMTM-PH/finexy-ai-bookkeeping/blob/main/deploy/nas-amd64/README.md" target="_blank" rel="noopener">NAS 部署配置</a>
         <a href="https://github.com/SMTM-PH/finexy-ai-bookkeeping/blob/main/docs/NAS_PUBLIC_IMAGE_DEPLOYMENT.md" target="_blank" rel="noopener">NAS 部署指南</a>
+        <a href="#fnos">飞牛 NAS（fnOS）部署</a>
         <a href="https://github.com/SMTM-PH/finexy-ai-bookkeeping/blob/main/docs/DEEPSEEK_CONFIG.md" target="_blank" rel="noopener">DeepSeek 配置</a>
       </nav>
       <nav class="footer-col" aria-label="社区链接">
