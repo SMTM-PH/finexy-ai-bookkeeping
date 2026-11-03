@@ -79,7 +79,7 @@ start_app() {
     return 1
   fi
 
-  log_msg "启动 Finexy ${TRIM_APPVER:-1.9.3}，端口 ${TRIM_SERVICE_PORT:-8080}"
+  log_msg "启动 Finexy ${TRIM_APPVER:-1.9.4}，端口 ${TRIM_SERVICE_PORT:-8080}"
 
   cd "$APP_DIR" || return 1
   ./ezbookkeeping server run --conf-path="$CONF_FILE" >> "$LOG_FILE" 2>&1 &

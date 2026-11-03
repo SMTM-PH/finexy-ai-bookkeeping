@@ -1,5 +1,5 @@
 appname = finexy
-version = 1.9.3
+version = 1.9.4
 display_name = Finexy 记账
 desc = Finexy 自托管记账服务（Go + Gin + xorm，SQLite）。包含 Web/PWA 页面、AI 记账与 MCP 接口。账本数据库、附件和日志保存在应用数据目录，升级不会覆盖已有数据。
 platform = x86
@@ -14,4 +14,4 @@ service_port = 8080
 checkport = true
 ctl_stop = true
 disable_authorization_path = true
-changelog = 1.9.3（当前发布）：修复 install_init 在 @appdata 创建前建目录导致的安装失败；运行期目录与首次配置改由 cmd/main start 创建；桌面入口 type=url，点击图标在浏览器标签页打开。
+changelog = 1.9.4（当前发布）：修复分类结构只显示前 8 个一级分类、搜索覆盖不完整、子分类缺少编辑入口的问题（issue 48）；桌面入口 type=url，点击图标在浏览器标签页打开。
