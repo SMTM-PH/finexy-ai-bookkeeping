@@ -19,5 +19,7 @@
         <activity android:name=".UserPreferencesQaActivity" android:exported="false" android:theme="@style/Theme.Finexy" />
         <activity android:name=".AIRecognitionQaActivity" android:exported="false" android:theme="@style/Theme.Finexy" />
         <activity android:name=".AppUpdateQaActivity" android:exported="false" android:theme="@style/Theme.Finexy" />
+        <activity android:name=".EntryReliabilityQaActivity" android:exported="false" android:theme="@style/Theme.Finexy" />
+        <activity android:name=".NormalTemplateQaActivity" android:exported="false" android:theme="@style/Theme.Finexy" />
     </application>
 </manifest>

@@ -389,6 +389,9 @@ func (s *TransactionCategoryService) DeleteCategory(c core.Context, uid int64, c
 	}
 
 	return s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
+		if _, err := sess.Where("uid=? AND deleted=? AND (category_id=? OR parent_category_id=?)", uid, false, categoryId, categoryId).SetExpr("updated_unix_time", "updated_unix_time").Update(new(models.TransactionCategory)); err != nil {
+			return err
+		}
 		var categoryAndSubCategories []*models.TransactionCategory
 		err := sess.Where("uid=? AND deleted=? AND (category_id=? OR parent_category_id=?)", uid, false, categoryId, categoryId).Find(&categoryAndSubCategories)
 
@@ -420,6 +423,19 @@ func (s *TransactionCategoryService) DeleteCategory(c core.Context, uid int64, c
 			return errs.ErrTransactionCategoryInUseCannotBeDeleted
 		}
 
+		snapshots, err := pendingScheduledSnapshots(sess, uid)
+		if err != nil {
+			return err
+		}
+		categoryIDs := make(map[int64]bool, len(categoryAndSubCategoryIds))
+		for _, id := range categoryAndSubCategoryIds {
+			categoryIDs[id] = true
+		}
+		for _, snapshot := range snapshots {
+			if categoryIDs[snapshot.CategoryId] {
+				return errs.ErrTransactionCategoryInUseCannotBeDeleted
+			}
+		}
 		deletedRows, err := sess.Cols("deleted", "deleted_unix_time").Where("uid=? AND deleted=?", uid, false).In("category_id", categoryAndSubCategoryIds).Update(updateModel)
 
 		if err != nil {
@@ -446,6 +462,16 @@ func (s *TransactionCategoryService) DeleteAllCategories(c core.Context, uid int
 	}
 
 	return s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
+		if _, err := sess.Where("uid=? AND deleted=?", uid, false).SetExpr("updated_unix_time", "updated_unix_time").Update(new(models.TransactionCategory)); err != nil {
+			return err
+		}
+		snapshots, err := pendingScheduledSnapshots(sess, uid)
+		if err != nil {
+			return err
+		}
+		if len(snapshots) > 0 {
+			return errs.ErrTransactionCategoryInUseCannotBeDeleted
+		}
 		exists, err := sess.Cols("uid", "deleted", "category_id").Where("uid=? AND deleted=? AND category_id<>?", uid, false, 0).Limit(1).Exist(&models.Transaction{})
 
 		if err != nil {

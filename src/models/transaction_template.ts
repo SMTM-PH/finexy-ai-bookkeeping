@@ -1,10 +1,11 @@
 import { type TextualYearMonthDay } from '@/core/datetime.ts';
 import { TransactionType } from '@/core/transaction.ts';
-import { TemplateType } from '@/core/template.ts';
+import { ScheduledTemplateFrequencyType, TemplateType } from '@/core/template.ts';
 
 import { Transaction, type TransactionInfoResponse } from './transaction.ts';
 
 export class TransactionTemplate extends Transaction implements TransactionTemplateInfoResponse {
+    public ledgerId = '0';
     public templateType: number;
     public name: string;
     public scheduledFrequencyType?: number;
@@ -31,6 +32,7 @@ export class TransactionTemplate extends Transaction implements TransactionTempl
     }
 
     public fillFrom(other: TransactionTemplate): void {
+        this.ledgerId = other.ledgerId;
         this.templateType = other.templateType;
         this.name = other.name;
 
@@ -46,6 +48,7 @@ export class TransactionTemplate extends Transaction implements TransactionTempl
 
     public toTemplateCreateRequest(clientSessionId: string): TransactionTemplateCreateRequest {
         return {
+            ledgerId: this.ledgerId,
             templateType: this.templateType,
             name: this.name,
             type: this.type,
@@ -55,7 +58,7 @@ export class TransactionTemplate extends Transaction implements TransactionTempl
             sourceAmount: this.sourceAmount,
             destinationAmount: this.type === TransactionType.Transfer ? this.destinationAmount : 0,
             hideAmount: this.hideAmount,
-            tagIds: this.tagIds,
+            tagIds: [...this.tagIds],
             comment: this.comment,
             scheduledFrequencyType: this.templateType === TemplateType.Schedule.type ? this.scheduledFrequencyType : undefined,
             scheduledFrequency: this.templateType === TemplateType.Schedule.type ? this.scheduledFrequency : undefined,
@@ -68,6 +71,7 @@ export class TransactionTemplate extends Transaction implements TransactionTempl
 
     public toTemplateModifyRequest(): TransactionTemplateModifyRequest {
         return {
+            ledgerId: this.ledgerId,
             id: this.id,
             name: this.name,
             type: this.type,
@@ -77,7 +81,7 @@ export class TransactionTemplate extends Transaction implements TransactionTempl
             sourceAmount: this.sourceAmount,
             destinationAmount: this.type === TransactionType.Transfer ? this.destinationAmount : 0,
             hideAmount: this.hideAmount,
-            tagIds: this.tagIds,
+            tagIds: [...this.tagIds],
             comment: this.comment,
             scheduledFrequencyType: this.templateType === TemplateType.Schedule.type ? this.scheduledFrequencyType : undefined,
             scheduledFrequency: this.templateType === TemplateType.Schedule.type ? this.scheduledFrequency : undefined,
@@ -87,8 +91,9 @@ export class TransactionTemplate extends Transaction implements TransactionTempl
         };
     }
 
-    public static createNewTransactionTemplate(transaction: Transaction): TransactionTemplate {
-        return new TransactionTemplate(
+    public static createNewTransactionTemplate(transaction: Transaction, ledgerId = '0'): TransactionTemplate {
+        if (!isPeriodicStringId(ledgerId)) throw new Error('模板账本标识无效');
+        const template = new TransactionTemplate(
             transaction.id,
             0, // templateType
             '', // name
@@ -107,16 +112,40 @@ export class TransactionTemplate extends Transaction implements TransactionTempl
             undefined, // scheduledEndDate
             undefined, // scheduledAt
             undefined, // nextScheduledTime
-            transaction.tagIds,
+            [...transaction.tagIds],
             transaction.comment,
             true,
             0,
             false
         );
+        template.ledgerId = ledgerId;
+        return template;
     }
 
-    public static ofTemplate(templateResponse: TransactionTemplateInfoResponse): TransactionTemplate {
-        return new TransactionTemplate(
+    public static ofTemplate(templateResponse: TransactionTemplateInfoResponse, expectedLedgerId = templateResponse?.ledgerId ?? '0'): TransactionTemplate {
+        if (!templateResponse || !isPeriodicStringId(expectedLedgerId)
+            || !isPeriodicStringId(templateResponse.id, false)
+            || (templateResponse.ledgerId ?? '0') !== expectedLedgerId
+            || !TemplateType.valueOf(templateResponse.templateType)
+            || typeof templateResponse.name !== 'string' || !templateResponse.name.trim()
+            || typeof templateResponse.editable !== 'boolean' || typeof templateResponse.hidden !== 'boolean'
+            || !Number.isSafeInteger(templateResponse.displayOrder)) {
+            throw new Error('模板响应不完整或账本归属不匹配，请重试');
+        }
+        // The transaction response omits zero-valued destination fields for
+        // ordinary income/expense templates. Transfers still require both sides.
+        const destinationAccountId = templateResponse.type !== TransactionType.Transfer && templateResponse.destinationAccountId === undefined ? '0' : templateResponse.destinationAccountId;
+        const destinationAmount = templateResponse.type !== TransactionType.Transfer && templateResponse.destinationAmount === undefined ? 0 : templateResponse.destinationAmount;
+        assertPeriodicSnapshot({ ...templateResponse, categoryId: templateResponse.categoryId, destinationAccountId, destinationAmount });
+        if (templateResponse.templateType === TemplateType.Schedule.type
+            && (typeof templateResponse.scheduledFrequencyType !== 'number'
+                || !ScheduledTemplateFrequencyType.valueOf(templateResponse.scheduledFrequencyType)
+                || typeof templateResponse.scheduledFrequency !== 'string'
+                || [templateResponse.scheduledAt, templateResponse.nextScheduledTime].some(value => value !== undefined && !Number.isSafeInteger(value))
+                || [templateResponse.scheduledStartDate, templateResponse.scheduledEndDate].some(value => value != null && !/^\d{4}-\d{2}-\d{2}$/.test(value)))) {
+            throw new Error('周期模板响应不完整，请重试');
+        }
+        const template = new TransactionTemplate(
             templateResponse.id,
             templateResponse.templateType,
             templateResponse.name,
@@ -125,9 +154,9 @@ export class TransactionTemplate extends Transaction implements TransactionTempl
             undefined, // only in new transaction template
             templateResponse.utcOffset ?? 0,
             templateResponse.sourceAccountId,
-            templateResponse.destinationAccountId,
+            destinationAccountId,
             templateResponse.sourceAmount,
-            templateResponse.destinationAmount,
+            destinationAmount,
             templateResponse.hideAmount,
             templateResponse.scheduledFrequencyType,
             templateResponse.scheduledFrequency,
@@ -135,19 +164,21 @@ export class TransactionTemplate extends Transaction implements TransactionTempl
             templateResponse.scheduledEndDate ?? undefined,
             templateResponse.scheduledAt,
             templateResponse.nextScheduledTime,
-            templateResponse.tagIds,
+            [...templateResponse.tagIds],
             templateResponse.comment,
-            true, // editable
+            templateResponse.editable,
             templateResponse.displayOrder,
             templateResponse.hidden
         );
+        template.ledgerId = expectedLedgerId;
+        return template;
     }
 
-    public static ofMultiTemplates(templateResponses: TransactionTemplateInfoResponse[]): TransactionTemplate[] {
+    public static ofMultiTemplates(templateResponses: TransactionTemplateInfoResponse[], expectedLedgerId = '0'): TransactionTemplate[] {
         const templates: TransactionTemplate[] = [];
 
         for (const templateResponse of templateResponses) {
-            templates.push(TransactionTemplate.ofTemplate(templateResponse));
+            templates.push(TransactionTemplate.ofTemplate(templateResponse, expectedLedgerId));
         }
 
         return templates;
@@ -155,6 +186,7 @@ export class TransactionTemplate extends Transaction implements TransactionTempl
 }
 
 export interface TransactionTemplateCreateRequest {
+    readonly ledgerId?: string;
     readonly templateType: number;
     readonly name: string;
     readonly type: number;
@@ -175,6 +207,7 @@ export interface TransactionTemplateCreateRequest {
 }
 
 export interface TransactionTemplateModifyRequest {
+    readonly ledgerId?: string;
     readonly id: string;
     readonly name: string;
     readonly type: number;
@@ -194,11 +227,13 @@ export interface TransactionTemplateModifyRequest {
 }
 
 export interface TransactionTemplateHideRequest {
+    readonly ledgerId?: string;
     readonly id: string;
     readonly hidden: boolean;
 }
 
 export interface TransactionTemplateMoveRequest {
+    readonly ledgerId?: string;
     readonly newDisplayOrders: TransactionTemplateNewDisplayOrderRequest[];
 }
 
@@ -208,7 +243,30 @@ export interface TransactionTemplateNewDisplayOrderRequest {
 }
 
 export interface TransactionTemplateDeleteRequest {
+    readonly ledgerId?: string;
     readonly id: string;
+}
+
+/** IDs retain their exact decimal representation at every API boundary. */
+export function isPeriodicStringId(value: unknown, allowZero = true): value is string {
+    return typeof value === 'string' && (allowZero ? /^(0|[1-9]\d*)$/ : /^[1-9]\d*$/).test(value)
+        && value.length <= 19 && BigInt(value) <= 9223372036854775807n;
+}
+
+export function assertPeriodicSnapshot(snapshot: Pick<TransactionTemplateInfoResponse, 'type' | 'categoryId' | 'sourceAccountId' | 'destinationAccountId' | 'sourceAmount' | 'destinationAmount' | 'utcOffset' | 'hideAmount' | 'tagIds' | 'comment'>): void {
+    const amountValid = (amount: unknown) => typeof amount === 'number' && Number.isSafeInteger(amount) && Math.abs(amount) <= 9999999999999;
+    if (!snapshot || ![TransactionType.Income, TransactionType.Expense, TransactionType.Transfer].includes(snapshot.type)
+        || !isPeriodicStringId(snapshot.categoryId, false) || !isPeriodicStringId(snapshot.sourceAccountId, false)
+        || !isPeriodicStringId(snapshot.destinationAccountId) || !amountValid(snapshot.sourceAmount) || !amountValid(snapshot.destinationAmount)
+        || !Number.isInteger(snapshot.utcOffset) || snapshot.utcOffset < -720 || snapshot.utcOffset > 840
+        || typeof snapshot.hideAmount !== 'boolean' || typeof snapshot.comment !== 'string'
+        || !Array.isArray(snapshot.tagIds) || snapshot.tagIds.length > 10
+        || snapshot.tagIds.some(id => !isPeriodicStringId(id, false)) || new Set(snapshot.tagIds).size !== snapshot.tagIds.length
+        || (snapshot.type === TransactionType.Transfer
+            ? snapshot.destinationAccountId === '0' || snapshot.destinationAccountId === snapshot.sourceAccountId || snapshot.sourceAmount < 0 || snapshot.destinationAmount < 0
+            : snapshot.destinationAccountId !== '0' || snapshot.destinationAmount !== 0)) {
+        throw new Error('周期记录的账户、金额或分类快照不完整，请重试');
+    }
 }
 
 export interface TransactionTemplateInfoResponse extends TransactionInfoResponse {

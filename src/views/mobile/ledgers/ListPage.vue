@@ -1,15 +1,19 @@
 <template>
-    <f7-page ptr @ptr:refresh="refresh">
-        <f7-navbar title="账本" back-link="返回"></f7-navbar>
+    <f7-page class="mobile-ledger-page" ptr @ptr:refresh="refresh">
+        <f7-navbar class="mobile-ledger-navbar" title="账本" back-link="返回"></f7-navbar>
 
-        <f7-block v-if="error" class="text-color-red" role="alert">{{ error }}</f7-block>
+        <f7-block v-if="error" class="text-color-red" role="alert">{{ error }}<f7-button :disabled="busy" outline @click="refresh()">重试</f7-button></f7-block>
+        <f7-block>正在使用：{{ ledgers.selectedLedger.name }}。浏览详情与加入账本不会切换记账目标。</f7-block>
         <f7-block-title>我的账本</f7-block-title>
         <f7-list strong inset dividers>
             <f7-list-item v-for="ledger in ledgers.allLedgers" :key="ledger.id"
                           :title="ledger.name" :footer="ledger.comment || (ledger.id === '0' ? '默认个人账本' : '独立账本')"
-                          :after="ledger.id === selectedId ? '当前' : ''" link="#"
+                          :after="ledger.id === ledgers.selectedLedgerId ? '正在使用' : ledger.id === selectedId ? '正在查看' : ''" link="#"
                           @click="selectLedger(ledger.id)"></f7-list-item>
         </f7-list>
+        <f7-block v-if="selectedId !== ledgers.selectedLedgerId">
+            <f7-button fill :disabled="busy" @click="switchLedger">切换到此账本</f7-button>
+        </f7-block>
 
         <f7-block-title>创建账本</f7-block-title>
         <f7-list strong inset>
@@ -88,17 +92,23 @@ async function run(action: () => Promise<void>): Promise<void> {
 }
 async function loadSelected(id: string): Promise<void> {
     selectedId.value = id; createdToken.value = ''; overview.value = undefined;
-    ledgers.select(id); overview.value = await ledgers.loadOverview(id); await ledgers.loadAccess(id);
+    const [nextOverview] = await Promise.all([ledgers.loadOverview(id), ledgers.loadAccess(id)]);
+    if (selectedId.value === id) overview.value = nextOverview;
 }
+function switchLedger(): void { ledgers.select(selectedId.value); showToast('已切换当前账本'); }
 async function selectLedger(id: string): Promise<void> { await run(async () => loadSelected(id)); }
-async function refresh(done?: () => void): Promise<void> { await run(async () => { await ledgers.load(); await loadSelected(selectedId.value); }); done?.(); }
-async function createLedger(): Promise<void> { await run(async () => { const ledger = await ledgers.createLedger(createName.value, createComment.value); createName.value = ''; createComment.value = ''; await loadSelected(ledger.id); }); }
+async function refresh(done?: () => void): Promise<void> { await run(async () => { await ledgers.load(); await loadSelected(ledgers.allLedgers.some(item => item.id === selectedId.value) ? selectedId.value : ledgers.selectedLedgerId); }); done?.(); }
+async function createLedger(): Promise<void> { await run(async () => { const ledger = await ledgers.createLedger(createName.value, createComment.value); ledgers.select(ledger.id); createName.value = ''; createComment.value = ''; await loadSelected(ledger.id); }); }
 async function previewToken(): Promise<void> { await run(async () => { invitationPreview.value = await ledgers.previewInvitation(token.value); }); }
-async function acceptToken(): Promise<void> { await run(async () => { const ledger = await ledgers.accept(token.value); invitationPreview.value = undefined; token.value = ''; await loadSelected(ledger.id); }); }
+async function acceptToken(): Promise<void> { await run(async () => { const ledger = await ledgers.accept(token.value); invitationPreview.value = undefined; token.value = ''; await loadSelected(ledger.id); showToast('已加入账本，可点击“切换到此账本”'); }); }
 async function inviteMember(): Promise<void> { await run(async () => { createdToken.value = (await ledgers.invite(inviteName.value, inviteRole.value, selectedId.value)).token; inviteName.value = ''; await ledgers.loadAccess(selectedId.value); }); }
 onMounted(async () => { await run(async () => { await ledgers.load(); selectedId.value = ledgers.selectedLedgerId; await loadSelected(selectedId.value); }); });
 </script>
 
 <style scoped>
+.mobile-ledger-page :deep(.button),
+.mobile-ledger-page :deep(.list-button),
+.mobile-ledger-page :deep(.item-link) { min-height: 44px; }
+.mobile-ledger-navbar :deep(.link) { min-width: 44px; min-height: 44px; }
 .ledger-card p { margin: 8px 0 0; } .token { overflow-wrap: anywhere; font-family: ui-monospace, monospace; }
 </style>

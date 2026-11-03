@@ -34,6 +34,10 @@ var AIRecognition = &AIRecognitionService{
 // RecognizeReceiptImage sends a receipt image directly to the configured vision model and returns a draft.
 // It never creates a transaction or stores the supplied image.
 func (s *AIRecognitionService) RecognizeReceiptImage(c core.Context, user *models.User, currentConfig *settings.Config, imageData []byte, contentType string, clientTimezone *time.Location) (*models.RecognizedTransactionResponse, *models.RecognizedTransactionResult, error) {
+	return s.RecognizeReceiptImageInLedger(c, user, currentConfig, 0, imageData, contentType, clientTimezone)
+}
+
+func (s *AIRecognitionService) RecognizeReceiptImageInLedger(c core.Context, user *models.User, currentConfig *settings.Config, ledgerID int64, imageData []byte, contentType string, clientTimezone *time.Location) (*models.RecognizedTransactionResponse, *models.RecognizedTransactionResult, error) {
 	if currentConfig == nil || currentConfig.ReceiptImageRecognitionLLMConfig == nil || currentConfig.ReceiptImageRecognitionLLMConfig.LLMProvider == "" || !currentConfig.TransactionFromAIImageRecognition {
 		return nil, nil, errs.ErrLargeLanguageModelProviderNotEnabled
 	}
@@ -62,7 +66,7 @@ func (s *AIRecognitionService) RecognizeReceiptImage(c core.Context, user *model
 		clientTimezone = time.UTC
 	}
 
-	accountNames, accountMap, incomeCategoryNames, expenseCategoryNames, transferCategoryNames, incomeCategoryMap, expenseCategoryMap, transferCategoryMap, tagNames, tagMap, err := s.getUserEssentialData(c, user.Uid)
+	scope, err := s.GetLedgerEssentialData(c, user.Uid, ledgerID)
 	if err != nil {
 		return nil, nil, errs.Or(err, errs.ErrOperationFailed)
 	}
@@ -74,11 +78,11 @@ func (s *AIRecognitionService) RecognizeReceiptImage(c core.Context, user *model
 
 	systemPromptParams := map[string]any{
 		"CurrentDateTime":          utils.FormatUnixTimeToLongDateTime(time.Now().Unix(), clientTimezone),
-		"AllExpenseCategoryNames":  strings.Join(expenseCategoryNames, "\n"),
-		"AllIncomeCategoryNames":   strings.Join(incomeCategoryNames, "\n"),
-		"AllTransferCategoryNames": strings.Join(transferCategoryNames, "\n"),
-		"AllAccountNames":          strings.Join(accountNames, "\n"),
-		"AllTagNames":              strings.Join(tagNames, "\n"),
+		"AllExpenseCategoryNames":  strings.Join(scope.ExpenseCategoryNames, "\n"),
+		"AllIncomeCategoryNames":   strings.Join(scope.IncomeCategoryNames, "\n"),
+		"AllTransferCategoryNames": strings.Join(scope.TransferCategoryNames, "\n"),
+		"AllAccountNames":          strings.Join(scope.AccountNames, "\n"),
+		"AllTagNames":              strings.Join(scope.TagNames, "\n"),
 		"AdditionalNotes":          "",
 	}
 
@@ -97,7 +101,7 @@ func (s *AIRecognitionService) RecognizeReceiptImage(c core.Context, user *model
 
 	llmResponse, err := llm.Container.GetJsonResponseByReceiptImageRecognitionModel(c, user.Uid, currentConfig, llmRequest)
 	if err != nil {
-		log.Errorf(c, "[ai_recognition.RecognizeReceiptImage] failed to get llm response for user \"uid:%d\", because %s", user.Uid, err.Error())
+		log.Errorf(c, "[ai_recognition.RecognizeReceiptImage] model request failed for uid:%d", user.Uid)
 		return nil, nil, errs.Or(err, errs.ErrOperationFailed)
 	}
 
@@ -110,7 +114,10 @@ func (s *AIRecognitionService) RecognizeReceiptImage(c core.Context, user *model
 		return nil, nil, errs.Or(err, errs.ErrOperationFailed)
 	}
 
-	response, err := parseRecognizedTransactionResult(result, clientTimezone, accountMap, expenseCategoryMap, incomeCategoryMap, transferCategoryMap, tagMap)
+	if err := scope.Recheck(c); err != nil {
+		return nil, nil, err
+	}
+	response, err := scope.Parse(result, clientTimezone)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -127,63 +134,13 @@ func isSupportedAIRecognitionImageContentType(contentType string) bool {
 	}
 }
 
+// Legacy callers explicitly retain the default personal ledger.
 func (s *AIRecognitionService) getUserEssentialData(c core.Context, uid int64) ([]string, map[string]*models.Account, []string, []string, []string, map[string]*models.TransactionCategory, map[string]*models.TransactionCategory, map[string]*models.TransactionCategory, []string, map[string]*models.TransactionTag, error) {
-	accounts, err := s.accounts.GetAllAccountsByUid(c, uid)
+	scope, err := s.GetLedgerEssentialData(c, uid, 0)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
 	}
-
-	accountMap := s.accounts.GetVisibleAccountNameMapByList(accounts)
-	accountNames := make([]string, 0, len(accounts))
-	for _, account := range accounts {
-		if !account.Hidden && account.Type != models.ACCOUNT_TYPE_MULTI_SUB_ACCOUNTS {
-			accountNames = append(accountNames, account.Name)
-		}
-	}
-
-	categories, err := s.transactionCategories.GetAllCategoriesByUid(c, uid, 0, -1)
-	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
-	}
-
-	incomeCategoryMap := make(map[string]*models.TransactionCategory)
-	expenseCategoryMap := make(map[string]*models.TransactionCategory)
-	transferCategoryMap := make(map[string]*models.TransactionCategory)
-	incomeCategoryNames := make([]string, 0)
-	expenseCategoryNames := make([]string, 0)
-	transferCategoryNames := make([]string, 0)
-
-	for _, category := range categories {
-		if category.Hidden || category.ParentCategoryId == models.LevelOneTransactionCategoryParentId {
-			continue
-		}
-		switch category.Type {
-		case models.CATEGORY_TYPE_INCOME:
-			incomeCategoryMap[category.Name] = category
-			incomeCategoryNames = append(incomeCategoryNames, category.Name)
-		case models.CATEGORY_TYPE_EXPENSE:
-			expenseCategoryMap[category.Name] = category
-			expenseCategoryNames = append(expenseCategoryNames, category.Name)
-		case models.CATEGORY_TYPE_TRANSFER:
-			transferCategoryMap[category.Name] = category
-			transferCategoryNames = append(transferCategoryNames, category.Name)
-		}
-	}
-
-	tags, err := s.transactionTags.GetAllTagsByUid(c, uid)
-	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
-	}
-
-	tagMap := s.transactionTags.GetVisibleTagNameMapByList(tags)
-	tagNames := make([]string, 0, len(tags))
-	for _, tag := range tags {
-		if !tag.Hidden {
-			tagNames = append(tagNames, tag.Name)
-		}
-	}
-
-	return accountNames, accountMap, incomeCategoryNames, expenseCategoryNames, transferCategoryNames, incomeCategoryMap, expenseCategoryMap, transferCategoryMap, tagNames, tagMap, nil
+	return scope.AccountNames, scope.Accounts, scope.IncomeCategoryNames, scope.ExpenseCategoryNames, scope.TransferCategoryNames, scope.IncomeCategories, scope.ExpenseCategories, scope.TransferCategories, scope.TagNames, scope.Tags, nil
 }
 
 func parseRecognizedTransactionResult(result *models.RecognizedTransactionResult, clientTimezone *time.Location, accountMap map[string]*models.Account, expenseCategoryMap map[string]*models.TransactionCategory, incomeCategoryMap map[string]*models.TransactionCategory, transferCategoryMap map[string]*models.TransactionCategory, tagMap map[string]*models.TransactionTag) (*models.RecognizedTransactionResponse, error) {

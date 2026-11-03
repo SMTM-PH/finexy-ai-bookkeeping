@@ -21,7 +21,7 @@ func (a *MonthlyBudgetsApi) MonthlyBudgetGetHandler(c *core.WebContext) (any, *e
 	if err := c.ShouldBindQuery(&request); err != nil {
 		return nil, errs.NewIncompleteOrIncorrectSubmissionError(err)
 	}
-	budget, err := a.monthlyBudgets.GetMonthlyBudget(c, c.GetCurrentUid(), request.YearMonth)
+	budget, err := a.monthlyBudgets.GetMonthlyBudgetInLedger(c, c.GetCurrentUid(), request.LedgerId, request.YearMonth)
 	if err != nil {
 		return nil, errs.Or(err, errs.ErrOperationFailed)
 	}
@@ -37,7 +37,7 @@ func (a *MonthlyBudgetsApi) MonthlyBudgetSetHandler(c *core.WebContext) (any, *e
 	if err := c.ShouldBindJSON(&request); err != nil {
 		return nil, errs.NewIncompleteOrIncorrectSubmissionError(err)
 	}
-	budget, err := a.monthlyBudgets.SetMonthlyBudget(c, c.GetCurrentUid(), request.YearMonth, request.Amount, request.CategoryAmounts)
+	budget, err := a.monthlyBudgets.SetMonthlyBudgetInLedger(c, c.GetCurrentUid(), request.LedgerId, request.YearMonth, request.Amount, request.CategoryAmounts, request.Currency, request.ExpectedRevision)
 	if err != nil {
 		return nil, errs.Or(err, errs.ErrOperationFailed)
 	}
@@ -50,7 +50,7 @@ func (a *MonthlyBudgetsApi) MonthlyBudgetDeleteHandler(c *core.WebContext) (any,
 	if err := c.ShouldBindJSON(&request); err != nil {
 		return nil, errs.NewIncompleteOrIncorrectSubmissionError(err)
 	}
-	if err := a.monthlyBudgets.DeleteMonthlyBudget(c, c.GetCurrentUid(), request.YearMonth); err != nil {
+	if err := a.monthlyBudgets.DeleteMonthlyBudgetInLedger(c, c.GetCurrentUid(), request.LedgerId, request.YearMonth, request.ExpectedRevision); err != nil {
 		return nil, errs.Or(err, errs.ErrOperationFailed)
 	}
 	return true, nil

@@ -13,6 +13,11 @@
             </f7-nav-right>
         </f7-navbar>
 
+        <f7-block role="note">
+            <p>这里沿用账号账户范围的原有分析与统计设置。</p>
+            <f7-link href="/statistic/transaction">返回当前账本报告</f7-link>
+        </f7-block>
+
         <f7-popover class="chart-data-type-popover-menu"
                     @popover:open="scrollPopoverToSelectedItem">
             <f7-list dividers>

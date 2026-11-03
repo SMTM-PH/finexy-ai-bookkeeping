@@ -4,6 +4,7 @@ import "net/http"
 
 // Error codes related to accounts
 var (
+	ErrAccountCardConflict = NewNormalError(NormalSubcategoryAccount, 28, http.StatusConflict, "account card changed on another device")
 	ErrAccountIdInvalid                         = NewNormalError(NormalSubcategoryAccount, 0, http.StatusBadRequest, "account id is invalid")
 	ErrAccountNotFound                          = NewNormalError(NormalSubcategoryAccount, 1, http.StatusBadRequest, "account not found")
 	ErrAccountTypeInvalid                       = NewNormalError(NormalSubcategoryAccount, 2, http.StatusBadRequest, "account type is invalid")

@@ -9,12 +9,15 @@
             <f7-list-item :title="tt('Transaction Tags')" link="/tag/list"></f7-list-item>
             <f7-list-item :title="tt('Transaction Templates')" link="/template/list"></f7-list-item>
             <f7-list-item :title="tt('Scheduled Transactions')" link="/schedule/list" v-if="isUserScheduledTransactionEnabled()"></f7-list-item>
+            <f7-list-item title="周期待确认与已忽略" link="/schedule/review" v-if="isUserScheduledTransactionEnabled()"></f7-list-item>
             <f7-list-item title="账本管理" link="/ledger/manage"></f7-list-item>
             <f7-list-item title="存钱计划" link="/savings/goals"></f7-list-item>
+            <f7-list-item title="月度预算" link="/settings/budget"></f7-list-item>
             <f7-list-item :title="tt('Data Management')" link="/user/data/management"></f7-list-item>
             <f7-list-item :title="tt('Two-Factor Authentication')" link="/user/2fa"></f7-list-item>
             <f7-list-item :title="tt('Device & Sessions')" link="/user/sessions"></f7-list-item>
             <f7-list-item title="AI 设置" link="/user/ai-settings"></f7-list-item>
+            <f7-list-item title="AI 待复核" link="/ai/review"></f7-list-item>
             <f7-list-button :class="{ 'disabled': logouting }" @click="logout">{{ tt('Log Out') }}</f7-list-button>
         </f7-list>
 

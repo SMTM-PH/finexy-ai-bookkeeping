@@ -1,3 +1,5 @@
+import { assertPeriodicSnapshot, isPeriodicStringId } from './transaction_template.ts';
+
 export const ScheduledOccurrenceStatus = {
     Pending: 1,
     Confirmed: 2,
@@ -5,6 +7,7 @@ export const ScheduledOccurrenceStatus = {
 } as const;
 
 export interface ScheduledOccurrenceSnapshotResponse {
+    ledgerId?: string;
     name: string;
     type: number;
     categoryId: string;
@@ -19,6 +22,7 @@ export interface ScheduledOccurrenceSnapshotResponse {
 }
 
 export interface ScheduledOccurrenceInfoResponse {
+    ledgerId?: string;
     templateId: string;
     scheduledUnixTime: number;
     status: number;
@@ -27,6 +31,7 @@ export interface ScheduledOccurrenceInfoResponse {
 }
 
 export interface ScheduledOccurrenceActionRequest {
+    ledgerId?: string;
     templateId: string;
     scheduledUnixTime: number;
 }
@@ -37,6 +42,7 @@ export interface ScheduledOccurrenceActionRequest {
  * changes an account balance.
  */
 export class ScheduledOccurrence {
+    readonly ledgerId: string;
     readonly templateId: string;
     readonly scheduledUnixTime: number;
     readonly status: number;
@@ -51,8 +57,10 @@ export class ScheduledOccurrence {
     readonly utcOffset: number;
     readonly hideAmount: boolean;
     readonly comment: string;
+    readonly tagIds: readonly string[];
 
     private constructor(info: ScheduledOccurrenceInfoResponse) {
+        this.ledgerId = info.ledgerId ?? '0';
         this.templateId = info.templateId;
         this.scheduledUnixTime = info.scheduledUnixTime;
         this.status = info.status;
@@ -67,13 +75,16 @@ export class ScheduledOccurrence {
         this.utcOffset = info.snapshot.utcOffset;
         this.hideAmount = info.snapshot.hideAmount;
         this.comment = info.snapshot.comment;
+        this.tagIds = Object.freeze([...info.snapshot.tagIds]);
+        Object.freeze(this);
     }
 
-    static of(info: ScheduledOccurrenceInfoResponse): ScheduledOccurrence {
-        if (!info || !info.templateId || info.templateId === '0') {
+    static of(info: ScheduledOccurrenceInfoResponse, expectedLedgerId = info?.ledgerId ?? '0'): ScheduledOccurrence {
+        if (!info || !isPeriodicStringId(info.templateId, false) || !isPeriodicStringId(expectedLedgerId)
+            || (info.ledgerId ?? '0') !== expectedLedgerId || !isPeriodicStringId(info.transactionId)) {
             throw new Error('invalid scheduled occurrence');
         }
-        if (!info.scheduledUnixTime || info.scheduledUnixTime <= 0) {
+        if (!Number.isSafeInteger(info.scheduledUnixTime) || info.scheduledUnixTime <= 0) {
             throw new Error('invalid scheduled occurrence time');
         }
         if (info.status !== ScheduledOccurrenceStatus.Pending &&
@@ -82,11 +93,13 @@ export class ScheduledOccurrence {
             throw new Error('invalid scheduled occurrence status');
         }
         const snapshot = info.snapshot;
-        if (!snapshot || !snapshot.categoryId || snapshot.categoryId === '0' ||
-            !snapshot.sourceAccountId || snapshot.sourceAccountId === '0') {
+        if (!snapshot || (snapshot.ledgerId ?? '0') !== expectedLedgerId
+            || typeof snapshot.name !== 'string' || !snapshot.name.trim()
+            || (info.status === ScheduledOccurrenceStatus.Confirmed ? info.transactionId === '0' : info.transactionId !== '0')) {
             throw new Error('incomplete scheduled occurrence snapshot');
         }
-        return new ScheduledOccurrence(info);
+        assertPeriodicSnapshot(snapshot);
+        return new ScheduledOccurrence({ ...info, ledgerId: expectedLedgerId });
     }
 
     get isPending(): boolean {
@@ -99,6 +112,7 @@ export class ScheduledOccurrence {
 
     get actionRequest(): ScheduledOccurrenceActionRequest {
         return {
+            ledgerId: this.ledgerId,
             templateId: this.templateId,
             scheduledUnixTime: this.scheduledUnixTime
         };

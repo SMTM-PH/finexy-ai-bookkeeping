@@ -125,7 +125,7 @@ func (p *CommonAnthropicMessagesAPILargeLanguageModelAdapter) ParseTextualRespon
 	err := json.Unmarshal(body, &messagesResponse)
 
 	if err != nil {
-		log.Errorf(c, "[anthropic_common_compatible_large_language_model_adapter.ParseTextualResponse] failed to parse messages response for user \"uid:%d\", because %s", uid, err.Error())
+		log.Errorf(c, "[anthropic_common_compatible_large_language_model_adapter.ParseTextualResponse] failed to parse messages response for user \"uid:%d\", error type %T", uid, err)
 		return nil, errs.ErrFailedToRequestRemoteApi
 	}
 
@@ -210,11 +210,11 @@ func (p *CommonAnthropicMessagesAPILargeLanguageModelAdapter) buildJsonRequestBo
 	requestBodyBytes, err := json.Marshal(messagesRequest)
 
 	if err != nil {
-		log.Errorf(c, "[anthropic_common_compatible_large_language_model_adapter.buildJsonRequestBody] failed to marshal request body for user \"uid:%d\", because %s", uid, err.Error())
+		log.Errorf(c, "[anthropic_common_compatible_large_language_model_adapter.buildJsonRequestBody] failed to marshal request body for user \"uid:%d\", error type %T", uid, err)
 		return nil, errs.ErrOperationFailed
 	}
 
-	log.Debugf(c, "[anthropic_common_compatible_large_language_model_adapter.buildJsonRequestBody] request body is %s", requestBodyBytes)
+	log.Debugf(c, "[anthropic_common_compatible_large_language_model_adapter.buildJsonRequestBody] request prepared")
 	return requestBodyBytes, nil
 }
 

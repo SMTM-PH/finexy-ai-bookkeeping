@@ -1,17 +1,38 @@
 <template>
-    <f7-page ptr @ptr:refresh="reload" @page:afterin="onPageAfterIn">
+    <f7-page ptr @ptr:refresh="reload" @page:afterin="onPageAfterIn" @page:beforeout="pendingPageActive = false">
         <f7-navbar>
             <f7-nav-title :title="tt('global.app.title')"></f7-nav-title>
         </f7-navbar>
 
         <ReleaseUpdateNotice />
+        <ledger-context-notice :limited="!isDefaultLedger" />
+        <div class="mobile-pending-entry"><LedgerPendingPanel compact :active="pendingPageActive" @open="openPendingTarget" /></div>
+        <f7-block v-if="loadError" role="alert">{{ loadError }} <f7-link @click="init()">重试</f7-link></f7-block>
+        <f7-block v-if="permissionError" role="alert">{{ permissionError }} <f7-link @click="init()">重试权限读取</f7-link></f7-block>
+        <f7-block v-if="!isDefaultLedger && ledgerRole === LedgerMemberRole.Viewer">当前成员仅可查看流水，不能记账。</f7-block>
+        <template v-if="!isDefaultLedger">
+            <f7-block v-if="loading" role="status">正在加载当前账本…</f7-block>
+            <f7-card v-else-if="scopedOverview" :title="scopedOverview.ledgerName">
+                <f7-card-content>
+                    <p>{{ scopedOverview.accountCount }} 个账户 · {{ scopedOverview.transactionCount }} 条流水</p>
+                    <p v-for="balance in scopedOverview.balances" :key="balance.currency">
+                        {{ balance.currency }}：{{ formatMobileWalletBalance(balance.balance, balance.currency) }}
+                    </p>
+                    <p v-if="!scopedOverview.balances.length">此账本尚无账户余额。</p>
+                    <f7-link href="/account/list">查看账户</f7-link>
+                    <f7-link class="margin-inline-start" href="/transaction/list">查看流水与导入账单</f7-link>
+                </f7-card-content>
+            </f7-card>
+        </template>
 
         <f7-block class="mobile-ledger-actions">
             <f7-link href="/ledger/manage" class="mobile-ledger-action" aria-label="管理账本"><f7-icon f7="book"></f7-icon><span>账本</span></f7-link>
             <f7-link href="/savings/goals" class="mobile-ledger-action" aria-label="查看存钱计划"><f7-icon f7="money_dollar_circle"></f7-icon><span>存钱计划</span></f7-link>
+            <f7-link href="/settings/budget" class="mobile-ledger-action" aria-label="查看当前账本预算"><f7-icon f7="chart_pie"></f7-icon><span>月度预算</span></f7-link>
         </f7-block>
 
-        <section v-if="!loading && !mobileWalletAccounts.length" class="mobile-onboarding" aria-labelledby="mobile-onboarding-title">
+        <template v-if="isDefaultLedger">
+        <section v-if="!loading && !loadError && !mobileWalletAccounts.length" class="mobile-onboarding" aria-labelledby="mobile-onboarding-title">
             <div class="mobile-onboarding-icon"><f7-icon f7="wallet_pass"></f7-icon></div>
             <div class="mobile-onboarding-copy">
                 <small>开始使用 · 0 / 1</small>
@@ -215,6 +236,8 @@
             </f7-list-item>
         </f7-list>
 
+        </template>
+
         <f7-toolbar tabbar icons bottom class="main-tabbar">
             <f7-link class="link" href="/transaction/list">
                 <f7-icon f7="square_list"></f7-icon>
@@ -226,7 +249,7 @@
             </f7-link>
             <!-- "homepage-add-button" must have the "dragenabled" class, otherwise the popover disappears immediately after the second long press -->
             <f7-link id="homepage-add-button" class="link dragenabled"
-                     href="/transaction/add" @taphold="openTransactionTemplatePopover">
+                     :href="canWriteLedger ? `/transaction/add?ledgerId=${ledgersStore.selectedLedgerId}` : '#'" :class="{ disabled: !canWriteLedger }" :aria-disabled="!canWriteLedger" aria-label="在当前账本记账" @taphold="openTransactionTemplatePopover">
                 <f7-icon f7="plus_square" class="ebk-tarbar-big-icon"></f7-icon>
             </f7-link>
             <f7-link class="link" href="/statistic/transaction">
@@ -239,9 +262,9 @@
             </f7-link>
         </f7-toolbar>
 
-        <f7-popover class="template-popover-menu" target-el="#homepage-add-button"
+        <f7-popover v-if="aiSourceAvailable || (isDefaultLedger && allTransactionTemplates && allTransactionTemplates.length)" class="template-popover-menu" target-el="#homepage-add-button"
                     v-model:opened="showTransactionTemplatePopover">
-            <f7-list dividers v-if="isTransactionFromAITextRecognitionEnabled() || isTransactionFromAIImageRecognitionEnabled() || (allTransactionTemplates && allTransactionTemplates.length)">
+            <f7-list dividers v-if="aiSourceAvailable || (allTransactionTemplates && allTransactionTemplates.length)">
                 <f7-list-item key="AIClipboardTextRecognition" link="#" no-chevron popover-close
                               :title="tt('AI Clipboard Text Recognition')"
                               @click="addByRecognizingClipboardText"
@@ -252,7 +275,7 @@
                 </f7-list-item>
                 <f7-list-item key="AIImageRecognition" link="#" no-chevron popover-close
                               :title="tt('AI Image Recognition')"
-                              @click="showAIReceiptImageRecognitionSheet = true"
+                              @click="addByRecognizingReceiptImage"
                               v-if="isTransactionFromAIImageRecognitionEnabled()">
                     <template #media>
                         <f7-icon f7="wand_stars"></f7-icon>
@@ -267,29 +290,32 @@
                 </f7-list-item>
             </f7-list>
         </f7-popover>
-
-        <a-i-image-recognition-sheet ref="aiImageRecognitionSheet"
-                                     v-model:show="showAIReceiptImageRecognitionSheet"
-                                     @recognition:change="onReceiptRecognitionChanged"/>
     </f7-page>
 </template>
 
 <script setup lang="ts">
-import AIImageRecognitionSheet, { type AIImageRecognitionResult } from '@/components/mobile/AIImageRecognitionSheet.vue';
 import ReleaseUpdateNotice from '@/components/ReleaseUpdateNotice.vue';
+import LedgerContextNotice from '@/components/mobile/LedgerContextNotice.vue';
+import LedgerPendingPanel from '@/components/common/LedgerPendingPanel.vue';
+import { mobileLedgerPendingLocation } from '@/lib/ledger_pending_navigation.ts';
+import type { LedgerPendingTarget } from '@/models/ledger_pending.ts';
 
-import { ref, computed, useTemplateRef } from 'vue';
+import { ref, computed, watch } from 'vue';
 import type { Router } from 'framework7/types';
 
 import { useI18n } from '@/locales/helpers.ts';
 import { useI18nUIComponents, isiOS } from '@/lib/ui/mobile.ts';
 import { useHomePageBase } from '@/views/base/HomePageBase.ts';
 
-import { useSettingsStore } from '@/stores/setting.ts';
 import { useAccountsStore } from '@/stores/account.ts';
 import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
 import { useTransactionTemplatesStore } from '@/stores/transactionTemplate.ts';
 import { useOverviewStore } from '@/stores/overview.ts';
+import { useLedgersStore } from '@/stores/ledger.ts';
+import { DefaultLedgerId, LedgerMemberRole, type LedgerOverview } from '@/models/ledger.ts';
+import { useUserStore } from '@/stores/user.ts';
+import { canWriteMobileLedger, mobileLedgerRole } from '@/lib/mobile_ledger.ts';
+import services from '@/lib/services.ts';
 
 import { DateRange } from '@/core/datetime.ts';
 import { AccountCategory } from '@/core/account.ts';
@@ -306,8 +332,6 @@ import {
 } from '@/lib/server_settings.ts';
 import logger from '@/lib/logger.ts';
 
-type AIImageRecognitionSheetType = InstanceType<typeof AIImageRecognitionSheet>;
-
 const props = defineProps<{
     f7router: Router.Router;
 }>();
@@ -323,18 +347,28 @@ const {
     getDisplayExpenseAmount
 } = useHomePageBase();
 
-const settingsStore = useSettingsStore();
 const accountsStore = useAccountsStore();
 const transactionCategoriesStore = useTransactionCategoriesStore();
 const transactionTemplatesStore = useTransactionTemplatesStore();
 const overviewStore = useOverviewStore();
-
-const aiImageRecognitionSheet = useTemplateRef<AIImageRecognitionSheetType>('aiImageRecognitionSheet');
+const ledgersStore = useLedgersStore();
+const userStore = useUserStore();
+const pendingPageActive = ref(true);
+function openPendingTarget(target: LedgerPendingTarget): void { props.f7router.navigate(mobileLedgerPendingLocation(target)); }
+const isDefaultLedger = computed(() => ledgersStore.selectedLedgerId === DefaultLedgerId);
+const ledgerRole = ref<number | null>(null);
+const permissionLedgerId = ref<string | null>(null);
+const permissionUsername = ref<string | undefined>(undefined);
+const permissionError = ref('');
+const canWriteLedger = computed(() => permissionLedgerId.value === ledgersStore.selectedLedgerId && permissionUsername.value === userStore.currentUserBasicInfo?.username && canWriteMobileLedger(ledgerRole.value));
+const aiSourceAvailable = computed(() => isTransactionFromAITextRecognitionEnabled() || isTransactionFromAIImageRecognitionEnabled());
+const scopedOverview = ref<LedgerOverview | null>(null);
+const loadError = ref('');
+let loadGeneration = 0;
 
 const loading = ref<boolean>(true);
 const showTransactionTemplatePopover = ref<boolean>(false);
-const showAIReceiptImageRecognitionSheet = ref<boolean>(false);
-const mobileWalletAccounts = computed<Account[]>(() => accountsStore.allVisiblePlainAccounts.slice(0, 4));
+const mobileWalletAccounts = computed<Account[]>(() => accountsStore.accountListLedgerId === ledgersStore.selectedLedgerId ? accountsStore.allVisiblePlainAccounts.slice(0, 4) : []);
 
 const allTransactionTemplates = computed<TransactionTemplate[]>(() => {
     const allTemplates = transactionTemplatesStore.allVisibleTemplates;
@@ -363,137 +397,109 @@ function mobileWalletCategoryLabel(category: number): string {
 }
 
 function openTransactionTemplatePopover(): void {
-    if (isTransactionFromAIImageRecognitionEnabled() || (allTransactionTemplates.value && allTransactionTemplates.value.length)) {
+    if (aiSourceAvailable.value || (isDefaultLedger.value && allTransactionTemplates.value && allTransactionTemplates.value.length)) {
         showTransactionTemplatePopover.value = true;
     }
 }
 
-function init(): void {
-    if (isUserLogined() && isUserUnlocked()) {
-        loading.value = true;
-
-        const promises = [
-            getShareCacheImageBlob(),
-            accountsStore.loadAllAccounts({ force: false }),
-            transactionCategoriesStore.loadAllCategories({ force: false }),
-            transactionTemplatesStore.loadAllTemplates({ templateType: TemplateType.Normal.type,  force: false }),
-            overviewStore.loadTransactionOverview({ force: false })
-        ];
-
-        Promise.all(promises).then(responses => {
-            if (responses[0] && responses[0] instanceof Blob) {
-                aiImageRecognitionSheet.value?.loadImage(responses[0]);
-                showAIReceiptImageRecognitionSheet.value = true;
-            }
-
-            loading.value = false;
-        }).catch(error => {
-            loading.value = false;
-
-            if (!error.processed) {
-                showToast(error.message || error);
-            }
-        });
+async function init(force = false): Promise<void> {
+    if (!isUserLogined() || !isUserUnlocked()) return;
+    const generation = ++loadGeneration;
+    const ledgerId = ledgersStore.selectedLedgerId;
+    const username = userStore.currentUserBasicInfo?.username;
+    ledgerRole.value = null;
+    permissionLedgerId.value = null;
+    permissionError.value = '';
+    loading.value = true;
+    loadError.value = '';
+    const permission = (ledgerId === DefaultLedgerId ? Promise.resolve(LedgerMemberRole.Owner) : services.listLedgerMembers({ ledgerId }).then(response => {
+        if (!response.data?.success || !Array.isArray(response.data.result)) throw new Error('无法读取当前账本权限');
+        return mobileLedgerRole(ledgerId, response.data.result);
+    })).then(role => {
+        if (generation !== loadGeneration || ledgerId !== ledgersStore.selectedLedgerId || username !== userStore.currentUserBasicInfo?.username) return;
+        ledgerRole.value = role;
+        permissionLedgerId.value = ledgerId;
+        permissionUsername.value = username;
+    }).catch(() => {
+        if (generation === loadGeneration && ledgerId === ledgersStore.selectedLedgerId && username === userStore.currentUserBasicInfo?.username) permissionError.value = '无法读取当前账本权限，记账入口已禁用。';
+    });
+    try {
+        await permission;
+        const shareBlob = await getShareCacheImageBlob();
+        if (ledgerId !== DefaultLedgerId) {
+            const [, overview] = await Promise.all([
+                accountsStore.loadAllAccounts({ force: false, ledgerId }),
+                ledgersStore.loadOverview(ledgerId)
+            ]);
+            if (generation !== loadGeneration || ledgerId !== ledgersStore.selectedLedgerId) return;
+            scopedOverview.value = overview;
+        } else {
+            await Promise.all([
+                accountsStore.loadAllAccounts({ force: false, ledgerId }),
+                transactionCategoriesStore.loadAllCategories({ force: false, ledgerId }),
+                transactionTemplatesStore.loadAllTemplates({ templateType: TemplateType.Normal.type, force: false }),
+                overviewStore.loadTransactionOverview({ force })
+            ]);
+            if (generation !== loadGeneration || ledgerId !== ledgersStore.selectedLedgerId) return;
+        }
+        if (shareBlob instanceof Blob) addByRecognizingSharedImage(shareBlob);
+    } catch (error) {
+        if (generation !== loadGeneration || ledgerId !== ledgersStore.selectedLedgerId) return;
+        const failure = error as { message?: string; processed?: boolean; isUpToDate?: boolean; stale?: boolean };
+        if (!failure.isUpToDate && !failure.stale) {
+            loadError.value = failure.message || '无法加载当前账本，请重试。';
+            if (!failure.processed) showToast(loadError.value);
+        }
+    } finally {
+        if (generation === loadGeneration) loading.value = false;
     }
 }
 
 function reload(done?: () => void): void {
-    const force = !!done;
+    void init(!!done).finally(() => done?.());
+}
 
-    overviewStore.loadTransactionOverview({
-        force: force
-    }).then(() => {
-        done?.();
+watch(() => [ledgersStore.selectedLedgerId, userStore.currentUserBasicInfo?.username], () => {
+    scopedOverview.value = null;
+    showTransactionTemplatePopover.value = false;
+    void init();
+}, { flush: 'sync' });
 
-        if (force) {
-            showToast('Data has been updated');
-        }
-    }).catch(error => {
-        done?.();
-
-        if (!error.processed) {
-            showToast(error.message || error);
-        }
-    });
+/** Every mobile AI entry hands off to the durable source page of the current
+ * ledger; nothing is recognized here and no financial field travels in a URL. */
+function openAISourcePage(entry: { sourceText?: string; sourceImage?: File; sourceType?: 1 | 2 }): void {
+    if (!canWriteLedger.value) return;
+    props.f7router.navigate('/ai/source', { props: entry });
 }
 
 function addByRecognizingClipboardText(): void {
+    if (!canWriteLedger.value) return;
+    const username = userStore.currentUserBasicInfo?.username;
     if (navigator.clipboard && isFunction(navigator.clipboard.readText) && !isiOS()) {
         navigator.clipboard.readText().then(text => {
-            const clipboardText = text && text.trim() ? text.trim() : '';
-            props.f7router.navigate('/transaction/add', {
-                props: {
-                    autoRecognizeClipboardText: clipboardText,
-                }
-            });
+            if (username !== userStore.currentUserBasicInfo?.username) return;
+            openAISourcePage({ sourceText: text && text.trim() ? text.trim() : '' });
         }).catch(error => {
+            if (username !== userStore.currentUserBasicInfo?.username) return;
             logger.error('failed to read clipboard', error);
-            props.f7router.navigate('/transaction/add', {
-                props: {
-                    autoRecognizeClipboardText: '',
-                }
-            });
+            openAISourcePage({ sourceText: '' });
         });
     } else {
-        props.f7router.navigate('/transaction/add', {
-            props: {
-                autoRecognizeClipboardText: '',
-            }
-        });
+        openAISourcePage({ sourceText: '' });
     }
 }
 
-function onReceiptRecognitionChanged(result: AIImageRecognitionResult): void {
-    const recognizedResponse = result.response;
-    const autoUploadRecognizedImage = settingsStore.appSettings.autoUploadTransactionPictureForAIRecognition;
-    const params: string[] = [];
+function addByRecognizingReceiptImage(): void {
+    openAISourcePage({ sourceType: 2 });
+}
 
-    if (recognizedResponse.type) {
-        params.push(`type=${recognizedResponse.type}`);
-    }
-
-    if (recognizedResponse.time) {
-        params.push(`time=${recognizedResponse.time}`);
-    }
-
-    if (recognizedResponse.categoryId) {
-        params.push(`categoryId=${recognizedResponse.categoryId}`);
-    }
-
-    if (recognizedResponse.sourceAccountId) {
-        params.push(`accountId=${recognizedResponse.sourceAccountId}`);
-    }
-
-    if (recognizedResponse.destinationAccountId) {
-        params.push(`destinationAccountId=${recognizedResponse.destinationAccountId}`);
-    }
-
-    if (recognizedResponse.sourceAmount) {
-        params.push(`amount=${recognizedResponse.sourceAmount}`);
-    }
-
-    if (recognizedResponse.destinationAmount) {
-        params.push(`destinationAmount=${recognizedResponse.destinationAmount}`);
-    }
-
-    if (recognizedResponse.tagIds) {
-        params.push(`tagIds=${recognizedResponse.tagIds.join(',')}`);
-    }
-
-    if (recognizedResponse.comment) {
-        params.push(`comment=${encodeURIComponent(recognizedResponse.comment)}`);
-    }
-
-    params.push(`noTransactionDraft=true`);
-
-    props.f7router.navigate(`/transaction/add?${params.join('&')}`, {
-        props: {
-            autoUploadPicture: autoUploadRecognizedImage ? result.imageFile : undefined,
-        }
-    });
+function addByRecognizingSharedImage(blob: Blob): void {
+    const type = blob.type && blob.type.trim() ? blob.type : 'image/jpeg';
+    openAISourcePage({ sourceType: 2, sourceImage: new File([blob], 'shared-receipt.jpg', { type }) });
 }
 
 function onPageAfterIn(): void {
+    pendingPageActive.value = true;
     if (!loading.value) {
         reload();
     }
@@ -503,6 +509,7 @@ init();
 </script>
 
 <style>
+.mobile-pending-entry { margin: 16px; }
 .mobile-ledger-actions { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; margin: 12px 16px 4px; padding: 0; }
 .mobile-ledger-action { min-height: 48px; justify-content: center; gap: 8px; border: 1px solid var(--f7-list-border-color); border-radius: 14px; background: var(--f7-card-bg-color); font-weight: 700; }
 .mobile-onboarding {

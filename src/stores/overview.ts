@@ -124,6 +124,7 @@ export const useOverviewStore = defineStore('overview', () => {
 
     const transactionOverviewData = ref<TransactionAmountsResponse>({});
     const transactionOverviewStateInvalid = ref<boolean>(true);
+    let overviewLoadGeneration = 0;
 
     const transactionOverview = computed<TransactionOverviewResponse>(() => {
         const overviewData = transactionOverviewData.value;
@@ -252,6 +253,7 @@ export const useOverviewStore = defineStore('overview', () => {
     }
 
     function resetTransactionOverview(): void {
+        ++overviewLoadGeneration;
         updateTransactionDateRange();
         transactionOverviewOptions.value.loadLast11Months = false;
         transactionOverviewData.value = {};
@@ -302,8 +304,13 @@ export const useOverviewStore = defineStore('overview', () => {
         const excludeAccountIds: string[] = objectFieldWithValueToArrayItem(settingsStore.appSettings.overviewAccountFilterInHomePage, true);
         const excludeCategoryIds: string[] = objectFieldWithValueToArrayItem(settingsStore.appSettings.overviewTransactionCategoryFilterInHomePage, true);
 
+        const generation = ++overviewLoadGeneration;
         return new Promise((resolve, reject) => {
             services.getTransactionAmounts(requestParams, excludeAccountIds, excludeCategoryIds).then(response => {
+                if (generation !== overviewLoadGeneration) {
+                    reject({ stale: true });
+                    return;
+                }
                 const data = response.data;
 
                 if (!data || !data.success || !data.result) {
@@ -325,6 +332,10 @@ export const useOverviewStore = defineStore('overview', () => {
 
                 resolve(data.result);
             }).catch(error => {
+                if (generation !== overviewLoadGeneration) {
+                    reject({ stale: true });
+                    return;
+                }
                 if (force) {
                     logger.error('failed to force load transaction overview', error);
                 } else {

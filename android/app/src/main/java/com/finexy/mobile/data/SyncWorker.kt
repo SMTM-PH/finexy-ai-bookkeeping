@@ -128,13 +128,17 @@ object SyncScheduler {
         val token = store.get(FinexyApi.KEY_TOKEN)
         if (serverUrl.isBlank() || token.isNullOrBlank() || store.get("local_mode") == "true") return
         val identity = LedgerScope.identity(serverUrl, token, false)
+        schedulePeriodic(context, identity, store.namespace)
+    }
+
+    fun schedulePeriodic(context: Context, identity: String, namespace: String = SyncWorker.DEFAULT_STORE_NAMESPACE) {
         val request = PeriodicWorkRequestBuilder<SyncWorker>(15, TimeUnit.MINUTES)
-            .setInputData(workerData(identity, store.namespace))
+            .setInputData(workerData(identity, namespace))
             .setConstraints(networkConstraint)
-            .addTag(tag(identity, store.namespace))
+            .addTag(tag(identity, namespace))
             .build()
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-            periodicName(identity, store.namespace), ExistingPeriodicWorkPolicy.UPDATE, request
+            periodicName(identity, namespace), ExistingPeriodicWorkPolicy.UPDATE, request
         )
     }
 
@@ -143,7 +147,11 @@ object SyncScheduler {
         val token = store.get(FinexyApi.KEY_TOKEN) ?: return
         if (serverUrl.isBlank()) return
         val identity = LedgerScope.identity(serverUrl, token, false)
-        WorkManager.getInstance(context).cancelUniqueWork(periodicName(identity, store.namespace))
+        cancelPeriodic(context, identity, store.namespace)
+    }
+
+    fun cancelPeriodic(context: Context, identity: String, namespace: String = SyncWorker.DEFAULT_STORE_NAMESPACE) {
+        WorkManager.getInstance(context).cancelUniqueWork(periodicName(identity, namespace))
     }
 
     private fun workerData(identity: String, namespace: String) = Data.Builder()

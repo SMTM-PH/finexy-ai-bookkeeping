@@ -8,6 +8,8 @@ import SignUpPage from '@/views/mobile/SignupPage.vue';
 import UnlockPage from '@/views/mobile/UnlockPage.vue';
 
 import TransactionListPage from '@/views/mobile/transactions/ListPage.vue';
+import AIReviewPage from '@/views/mobile/ai/ReviewPage.vue';
+import AIReviewSourcePage from '@/views/mobile/ai/SourcePage.vue';
 import TransactionEditPage from '@/views/mobile/transactions/EditPage.vue';
 import TransactionAmountFilterPage from '@/views/mobile/transactions/AmountFilterPage.vue';
 
@@ -17,6 +19,7 @@ import AccountReconciliationStatementPage from '@/views/mobile/accounts/Reconcil
 import AccountMoveAllTransactionsPage from '@/views/mobile/accounts/MoveAllTransactionsPage.vue';
 
 import StatisticsTransactionPage from '@/views/mobile/statistics/TransactionPage.vue';
+import LedgerReportPage from '@/views/mobile/statistics/LedgerReportPage.vue';
 import StatisticsSettingsPage from '@/views/mobile/statistics/SettingsPage.vue';
 
 import TextSizeSettingsPage from '@/views/mobile/settings/TextSizeSettingsPage.vue';
@@ -52,16 +55,52 @@ import TagGroupListPage from '@/views/mobile/tags/GroupListPage.vue';
 import TemplateListPage from '@/views/mobile/templates/ListPage.vue';
 import LedgerListPage from '@/views/mobile/ledgers/ListPage.vue';
 import SavingsGoalListPage from '@/views/mobile/savings/ListPage.vue';
+import MonthlyBudgetPage from '@/views/mobile/settings/MonthlyBudgetPage.vue';
+import LedgerOperationUnavailablePage from '@/components/mobile/LedgerOperationUnavailablePage.vue';
+import LedgerSelectionErrorPage from '@/components/mobile/LedgerSelectionErrorPage.vue';
+import LedgerPendingTargetErrorPage from '@/components/mobile/LedgerPendingTargetErrorPage.vue';
+import { supportsMobileLedgerRoute } from '@/lib/mobile_ledger.ts';
+import { mobilePendingRouteTarget } from '@/lib/mobile_pending_route.ts';
+import { useLedgersStore } from '@/stores/ledger.ts';
+import { useLedgerPendingStore } from '@/stores/ledgerPending.ts';
 
 function asyncResolve(component: unknown): (ctx: Router.RouteCallbackCtx) => void {
-    return function({ resolve }: { resolve: ({ component }: { component: unknown }) => void }): void {
+    return async function({ resolve, to }: Router.RouteCallbackCtx): Promise<void> {
+        if (Object.hasOwn(to.query, 'pendingTarget')) {
+            try {
+                const target = mobilePendingRouteTarget(to.path, to.query);
+                if (!isUserLogined() || !isUserUnlocked() || !target || target.ledgerId !== useLedgersStore().selectedLedgerId) {
+                    throw new Error('原账本与当前账本不一致，请回总览核对后重新打开');
+                }
+                // Never call ensureSelection here: its fallback would change
+                // the ledger before opening an old notification's editor.
+                const pending = useLedgerPendingStore();
+                await pending.refresh(target.ledgerId);
+                await pending.verifyTarget(target);
+                return resolve({ component });
+            } catch {
+                return resolve({ component: LedgerPendingTargetErrorPage }, { props: {
+                    retryUrl: to.url,
+                    message: '原待处理条目已变化，或无法核验当前账号、原账本及读取权限。请重试原入口或回总览核对。'
+                } });
+            }
+        }
+        if (isUserLogined() && isUserUnlocked() && !['/login', '/signup', '/unlock'].includes(to.path)) {
+            try {
+                await useLedgersStore().ensureSelection();
+            } catch {
+                resolve({ component: LedgerSelectionErrorPage });
+                return;
+            }
+        }
         return resolve({
-            component: component
+            component: supportsMobileLedgerRoute(to.path, useLedgersStore().selectedLedgerId)
+                ? component : LedgerOperationUnavailablePage
         });
     } as unknown as (ctx: Router.RouteCallbackCtx) => void;
 }
 
-function checkLogin({ router, resolve, reject }: { router: Router.Router, resolve: () => void, reject: () => void }): void {
+function checkLogin({ router, resolve, reject, to, direction }: Router.RouteCallbackCtx): void {
     if (!isUserLogined()) {
         reject();
         router.navigate('/login', {
@@ -80,6 +119,11 @@ function checkLogin({ router, resolve, reject }: { router: Router.Router, resolv
         return;
     }
 
+    if (direction === 'backward' && !Object.hasOwn(to.query, 'pendingTarget') && !supportsMobileLedgerRoute(to.path, useLedgersStore().selectedLedgerId)) {
+        reject();
+        router.navigate('/ledger/manage', { clearPreviousHistory: true });
+        return;
+    }
     resolve();
 }
 
@@ -161,6 +205,16 @@ const routes: Router.RouteParameters[] = [
         }
     },
     {
+        path: '/ai/review',
+        async: asyncResolve(AIReviewPage),
+        beforeEnter: [checkLogin]
+    },
+    {
+        path: '/ai/source',
+        async: asyncResolve(AIReviewSourcePage),
+        beforeEnter: [checkLogin]
+    },
+    {
         path: '/transaction/list',
         async: asyncResolve(TransactionListPage),
         beforeEnter: [checkLogin]
@@ -212,6 +266,11 @@ const routes: Router.RouteParameters[] = [
     },
     {
         path: '/statistic/transaction',
+        async: asyncResolve(LedgerReportPage),
+        beforeEnter: [checkLogin]
+    },
+    {
+        path: '/statistic/advanced',
         async: asyncResolve(StatisticsTransactionPage),
         beforeEnter: [checkLogin]
     },
@@ -223,6 +282,11 @@ const routes: Router.RouteParameters[] = [
     {
         path: '/settings/textsize',
         async: asyncResolve(TextSizeSettingsPage),
+        beforeEnter: [checkLogin]
+    },
+    {
+        path: '/settings/budget',
+        async: asyncResolve(MonthlyBudgetPage),
         beforeEnter: [checkLogin]
     },
     {
@@ -362,6 +426,11 @@ const routes: Router.RouteParameters[] = [
     },
     {
         path: '/schedule/list',
+        async: asyncResolve(TemplateListPage),
+        beforeEnter: [checkLogin]
+    },
+    {
+        path: '/schedule/review',
         async: asyncResolve(TemplateListPage),
         beforeEnter: [checkLogin]
     },

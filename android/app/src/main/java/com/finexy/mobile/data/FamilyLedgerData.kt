@@ -203,24 +203,27 @@ data class RemoteLedgerInvitationPreview(
 data class RemoteLedgerDeletePreview(
     val ledgerId: Long, val ledgerName: String, val activeMemberCount: Int, val pendingInvitationCount: Int,
     val accountCount: Int, val transactionCount: Int, val savingsGoalCount: Int, val savingsGoalFundCount: Int,
-    val canDelete: Boolean, val blockingReasons: List<String>
+    val canDelete: Boolean, val blockingReasons: List<String>, val monthlyBudgetCount: Int = 0
 ) {
     companion object {
-        private val validBlockers = setOf("accounts", "transactions", "savingsGoals")
+        private val validBlockers = setOf("accounts", "transactions", "savingsGoals", "monthlyBudgets")
         fun from(data: JSONObject): RemoteLedgerDeletePreview {
             fun count(name: String) = data.getInt(name).also { require(it >= 0) { "$name 无效" } }
             val blockers = data.getJSONArray("blockingReasons").let { array ->
                 (0 until array.length()).map { array.getString(it) }.also { require(it.all(validBlockers::contains)) }
             }
             val accountCount = count("accountCount"); val transactionCount = count("transactionCount"); val goalCount = count("savingsGoalCount")
-            val blocked = accountCount > 0 || transactionCount > 0 || goalCount > 0
+            // Older servers had no ledger-scoped budgets and omit this field.
+            val budgetCount = if (data.has("monthlyBudgetCount")) count("monthlyBudgetCount") else 0
+            require(("monthlyBudgets" in blockers) == (budgetCount > 0)) { "预算关联数与删除原因不一致" }
+            val blocked = accountCount > 0 || transactionCount > 0 || goalCount > 0 || budgetCount > 0
             val canDelete = data.getBoolean("canDelete").also { require(it != blocked) { "删除状态与关联数据不一致" } }
             return RemoteLedgerDeletePreview(
                 ledgerId = data.getString("ledgerId").toLong().also { require(it > 0) },
                 ledgerName = data.getString("ledgerName").trim().also { require(it.isNotEmpty()) },
                 activeMemberCount = count("activeMemberCount"), pendingInvitationCount = count("pendingInvitationCount"),
                 accountCount = accountCount, transactionCount = transactionCount, savingsGoalCount = goalCount,
-                savingsGoalFundCount = count("savingsGoalFundCount"), canDelete = canDelete, blockingReasons = blockers)
+                savingsGoalFundCount = count("savingsGoalFundCount"), canDelete = canDelete, blockingReasons = blockers, monthlyBudgetCount = budgetCount)
         }
     }
 }

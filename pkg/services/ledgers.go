@@ -736,16 +736,24 @@ func (s *LedgerService) GetDeletePreview(c core.Context, uid, ledgerId int64) (*
 		return nil, err
 	}
 	counts := []struct {
-		model  any
-		value  *int64
-		reason string
+		model      any
+		value      *int64
+		reason     string
+		activeOnly bool
 	}{
-		{new(models.Account), &preview.AccountCount, "accounts"},
-		{new(models.Transaction), &preview.TransactionCount, "transactions"},
-		{new(models.SavingsGoal), &preview.SavingsGoalCount, "savingsGoals"},
+		{new(models.Account), &preview.AccountCount, "accounts", false},
+		{new(models.Transaction), &preview.TransactionCount, "transactions", false},
+		{new(models.SavingsGoal), &preview.SavingsGoalCount, "savingsGoals", false},
+		{new(models.MonthlyBudget), &preview.MonthlyBudgetCount, "monthlyBudgets", true},
+		{new(models.TransactionTemplate), &preview.TransactionTemplateCount, "transactionTemplates", true},
+		{new(models.AIReviewItem), &preview.AIReviewItemCount, "aiReviewItems", true},
 	}
 	for _, item := range counts {
-		count, countErr := sess.Where("ledger_id=?", ledgerId).Count(item.model)
+		query := sess.Where("ledger_id=?", ledgerId)
+		if item.activeOnly {
+			query = query.And("deleted=?", false)
+		}
+		count, countErr := query.Count(item.model)
 		if countErr != nil {
 			return nil, countErr
 		}
@@ -753,6 +761,13 @@ func (s *LedgerService) GetDeletePreview(c core.Context, uid, ledgerId int64) (*
 		if count > 0 {
 			preview.BlockingReasons = append(preview.BlockingReasons, item.reason)
 		}
+	}
+	preview.ScheduledOccurrenceCount, err = sess.Where("ledger_id=?", ledgerId).In("status", []models.ScheduledOccurrenceStatus{models.ScheduledOccurrencePending, models.ScheduledOccurrenceDismissed}).Count(new(models.ScheduledOccurrence))
+	if err != nil {
+		return nil, err
+	}
+	if preview.ScheduledOccurrenceCount > 0 {
+		preview.BlockingReasons = append(preview.BlockingReasons, "scheduledOccurrences")
 	}
 	preview.SavingsGoalFundCount, err = sess.Table(new(models.SavingsGoalFund)).
 		Join("INNER", "savings_goal", "savings_goal.savings_goal_id = savings_goal_fund.goal_id").
@@ -832,7 +847,7 @@ func (s *LedgerService) GetOverview(c core.Context, uid, ledgerId int64) (*model
 }
 
 // DeleteLedger soft deletes an empty explicit ledger. Only the ledger owner
-// may delete it; accounts, transactions and savings goals must be moved or
+// may delete it; accounts, transactions, savings goals and active budgets must be moved or
 // removed through their own guarded workflows first.
 func (s *LedgerService) DeleteLedger(c core.Context, uid, ledgerId int64) error {
 	if ledgerId == models.DefaultLedgerId {
@@ -849,6 +864,11 @@ func (s *LedgerService) DeleteLedger(c core.Context, uid, ledgerId int64) error 
 	}
 
 	return db.DoTransaction(c, func(sess *xorm.Session) error {
+		if err := authorizeMonthlyBudgetLedger(sess, uid, ledger, func(role models.FamilyMemberRole) bool {
+			return role == models.FAMILY_MEMBER_ROLE_OWNER
+		}, true); err != nil {
+			return err
+		}
 		for _, model := range []any{&models.Account{}, &models.Transaction{}, &models.SavingsGoal{}} {
 			has, err := sess.Where("ledger_id=?", ledgerId).Exist(model)
 			if err != nil {
@@ -857,6 +877,35 @@ func (s *LedgerService) DeleteLedger(c core.Context, uid, ledgerId int64) error 
 			if has {
 				return errs.ErrLedgerNotEmpty
 			}
+		}
+		hasBudget, err := sess.Where("ledger_id=? AND deleted=?", ledgerId, false).Exist(new(models.MonthlyBudget))
+		if err != nil {
+			return err
+		}
+		if hasBudget {
+			return errs.ErrLedgerNotEmpty
+		}
+
+		hasTemplate, err := sess.Where("ledger_id=? AND deleted=?", ledgerId, false).Exist(new(models.TransactionTemplate))
+		if err != nil {
+			return err
+		}
+		if hasTemplate {
+			return errs.ErrLedgerNotEmpty
+		}
+		hasReview, err := sess.Where("ledger_id=? AND deleted=?", ledgerId, false).Exist(new(models.AIReviewItem))
+		if err != nil {
+			return err
+		}
+		if hasReview {
+			return errs.ErrLedgerNotEmpty
+		}
+		hasOccurrence, err := sess.Where("ledger_id=?", ledgerId).In("status", []models.ScheduledOccurrenceStatus{models.ScheduledOccurrencePending, models.ScheduledOccurrenceDismissed}).Exist(new(models.ScheduledOccurrence))
+		if err != nil {
+			return err
+		}
+		if hasOccurrence {
+			return errs.ErrLedgerNotEmpty
 		}
 
 		now := time.Now().Unix()

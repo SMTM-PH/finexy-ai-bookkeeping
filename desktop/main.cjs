@@ -2,11 +2,15 @@ const { app, BrowserWindow, Menu, ipcMain, net, shell } = require('electron');
 const { spawn, execFile } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
+const { isTrustedServerUrl, isTrustedPageUrl, isTrustedIpcEvent, isSafeExternalUrl } = require('./navigation-policy.cjs');
 
 const DEFAULT_SERVER_URL = 'http://127.0.0.1:8080';
 const WINDOW_STATE_FILE = 'window-state.json';
 const SETTINGS_FILE = 'desktop-settings.json';
 const WINDOWS_STYLE_FILE = path.join(__dirname, 'windows.css');
+const OFFLINE_FILE = path.join(__dirname, 'offline.html');
+const OFFLINE_URL = pathToFileURL(OFFLINE_FILE).href;
 
 let mainWindow;
 let serverUrl = DEFAULT_SERVER_URL;
@@ -33,7 +37,7 @@ function normalizeServerUrl(value) {
     if (!candidate) return DEFAULT_SERVER_URL;
     try {
         const parsed = new URL(candidate.includes('://') ? candidate : `http://${candidate}`);
-        if (!['http:', 'https:'].includes(parsed.protocol)) return DEFAULT_SERVER_URL;
+        if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) return DEFAULT_SERVER_URL;
         return parsed.origin;
     } catch {
         return DEFAULT_SERVER_URL;
@@ -95,7 +99,7 @@ async function waitForServer({ bootstrap = true } = {}) {
     const attempts = bootstrap ? 20 : 4;
     for (let index = 0; index < attempts; index += 1) {
         await new Promise(resolve => setTimeout(resolve, 1500));
-        if (bootstrap && index === 5) await startExistingContainers();
+        if (bootstrap && serverUrl === DEFAULT_SERVER_URL && index === 5) await startExistingContainers();
         if (await isServerReady()) return true;
     }
     return false;
@@ -119,7 +123,7 @@ async function loadApplication({ bootstrap = true } = {}) {
     if (ready) {
         await mainWindow.loadURL(`${serverUrl}/desktop#/`);
     } else {
-        await mainWindow.loadFile(path.join(__dirname, 'offline.html'));
+        await mainWindow.loadFile(OFFLINE_FILE);
     }
 }
 
@@ -151,21 +155,24 @@ function createWindow() {
     mainWindow.once('ready-to-show', () => mainWindow.show());
     mainWindow.on('close', saveWindowState);
     mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-        if (url.startsWith(serverUrl)) return { action: 'allow' };
-        void shell.openExternal(url);
+        // Keep external pages out of renderers that expose the desktop bridge.
+        if (isSafeExternalUrl(url)) void shell.openExternal(url);
         return { action: 'deny' };
     });
     mainWindow.webContents.on('will-navigate', (event, url) => {
-        if (url.startsWith(serverUrl) || url.startsWith('file:')) return;
+        if (isTrustedPageUrl(url, serverUrl, OFFLINE_URL)) return;
         event.preventDefault();
-        void shell.openExternal(url);
+        if (isSafeExternalUrl(url)) void shell.openExternal(url);
+    });
+    mainWindow.webContents.on('will-redirect', (event, url) => {
+        if (!isTrustedPageUrl(url, serverUrl, OFFLINE_URL)) event.preventDefault();
     });
     mainWindow.webContents.on('page-title-updated', event => {
         event.preventDefault();
         mainWindow.setTitle('Finexy');
     });
     mainWindow.webContents.on('did-finish-load', () => {
-        if (process.platform !== 'win32' || !mainWindow.webContents.getURL().startsWith(serverUrl)) return;
+        if (process.platform !== 'win32' || !isTrustedServerUrl(mainWindow.webContents.getURL(), serverUrl)) return;
         try {
             const windowsStyles = fs.readFileSync(WINDOWS_STYLE_FILE, 'utf8');
             void mainWindow.webContents.insertCSS(windowsStyles, { cssOrigin: 'user' });
@@ -193,14 +200,22 @@ if (!gotLock) {
         const settings = readJson(SETTINGS_FILE, {});
         serverUrl = normalizeServerUrl(process.env.FINEXY_SERVER_URL || settings.serverUrl);
 
-        ipcMain.handle('desktop:get-server-url', () => serverUrl);
-        ipcMain.handle('desktop:set-server-url', (_event, value) => {
+        function trustedHandler(handler) {
+            return (event, ...args) => {
+                if (!isTrustedIpcEvent(event, mainWindow?.webContents, serverUrl, OFFLINE_URL)) {
+                    throw new Error('Untrusted desktop request');
+                }
+                return handler(...args);
+            };
+        }
+        ipcMain.handle('desktop:get-server-url', trustedHandler(() => serverUrl));
+        ipcMain.handle('desktop:set-server-url', trustedHandler(value => {
             serverUrl = normalizeServerUrl(value);
             writeJson(SETTINGS_FILE, { serverUrl });
             return serverUrl;
-        });
-        ipcMain.handle('desktop:retry', () => loadApplication({ bootstrap: true }));
-        ipcMain.handle('desktop:quit', () => app.quit());
+        }));
+        ipcMain.handle('desktop:retry', trustedHandler(() => loadApplication({ bootstrap: true })));
+        ipcMain.handle('desktop:quit', trustedHandler(() => app.quit()));
 
         createWindow();
         app.on('activate', () => {

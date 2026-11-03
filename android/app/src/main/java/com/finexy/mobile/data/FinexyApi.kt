@@ -30,6 +30,10 @@ class FinexyApi(private val store: SecureStore) {
         .readTimeout(130, TimeUnit.SECONDS)
         .writeTimeout(130, TimeUnit.SECONDS)
         .build()
+    private val ledgerReportClient by lazy {
+        client.newBuilder().followRedirects(false).followSslRedirects(false)
+            .readTimeout(130, TimeUnit.SECONDS).build()
+    }
     private val jsonType = "application/json".toMediaType()
 
     private fun endpoint(path: String): String = "${serverUrl ?: error("尚未配置服务器地址")}/api/" + path.trimStart('/')
@@ -77,6 +81,19 @@ class FinexyApi(private val store: SecureStore) {
     }
 
     suspend fun modifyTransaction(payload: JSONObject): String = request("v1/transactions/modify.json", payload.toString())
+
+    suspend fun getTransaction(id: Long, ledgerId: Long): RemoteTransaction {
+        require(id > 0 && ledgerId >= 0) { "流水标识无效" }
+        val raw = request("v1/transactions/get.json?id=$id&ledgerId=$ledgerId&with_pictures=true")
+        requirePeriodicTransactionDetail(raw, id, ledgerId)
+        val envelope = JSONObject(raw)
+        require(envelope.get("success") == true) { "流水读取未成功" }
+        val item = envelope.getJSONObject("result")
+        require(item.getString("id").toLong() == id) { "流水响应对象不一致" }
+        require(item.optString("ledgerId").toLongOrNull() == ledgerId) { "流水响应账本不一致" }
+        require(item.get("tagIds") is JSONArray) { "流水标签关联不完整" }
+        return RemoteTransaction.from(item, ledgerId)
+    }
 
     suspend fun deleteTransaction(id: Long, ledgerId: Long = 0): String = request("v1/transactions/delete.json", JSONObject().put("id", id.toString()).apply {
         if (ledgerId > 0) put("ledgerId", ledgerId.toString())
@@ -260,6 +277,44 @@ class FinexyApi(private val store: SecureStore) {
 
     suspend fun withdrawFromSavingsGoal(goal: RemoteSavingsGoal, amountMinor: Long, accountId: Long, comment: String): RemoteSavingsGoalFund =
         moveGoalFunds(goal, amountMinor, accountId, comment, "v1/savings_goal/withdraw.json")
+
+    internal suspend fun getMonthlyBudget(ledgerId: Long, yearMonth: Int): MonthlyBudget? {
+        require(ledgerId >= 0) { "账本无效" }
+        requireBudgetMonth(yearMonth)
+        return MonthlyBudgetContract.parseBudget(request("v1/budget/monthly/get.json?ledgerId=$ledgerId&yearMonth=$yearMonth"), ledgerId, yearMonth)
+    }
+
+    internal suspend fun setMonthlyBudget(ledgerId: Long, draft: MonthlyBudgetDraft): MonthlyBudget {
+        val budget = MonthlyBudgetContract.parseBudget(request("v1/budget/monthly/set.json", draft.payload(ledgerId)),
+            ledgerId, draft.yearMonth, allowUnset = false) ?: error("预算保存响应不完整")
+        require(budget.amountMinor == draft.amountMinor && budget.currency == draft.currency && budget.categoryAmounts == draft.categoryAmounts && budget.revision > draft.expectedRevision) {
+            "预算保存响应与提交内容不一致，请刷新核对"
+        }
+        return budget
+    }
+
+    internal suspend fun deleteMonthlyBudget(ledgerId: Long, yearMonth: Int, expectedRevision: Long) {
+        MonthlyBudgetContract.requireDeleted(request("v1/budget/monthly/delete.json", MonthlyBudgetContract.deletePayload(ledgerId, yearMonth, expectedRevision)))
+    }
+
+    /** Never turn a missing child-category response into a valid empty selection. */
+    internal suspend fun listMonthlyBudgetCategories(ledgerId: Long): List<MonthlyBudgetCategory> {
+        require(ledgerId >= 0) { "账本无效" }
+        val path = "v1/transaction/categories/list.json?type=2&ledgerId=$ledgerId&parent_id="
+        val parents = MonthlyBudgetContract.parseCategoryLevel(request(path + "0"), 0)
+        val categories = parents.flatMap { parent ->
+            val children = MonthlyBudgetContract.parseCategoryLevel(request(path + parent.id), parent.id)
+            if (parent.hidden) emptyList() else children.filterNot { it.hidden }.map { it.copy(name = "${parent.name} / ${it.name}") }
+        }
+        require(categories.map { it.id }.distinct().size == categories.size) { "分类响应包含重复记录" }
+        return categories
+    }
+
+    internal suspend fun getMonthlyBudgetExpenses(ledgerId: Long, yearMonth: Int, zone: java.time.ZoneId): MonthlyBudgetExpenseSnapshot {
+        val accounts = listAccounts(ledgerId)
+        val transactions = listTransactions(ledgerId)
+        return MonthlyBudgetContract.parseExpenses(accounts, transactions, ledgerId, yearMonth, zone)
+    }
 
     /**
      * Ledger endpoints are optional on legacy servers. Returning null keeps
@@ -476,9 +531,10 @@ class FinexyApi(private val store: SecureStore) {
 
     suspend fun deleteTag(id: Long): String = request("v1/transaction/tags/delete.json", JSONObject().put("id", id.toString()).toString())
 
-    suspend fun listTemplates(templateType: Int = 1): String {
+    suspend fun listTemplates(templateType: Int = 1, ledgerId: Long = 0): String {
+        require(ledgerId >= 0) { "账本无效" }
         require(templateType in 1..2) { "模板类型无效" }
-        return request("v1/transaction/templates/list.json?templateType=$templateType")
+        return request("v1/transaction/templates/list.json?templateType=$templateType&ledgerId=$ledgerId")
     }
 
     suspend fun recognizeTransactionText(text: String): RecognizedTransaction {
@@ -513,6 +569,83 @@ class FinexyApi(private val store: SecureStore) {
         return LocalOCRResult(text, result.optDouble("confidence", 0.0))
     }
 
+    /** New ledger APIs require durable/atomic server capabilities; never fall back to resolve. */
+    private fun requireLedgerAISession() {
+        check(store.get(KEY_SERVER_URL)?.trimEnd('/') == serverUrl && store.get(KEY_TOKEN) == sessionToken) {
+            "登录状态已改变，请保留原内容并重新进入页面"
+        }
+    }
+
+    private suspend fun requestLedgerAI(path: String, body: String? = null, requestClient: OkHttpClient = client): String {
+        val raw = try { request(path, body, requestClient) } catch (_: org.json.JSONException) {
+            // JSONObject exceptions can contain raw response text; never persist it as a draft error.
+            throw IllegalArgumentException("AI 回包格式不完整，请保留原内容后重试")
+        }
+        requireLedgerAISession()
+        return raw
+    }
+
+    suspend fun requireLedgerAIReview(ledgerId: Long, recognition: Boolean = false) {
+        require(ledgerId >= 0) { "AI 账本无效" }
+        requireLedgerAIReviewCapabilities(requestLedgerAI("v1/ai/review/capabilities.json?ledgerId=$ledgerId"), ledgerId, recognition)
+    }
+
+    suspend fun listLedgerAIReviewItems(ledgerId: Long, status: Int = 1): List<LedgerAIReviewItem> {
+        require(ledgerId >= 0 && status in 1..3) { "AI 队列查询无效" }
+        requireLedgerAIReview(ledgerId)
+        return collectLedgerAIReviewPages(ledgerId, status) { before ->
+            requestLedgerAI("v1/ai/review/list.json?ledgerId=$ledgerId&status=$status&beforeId=$before&limit=100")
+        }
+    }
+
+    suspend fun getLedgerAIReviewItem(ledgerId: Long, id: Long): LedgerAIReviewItem {
+        require(ledgerId >= 0 && id > 0) { "AI 条目标识无效" }
+        return parseLedgerAIReviewItem(requestLedgerAI("v1/ai/review/get.json?ledgerId=$ledgerId&id=$id"), ledgerId, id)
+    }
+
+    /** The caller persists these exact bytes and the stable key before invoking this method. */
+    suspend fun createLedgerAIReviewItem(ledgerId: Long, payloadJson: String): LedgerAIReviewItem {
+        validateLedgerAIReviewCreate(payloadJson, ledgerId)
+        requireLedgerAIReview(ledgerId)
+        val item = parseLedgerAIReviewItem(requestLedgerAI("v1/ai/review/create.json", payloadJson), ledgerId)
+        requireLedgerAIReviewCreateReceipt(item, payloadJson, ledgerId)
+        return item
+    }
+
+    /** One atomic server operation, with the original ledger/item/request unchanged. */
+    suspend fun confirmLedgerAIReviewItem(ledgerId: Long, id: Long, payloadJson: String): LedgerAIConfirmationReceipt {
+        validateLedgerAIConfirmation(payloadJson, ledgerId, id)
+        requireLedgerAIReview(ledgerId)
+        return parseLedgerAIConfirmationReceipt(requestLedgerAI("v1/ai/review/confirm.json", payloadJson), ledgerId, id)
+    }
+
+    suspend fun changeLedgerAIReviewItem(ledgerId: Long, id: Long, action: String) {
+        require(ledgerId >= 0 && id > 0 && action in setOf("dismiss", "restore", "delete")) { "AI 条目状态操作无效" }
+        requireLedgerAIReview(ledgerId)
+        val payload = JSONObject().put("ledgerId", ledgerId.toString()).put("id", id.toString()).toString()
+        requireLedgerAIStateResult(requestLedgerAI("v1/ai/review/$action.json", payload))
+    }
+
+    suspend fun recognizeLedgerTransactionText(ledgerId: Long, text: String): LedgerAIRecognition {
+        require(ledgerId >= 0 && trimAIReviewSource(text).isNotEmpty() && text.toByteArray(Charsets.UTF_8).size <= 8000) { "AI 来源文本为空或超限" }
+        requireLedgerAIReview(ledgerId, recognition = true)
+        val body = JSONObject().put("ledgerId", ledgerId.toString()).put("text", text).toString()
+        return parseLedgerAIRecognition(requestLedgerAI("v1/llm/transactions/recognize_text.json", body, recognitionClient), ledgerId)
+    }
+
+    suspend fun recognizeLedgerReceiptImage(ledgerId: Long, image: ByteArray, fileName: String, contentType: String): LedgerAIRecognition {
+        require(ledgerId >= 0 && image.isNotEmpty() && image.size <= 20 * 1024 * 1024 && contentType in setOf("image/jpeg", "image/png", "image/webp")) { "AI 图片为空、过大或格式不支持" }
+        requireLedgerAIReview(ledgerId, recognition = true)
+        val body = MultipartBody.Builder().setType(MultipartBody.FORM)
+            .addFormDataPart("ledgerId", ledgerId.toString())
+            .addFormDataPart("image", fileName, image.toRequestBody(contentType.toMediaType())).build()
+        val raw = try { requestMultipart("v1/llm/transactions/recognize_receipt_image.json", body) } catch (_: org.json.JSONException) {
+            throw IllegalArgumentException("AI 回包格式不完整，请保留原内容后重试")
+        }
+        requireLedgerAISession()
+        return parseLedgerAIRecognition(raw, ledgerId)
+    }
+
     suspend fun listAIReviewItems(): List<RemoteAIReviewItem> = parseAIReviewItems(request("v1/ai/review/list.json"))
 
     suspend fun createAIReviewItem(sourceType: Int, sourceText: String, recognized: RecognizedTransaction?, failureReason: String = ""): RemoteAIReviewItem {
@@ -543,12 +676,12 @@ class FinexyApi(private val store: SecureStore) {
     }
 
     /** Review-queue pages are bounded by the server (1–100); walk them fully. */
-    suspend fun listOccurrences(status: Int): List<RemoteOccurrence> {
-        require(status in 1..3) { "待确认状态无效" }
+    suspend fun listOccurrences(status: Int, ledgerId: Long = 0): List<RemoteOccurrence> {
+        require(status in 1..3 && ledgerId >= 0) { "待确认状态或账本无效" }
         val items = linkedMapOf<Pair<Long, Long>, RemoteOccurrence>()
         var offset = 0
         do {
-            val page = parseOccurrenceList(request("v1/schedule/review/list.json?status=$status&offset=$offset&limit=100"))
+            val page = parseOccurrenceList(request("v1/schedule/review/list.json?status=$status&ledgerId=$ledgerId&offset=$offset&limit=100"), ledgerId, status)
             page.forEach { item -> require(items.put(item.templateId to item.scheduledUnixTime, item) == null) { "待确认列表包含重复记录" } }
             check(page.size < 100 || offset < 10_000) { "待确认列表分页未收敛" }
             offset += page.size
@@ -556,120 +689,115 @@ class FinexyApi(private val store: SecureStore) {
         return items.values.toList()
     }
 
-    suspend fun confirmOccurrence(templateId: Long, scheduledUnixTime: Long): Long =
-        parseConfirmedTransactionId(request("v1/schedule/review/confirm.json", occurrencePayload(templateId, scheduledUnixTime).toString()))
-
-    suspend fun setOccurrenceDismissed(templateId: Long, scheduledUnixTime: Long, dismissed: Boolean): Unit {
-        request("v1/schedule/review/${if (dismissed) "dismiss" else "restore"}.json", occurrencePayload(templateId, scheduledUnixTime).toString())
+    /** Refresh live membership before writes; the server checks again in its transaction. */
+    suspend fun periodicRole(ledgerId: Long): Int {
+        require(ledgerId >= 0) { "账本无效" }
+        if (ledgerId == 0L) return RemoteLedgerMember.ROLE_OWNER
+        val members = listLedgerMembers(ledgerId)
+        require(members.all { it.ledgerId == ledgerId }) { "成员响应账本不一致" }
+        return members.filter { it.isCurrentUser && it.status == 1 }.singleOrNull()?.role
+            ?: error("当前账本成员权限无法确认")
     }
 
-    internal fun occurrencePayload(templateId: Long, scheduledUnixTime: Long): JSONObject {
-        require(templateId > 0 && scheduledUnixTime > 0) { "待确认记录标识无效" }
-        return JSONObject().put("templateId", templateId.toString()).put("scheduledUnixTime", scheduledUnixTime)
+    private suspend fun requirePeriodicWrite(ledgerId: Long, manage: Boolean = false) {
+        val role = periodicRole(ledgerId)
+        require(role in if (manage) listOf(RemoteLedgerMember.ROLE_OWNER, RemoteLedgerMember.ROLE_ADMIN)
+            else listOf(RemoteLedgerMember.ROLE_OWNER, RemoteLedgerMember.ROLE_ADMIN, RemoteLedgerMember.ROLE_MEMBER)) { "当前成员没有此操作权限" }
     }
 
-    /**
-     * A malformed or partial review list must fail loudly instead of being
-     * treated as an empty queue: only a real empty array may clear the cache.
-     */
-    internal fun parseOccurrenceList(raw: String): List<RemoteOccurrence> {
-        val envelope = JSONObject(raw)
-        require(envelope.optBoolean("success", false)) { "待确认列表响应失败" }
-        val items = envelope.optJSONArray("result") ?: error("待确认列表响应不完整")
-        return (0 until items.length()).map { index ->
-            val item = items.optJSONObject(index) ?: error("待确认记录无效")
-            val templateId = item.optString("templateId").toLongOrNull()
-            val scheduledUnixTime = item.optLong("scheduledUnixTime")
-            val status = item.optInt("status")
-            require(templateId != null && templateId > 0 && scheduledUnixTime > 0 && status in 1..3) {
-                "待确认记录包含无效标识或状态"
-            }
-            val snapshot = item.optJSONObject("snapshot") ?: error("待确认记录缺少快照")
-            val type = snapshot.optInt("type")
-            require(type in 2..4) { "待确认快照交易类型无效" }
-            val categoryId = snapshot.optString("categoryId").toLongOrNull() ?: 0L
-            val sourceAccountId = snapshot.optString("sourceAccountId").toLongOrNull() ?: 0L
-            require(categoryId > 0 && sourceAccountId > 0) { "待确认快照缺少账户或分类" }
-            RemoteOccurrence(
-                templateId = templateId, scheduledUnixTime = scheduledUnixTime, status = status,
-                transactionId = item.optString("transactionId").toLongOrNull() ?: 0L,
-                name = snapshot.optString("name"), type = type, categoryId = categoryId,
-                sourceAccountId = sourceAccountId,
-                destinationAccountId = snapshot.optString("destinationAccountId").toLongOrNull() ?: 0L,
-                sourceAmountMinor = snapshot.optLong("sourceAmount"),
-                destinationAmountMinor = snapshot.optLong("destinationAmount"),
-                utcOffset = snapshot.optInt("utcOffset"), hideAmount = snapshot.optBoolean("hideAmount"),
-                tagIdsJson = (snapshot.optJSONArray("tagIds") ?: JSONArray()).toString(),
-                comment = snapshot.optString("comment")
-            )
-        }
+    suspend fun confirmOccurrence(templateId: Long, scheduledUnixTime: Long, ledgerId: Long = 0): Long {
+        requirePeriodicWrite(ledgerId)
+        return parseConfirmedTransactionId(request("v1/schedule/review/confirm.json", occurrencePayload(templateId, scheduledUnixTime, ledgerId).toString()), ledgerId)
     }
 
-    internal fun parseConfirmedTransactionId(raw: String): Long {
-        val result = JSONObject(raw).optJSONObject("result") ?: error("确认响应缺少结果")
-        val id = result.optString("transactionId").toLongOrNull() ?: 0L
-        require(id > 0) { "确认响应缺少流水 ID" }
-        return id
+    suspend fun setOccurrenceDismissed(templateId: Long, scheduledUnixTime: Long, dismissed: Boolean, ledgerId: Long = 0) {
+        requirePeriodicWrite(ledgerId)
+        requirePeriodicBooleanResult(request("v1/schedule/review/${if (dismissed) "dismiss" else "restore"}.json", occurrencePayload(templateId, scheduledUnixTime, ledgerId).toString()))
     }
 
-    suspend fun listScheduledTemplatesIfEnabled(): List<RemoteTemplate>? = try {
-        parseScheduledTemplateList(listTemplates(2))
+    internal fun occurrencePayload(templateId: Long, scheduledUnixTime: Long, ledgerId: Long = 0): JSONObject {
+        require(templateId > 0 && scheduledUnixTime > 0 && ledgerId >= 0) { "待确认记录标识无效" }
+        return JSONObject().put("ledgerId", ledgerId.toString()).put("templateId", templateId.toString()).put("scheduledUnixTime", scheduledUnixTime)
+    }
+
+    internal fun parseOccurrenceList(raw: String, ledgerId: Long = 0, status: Int? = null) = parsePeriodicOccurrences(raw, ledgerId, status)
+    internal fun parseConfirmedTransactionId(raw: String, ledgerId: Long = 0) = parsePeriodicConfirmation(raw, ledgerId)
+
+    suspend fun listScheduledTemplatesIfEnabled(ledgerId: Long = 0): List<RemoteTemplate>? = try {
+        parseScheduledTemplateList(listTemplates(2, ledgerId), ledgerId)
     } catch (error: ApiException) {
-        // Go ErrScheduledTransactionNotEnabled: category 2, subcategory 10, index 3.
         if (error.status == 400 && error.serverCode == 210003) null else throw error
     }
 
-    suspend fun createTemplate(template: TemplateEntity): RemoteTemplate {
-        val payload = templatePayload(template)
-        val raw = request("v1/transaction/templates/add.json", payload.toString())
-        val result = JSONObject(raw).opt("result")
-        return parseTemplateResponse(JSONObject().put("result", JSONArray().put(result)).toString()).firstOrNull()
-            ?: error("Invalid template response")
-    }
-
-    internal fun parseScheduledTemplateList(raw: String): List<RemoteTemplate> {
+    private fun parseTemplateWrite(raw: String, template: TemplateEntity, modifying: Boolean): RemoteTemplate {
         val envelope = JSONObject(raw)
-        require(envelope.optBoolean("success", false)) { "周期计划响应失败" }
-        val items = envelope.optJSONArray("result") ?: error("周期计划列表响应不完整")
-        val ids = mutableSetOf<Long>()
-        for (index in 0 until items.length()) {
-            val item = items.optJSONObject(index) ?: error("周期计划数据无效")
-            val id = item.optString("id").toLongOrNull()
-            require(id != null && id > 0 && ids.add(id) && item.optInt("templateType") == 2) {
-                "周期计划包含无效 ID、重复项或错误类型"
-            }
+        require(envelope.get("success") == true) { "模板写入响应失败" }
+        val result = envelope.getJSONObject("result")
+        return parsePeriodicTemplates(JSONObject().put("success", true).put("result", JSONArray().put(result)).toString(), template.ledgerId, template.templateType).single().also {
+            require(!modifying || it.id == template.id) { "模板写入响应对象不一致" }
         }
-        return parseTemplateResponse(raw).also { require(it.size == items.length()) { "周期计划解析不完整" } }
     }
 
-    suspend fun deleteTemplate(id: Long): String = request("v1/transaction/templates/delete.json", JSONObject().put("id", id.toString()).toString())
+    suspend fun createTemplate(template: TemplateEntity): RemoteTemplate {
+        requirePeriodicWrite(template.ledgerId, manage = true)
+        return parseTemplateWrite(request("v1/transaction/templates/add.json", templatePayload(template).toString()), template, false)
+    }
 
-    suspend fun hideTemplate(id: Long, hidden: Boolean): String {
+    suspend fun requireDurableTemplateCreation(templateType: Int) {
+        val raw = try { request("v1/transaction/templates/capabilities.json") }
+        catch (error: ApiException) {
+            if (error.status == 404) throw IllegalStateException("服务器尚不支持持久模板创建，请先升级服务端", error)
+            throw error
+        }
+        requireTemplateCreationCapabilities(raw, templateType)
+    }
+
+    /** Upload the confirmed stored snapshot only, after fresh capability and role checks. */
+    suspend fun createTemplate(write: TemplateCreationEntity): TemplateCreationReceipt {
+        validateTemplateCreation(write)
+        require(write.state == TemplateCreationEntity.PENDING) { "已保存模板只需刷新" }
+        requireDurableTemplateCreation(write.templateType)
+        requirePeriodicWrite(write.ledgerId, manage = true)
+        val payload = JSONObject(write.payloadJson).put("clientSessionId", write.clientSessionId)
+        return parseTemplateCreationReceipt(request("v1/transaction/templates/add_durable.json", payload.toString()), write.ledgerId, write.templateType)
+    }
+
+    internal fun parseScheduledTemplateList(raw: String, ledgerId: Long = 0) = parsePeriodicTemplates(raw, ledgerId, 2)
+
+    suspend fun deleteTemplate(id: Long, ledgerId: Long = 0): String {
         require(id > 0) { "模板 ID 无效" }
-        return request("v1/transaction/templates/hide.json", JSONObject().put("id", id.toString()).put("hidden", hidden).toString())
+        requirePeriodicWrite(ledgerId, manage = true)
+        return request("v1/transaction/templates/delete.json", JSONObject().put("ledgerId", ledgerId.toString()).put("id", id.toString()).toString()).also(::requirePeriodicBooleanResult)
     }
 
-    suspend fun moveTemplates(templates: List<TemplateEntity>): String = request(
-        "v1/transaction/templates/move.json", templateOrderPayload(templates).toString()
-    )
+    suspend fun hideTemplate(id: Long, hidden: Boolean, ledgerId: Long = 0): String {
+        require(id > 0) { "模板 ID 无效" }
+        requirePeriodicWrite(ledgerId, manage = true)
+        return request("v1/transaction/templates/hide.json", JSONObject().put("ledgerId", ledgerId.toString()).put("id", id.toString()).put("hidden", hidden).toString()).also(::requirePeriodicBooleanResult)
+    }
+
+    suspend fun moveTemplates(templates: List<TemplateEntity>): String {
+        val payload = templateOrderPayload(templates)
+        requirePeriodicWrite(templates.first().ledgerId, manage = true)
+        return request("v1/transaction/templates/move.json", payload.toString()).also(::requirePeriodicBooleanResult)
+    }
 
     internal fun templateOrderPayload(templates: List<TemplateEntity>): JSONObject {
-        require(templates.isNotEmpty() && templates.all { it.id > 0 } && templates.map { it.id }.distinct().size == templates.size) { "模板排序包含无效或重复 ID" }
-        require(templates.map { it.templateType }.distinct().size == 1) { "普通模板和周期计划不能混合排序" }
-        return JSONObject().put("newDisplayOrders", JSONArray().apply {
+        require(templates.isNotEmpty() && templates.all { it.id > 0 && it.ledgerId >= 0 } && templates.map { it.id }.distinct().size == templates.size) { "模板排序包含无效或重复 ID" }
+        require(templates.map { it.templateType }.distinct().size == 1 && templates.map { it.ledgerId }.distinct().size == 1) { "不同账本或类型的模板不能混合排序" }
+        return JSONObject().put("ledgerId", templates.first().ledgerId.toString()).put("newDisplayOrders", JSONArray().apply {
             templates.forEachIndexed { index, template -> put(JSONObject().put("id", template.id.toString()).put("displayOrder", index)) }
         })
     }
 
     suspend fun modifyTemplate(template: TemplateEntity): RemoteTemplate {
-        val payload = templatePayload(template).put("id", template.id.toString())
-        val raw = request("v1/transaction/templates/modify.json", payload.toString())
-        val result = JSONObject(raw).opt("result")
-        return parseTemplateResponse(JSONObject().put("result", JSONArray().put(result)).toString()).firstOrNull()
-            ?: error("Invalid template response")
+        require(template.id > 0) { "模板 ID 无效" }
+        requirePeriodicWrite(template.ledgerId, manage = true)
+        return parseTemplateWrite(request("v1/transaction/templates/modify.json", templatePayload(template).put("id", template.id.toString()).toString()), template, true)
     }
 
     internal fun templatePayload(template: TemplateEntity): JSONObject = JSONObject()
+        .put("ledgerId", template.ledgerId.toString())
         .put("templateType", template.templateType).put("name", template.name).put("type", template.type)
         .put("categoryId", template.categoryId.toString()).put("sourceAccountId", template.sourceAccountId.toString())
         .put("destinationAccountId", template.destinationAccountId.toString()).put("sourceAmount", template.sourceAmountMinor)
@@ -683,6 +811,10 @@ class FinexyApi(private val store: SecureStore) {
                 put("scheduledEndDate", template.scheduledEndDate ?: JSONObject.NULL)
                 put("utcOffset", template.utcOffset)
             }
+            require(template.ledgerId >= 0 && template.templateType in 1..2) { "模板账本或类型无效" }
+            // Validate integer money, references and calendar before issuing a write.
+            val validation = JSONObject(toString()).put("id", "1")
+            parsePeriodicTemplates(JSONObject().put("success", true).put("result", JSONArray().put(validation)).toString(), template.ledgerId, template.templateType)
         }
 
     fun parseTransactionResponse(raw: String, ledgerId: Long = 0): List<RemoteTransaction> {
@@ -777,27 +909,79 @@ class FinexyApi(private val store: SecureStore) {
         }
     }
 
-    fun parseTemplateResponse(raw: String): List<RemoteTemplate> {
-        val data = JSONObject(raw).opt("result") ?: return emptyList()
-        val array = data as? JSONArray ?: return emptyList()
-        return (0 until array.length()).mapNotNull { index ->
-            val item = array.optJSONObject(index) ?: return@mapNotNull null
-            val id = item.optString("id").toLongOrNull() ?: item.optLong("id")
-            if (id == 0L) null else RemoteTemplate(
-                id, item.optString("name"), item.optInt("type", 3),
-                item.optString("categoryId").toLongOrNull() ?: item.optLong("categoryId"),
-                item.optString("sourceAccountId").toLongOrNull() ?: item.optLong("sourceAccountId"),
-                item.optLong("sourceAmount"), item.optString("comment"),
-                (item.optJSONArray("tagIds") ?: JSONArray()).toString(), item.optBoolean("hidden"),
-                templateType = item.optInt("templateType", 1),
-                destinationAccountId = item.optString("destinationAccountId").toLongOrNull() ?: item.optLong("destinationAccountId"),
-                destinationAmountMinor = item.optLong("destinationAmount"), hideAmount = item.optBoolean("hideAmount"),
-                scheduledFrequencyType = item.optIntOrNull("scheduledFrequencyType"),
-                scheduledFrequency = item.optNullableString("scheduledFrequency"),
-                scheduledStartDate = item.optNullableString("scheduledStartDate"), scheduledEndDate = item.optNullableString("scheduledEndDate"),
-                utcOffset = item.optIntOrNull("utcOffset"), scheduledAt = item.optIntOrNull("scheduledAt"),
-                nextScheduledTime = item.optLongOrNull("nextScheduledTime"), displayOrder = item.optInt("displayOrder")
-            )
+    fun parseTemplateResponse(raw: String, ledgerId: Long = 0): List<RemoteTemplate> = parsePeriodicTemplates(raw, ledgerId)
+
+    /** Selected-ledger controllers must discard this context on selection changes. */
+    internal fun captureLedgerReportContext(ledgerId: Long): LedgerReportContext {
+        require(ledgerId >= 0) { "报告账本无效" }
+        check(!sessionToken.isNullOrBlank() && store.get("local_mode") != "true") { "请先登录报告服务器" }
+        requireLedgerAISession()
+        return LedgerReportContext(serverUrl.orEmpty(), LedgerScope.identity(serverUrl.orEmpty(), sessionToken, false), ledgerId)
+    }
+
+    private fun requireLedgerReportContext(context: LedgerReportContext, query: LedgerReportQuery) {
+        requireLedgerAISession()
+        check(!sessionToken.isNullOrBlank() && store.get("local_mode") != "true" && context.serverUrl == serverUrl &&
+            context.identity == LedgerScope.identity(serverUrl.orEmpty(), sessionToken, false) && context.ledgerId == query.ledgerId) {
+            "报告所属账号或账本已改变，请重新进入页面"
+        }
+    }
+
+    internal suspend fun queryLedgerReport(context: LedgerReportContext, query: LedgerReportQuery, offset: Int = 0,
+        count: Int = 50, expectedSnapshotHash: String? = null): LedgerReportPage {
+        requireLedgerReportContext(context, query)
+        val payload = LedgerReportContract.request(query, offset, count, expectedSnapshotHash)
+        val raw = try { request("v1/reports/query.json", payload, ledgerReportClient) } catch (_: org.json.JSONException) {
+            throw LedgerReportContractException()
+        }
+        requireLedgerReportContext(context, query)
+        return LedgerReportContract.page(raw, query, offset, count, expectedSnapshotHash)
+    }
+
+    internal suspend fun previewLedgerReportExport(context: LedgerReportContext, page: LedgerReportPage): LedgerReportPreview {
+        requireLedgerReportContext(context, page.query)
+        val raw = try { request("v1/reports/export/preview.json", LedgerReportContract.previewRequest(page), ledgerReportClient) } catch (_: org.json.JSONException) {
+            throw LedgerReportContractException()
+        }
+        requireLedgerReportContext(context, page.query)
+        return LedgerReportContract.preview(raw, page, System.currentTimeMillis() / 1000)
+    }
+
+    /** Returns validated bytes, not a successful system-file-save receipt. No redirect is followed. */
+    internal suspend fun downloadLedgerReportCsv(context: LedgerReportContext, page: LedgerReportPage, preview: LedgerReportPreview,
+        confirmed: Boolean, includeHiddenAmounts: Boolean = false): LedgerReportDownload {
+        requireLedgerReportContext(context, page.query)
+        if (sessionToken != null) {
+            val expires = tokenExpiry(sessionToken!!)
+            if (expires > 0 && expires - System.currentTimeMillis() / 1000 < 86400) refreshSession()
+        }
+        requireLedgerReportContext(context, page.query)
+        val payload = LedgerReportContract.exportRequest(page, preview, confirmed, includeHiddenAmounts, System.currentTimeMillis() / 1000)
+        val requestToken = sessionToken
+        return withContext(Dispatchers.IO) {
+            val builder = Request.Builder().url(endpoint("v1/reports/export.csv"))
+                .header("X-Timezone-Offset", (java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 60000).toString())
+                .header("Accept", "text/csv").post(payload.toRequestBody(jsonType))
+            requestToken?.let { builder.header("Authorization", "Bearer $it") }
+            ledgerReportClient.newCall(builder.build()).execute().use { response ->
+                if (response.code != 200) throw ApiException(response.code, "报告下载失败（HTTP ${response.code}），请重新读取报告后重试")
+                for (header in listOf("Content-Type", "Content-Disposition", "X-Finexy-Report-Snapshot", "X-Finexy-Report-Count", "X-Finexy-Report-Amount-Unit")) {
+                    if (response.headers.values(header).size != 1) throw LedgerReportContractException()
+                }
+                val body = response.body ?: throw LedgerReportContractException()
+                if (body.contentLength() > LedgerReportContract.MAX_DOWNLOAD_BYTES) throw LedgerReportContractException()
+                val source = body.source()
+                if (source.request(LedgerReportContract.MAX_DOWNLOAD_BYTES.toLong() + 1)) throw LedgerReportContractException()
+                val bytes = source.readByteArray()
+                requireLedgerReportContext(context, page.query)
+                check(sessionToken == requestToken) { "报告确认会话已改变，请重新预览" }
+                // A slow response must not deliver a result after its confirmation has expired.
+                LedgerReportContract.exportRequest(page, preview, confirmed, includeHiddenAmounts, System.currentTimeMillis() / 1000)
+                val result = LedgerReportContract.download(bytes, response.headers.names().associateWith { response.header(it).orEmpty() }, page)
+                requireLedgerReportContext(context, page.query)
+                check(sessionToken == requestToken) { "报告确认会话已改变，请重新预览" }
+                result
+            }
         }
     }
 
@@ -968,14 +1152,14 @@ data class RemoteTemplate(val id: Long, val name: String, val type: Int, val cat
     val templateType: Int = 1, val destinationAccountId: Long = 0, val destinationAmountMinor: Long = 0, val hideAmount: Boolean = false,
     val scheduledFrequencyType: Int? = null, val scheduledFrequency: String? = null, val scheduledStartDate: String? = null,
     val scheduledEndDate: String? = null, val utcOffset: Int? = null, val scheduledAt: Int? = null, val nextScheduledTime: Long? = null,
-    val displayOrder: Int = 0)
+    val displayOrder: Int = 0, val ledgerId: Long = 0)
 
 /** One due schedule waiting for user confirmation; never auto-posted. */
 data class RemoteOccurrence(
     val templateId: Long, val scheduledUnixTime: Long, val status: Int, val transactionId: Long,
     val name: String, val type: Int, val categoryId: Long, val sourceAccountId: Long, val destinationAccountId: Long,
     val sourceAmountMinor: Long, val destinationAmountMinor: Long, val utcOffset: Int, val hideAmount: Boolean,
-    val tagIdsJson: String, val comment: String
+    val tagIdsJson: String, val comment: String, val ledgerId: Long = 0
 )
 
 data class LocalOCRResult(val text: String, val confidence: Double)

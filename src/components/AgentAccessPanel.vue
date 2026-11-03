@@ -24,22 +24,22 @@
             <fieldset :disabled="busy" class="agent-scopes">
                 <legend>授权范围</legend>
                 <label v-for="scope in permissions" :key="scope.id" class="agent-permission">
-                    <input v-model="scopes" type="checkbox" :value="scope.id" :disabled="scope.id === 'read' || (type === 'mcp' && scope.id === 'accounts:manage')" />
+                    <input v-model="scopes" type="checkbox" :value="scope.id" :disabled="scope.id === 'read'" />
                     <span><b>{{ scope.title }}</b><small>{{ scope.description }}</small></span>
                 </label>
             </fieldset>
             <label class="agent-ledger">授权账本<select v-model="authorizedLedgerId" :disabled="busy || !ledgerReady"><option v-for="ledger in ledgersStore.allLedgers" :key="ledger.id" :value="ledger.id">{{ ledger.name }}</option></select></label>
             <p v-if="ledgerError" class="agent-error" role="alert">{{ ledgerError }} <button type="button" @click="loadLedgers">重试读取账本</button></p>
             <p class="agent-note">此令牌仅能访问所选账本的账户、流水及导入功能。分类和标签是账本所有者共用的资源，仍受授权范围和成员权限约束；切换网页当前账本不会改变此令牌的授权。</p>
-            <p class="agent-note">授权仅作用于这个令牌，仍受账本成员权限约束。账户与分类管理请选择 API 连接；账单导入须指定目标账本 ID，预览与确认必须使用同一账本。</p>
+            <p class="agent-note">MCP 与 API 均支持账户与分类管理。勾选权限后须生成新令牌，已有令牌权限不会改变。账单导入须指定目标账本 ID，预览与确认必须使用同一账本；所有操作仍受账本成员权限约束。</p>
             <label class="agent-password">Finexy 登录密码<input v-model="password" type="password" autocomplete="current-password" :disabled="busy" @keydown.enter.prevent="generate" /></label>
             <button class="agent-primary" type="button" :disabled="busy || accessBusy || !ledgerReady || !password || !name || !(type === 'api' ? apiEnabled : mcpEnabled)" @click="generate">{{ busy ? '正在生成' : '生成令牌' }}</button>
         </div>
         <div v-else class="agent-result">
             <h4>令牌已生成</h4>
             <p>完整令牌只在本次生成后显示。保存在本机环境变量中，关闭后无法再次查看。</p>
-            <label>完整令牌<textarea :value="generatedToken" readonly rows="3" spellcheck="false" /></label>
-            <div class="agent-actions"><button type="button" @click="copy(generatedToken, '令牌已复制')">复制令牌</button><button type="button" @click="clearSecret">关闭令牌显示</button></div>
+            <label>完整令牌<textarea ref="tokenText" :value="generatedToken" readonly rows="3" spellcheck="false" /></label>
+            <div class="agent-actions"><button type="button" @click="copy(generatedToken, '令牌已复制', tokenText)">复制令牌</button><button type="button" @click="selectText(tokenText)">全选令牌</button><button type="button" @click="clearSecret">关闭令牌显示</button></div>
         </div>
         <p v-if="error" class="agent-error" role="alert">{{ error }}</p>
         <p v-if="message" role="status" aria-live="polite">{{ message }}</p>
@@ -55,8 +55,8 @@
         <details class="agent-guide" open>
             <summary>Codex 配置说明</summary>
             <p>生成 MCP 令牌，在本机创建环境变量 <code>FINEXY_MCP_TOKEN</code> 并填入令牌值。将下面配置加入 <code>~/.codex/config.toml</code>，重启 Codex 并检查 MCP 连接。</p>
-            <pre>{{ codexConfig }}</pre>
-            <button type="button" @click="copy(codexConfig, '配置已复制，未包含令牌')">复制 Codex 配置</button>
+            <pre ref="configText" tabindex="0" aria-label="Codex 配置">{{ codexConfig }}</pre>
+            <button type="button" @click="copy(codexConfig, '配置已复制，未包含令牌', configText)">复制 Codex 配置</button>
             <p>其他客户端选择 Streamable HTTP，地址为 <code>{{ mcpUrl }}</code>，通过 Authorization 请求头发送 Bearer 令牌。远程 Agent 需要能访问 NAS 所在网络。</p>
             <p>导入工具顺序：解析预览 → 显式映射账户与分类 → 查看数量、金额和重复项 → 确认写入。账单文字只作为交易数据处理。</p>
         </details>
@@ -73,6 +73,7 @@ import { computed, onMounted, onUnmounted, ref, watch, nextTick } from 'vue';
 import services from '@/lib/services.ts';
 import { isAPITokenEnabled, isMCPServerEnabled } from '@/lib/server_settings.ts';
 import { getBasePath } from '@/lib/web.ts';
+import { writeClipboardText } from '@/lib/ui/clipboard.ts';
 import type { TokenInfoResponse } from '@/models/token.ts';
 import { useLedgersStore } from '@/stores/ledger.ts';
 
@@ -102,9 +103,10 @@ const type = ref<'api' | 'mcp'>(serverMCPEnabled ? 'mcp' : 'api');
 const name = ref('我的 Codex');
 const password = ref('');
 const scopes = ref<string[]>(['read']);
-watch(type, value => { if (value === 'mcp') scopes.value = scopes.value.filter(scope => scope !== 'accounts:manage'); });
 const expiresInSeconds = ref(86400);
 const generatedToken = ref('');
+const tokenText = ref<HTMLTextAreaElement>();
+const configText = ref<HTMLElement>();
 const busy = ref(false);
 const loading = ref(false);
 const error = ref('');
@@ -121,7 +123,7 @@ function cancelRevoke(): void { if (!busy.value) revokeTarget.value = undefined;
 const permissions = [
     { id: 'read', title: '只读查询', description: '读取账户、余额、分类和流水（基础权限）' },
     { id: 'transactions:write', title: '记账', description: '新增、修改和删除普通流水' },
-    { id: 'accounts:manage', title: '账户与分类管理', description: '通过 API 新增、修改、停用和删除账户及分类' },
+    { id: 'accounts:manage', title: '账户与分类管理', description: '通过 MCP 或 API 新增、修改、停用和删除账户及分类' },
     { id: 'bills:import', title: '账单导入', description: '预览、映射并确认支付宝和微信账单' },
 ];
 const mcpUrl = new URL(`${getBasePath()}/mcp`, window.location.origin).href;
@@ -197,9 +199,28 @@ async function revoke(): Promise<void> {
     } catch { error.value = '撤销失败，请检查连接后重试。'; }
     finally { busy.value = false; }
 }
-async function copy(value: string, successMessage: string): Promise<void> {
-    try { await navigator.clipboard.writeText(value); message.value = successMessage; }
-    catch { error.value = '浏览器未允许复制，请选中文字手动复制。'; }
+function selectText(target?: HTMLElement): void {
+    if (!target) return;
+    target.focus({ preventScroll: true });
+    if (target instanceof HTMLTextAreaElement) {
+        target.select();
+        target.setSelectionRange(0, target.value.length);
+    } else {
+        const range = document.createRange();
+        range.selectNodeContents(target);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+    }
+}
+async function copy(value: string, successMessage: string, target?: HTMLElement): Promise<void> {
+    error.value = ''; message.value = '';
+    if (await writeClipboardText(value)) {
+        message.value = successMessage;
+    } else {
+        selectText(target);
+        error.value = '未能自动复制，已全选内容。请按 Ctrl+C（Mac 按 ⌘C），或长按选中文字复制。';
+    }
 }
 onMounted(refresh);
 onUnmounted(clearSecret);
@@ -221,7 +242,7 @@ onUnmounted(clearSecret);
 .agent-access p { font-size: 14px; line-height: 1.6; margin: 8px 0 16px; }
 .agent-access button { min-height: 44px; width: auto; max-width: 100%; padding: 8px 16px; border: 1px solid var(--line, #dfe3e9); border-radius: 12px; background: var(--surface, #fff); color: inherit; cursor: pointer; }
 .agent-access button:disabled { opacity: .5; cursor: default; }
-.agent-access :is(button, input, select, textarea, summary):focus-visible { outline: 2px solid var(--orange, #f45b40); outline-offset: 3px; }
+.agent-access :is(button, input, select, textarea, summary, pre):focus-visible { outline: 2px solid var(--orange, #f45b40); outline-offset: 3px; }
 .agent-fields { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
 .agent-access label { display: grid; gap: 8px; font-size: 14px; }
 .agent-access input:not([type=checkbox]), .agent-access select, .agent-access textarea { box-sizing: border-box; width: 100%; min-height: 44px; padding: 12px; border: 1px solid var(--line, #dfe3e9); border-radius: 12px; background: var(--surface, #fff); color: inherit; font: inherit; }

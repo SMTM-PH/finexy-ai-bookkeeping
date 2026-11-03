@@ -22,7 +22,11 @@ class ScheduleUiTest {
     private fun usePlanPage() {
         rule.activityRule.scenario.onActivity { activity -> activity.reviewMode = false }
         rule.waitUntil(5_000) {
-            rule.onAllNodesWithText("到期后进入待确认队列", substring = true).fetchSemanticsNodes().isNotEmpty()
+            // The header is rendered before Room's first Flow emission; wait for
+            // both seeded rows so an idle empty frame cannot look like missing data.
+            rule.onAllNodesWithText("到期后进入待确认队列", substring = true).fetchSemanticsNodes().isNotEmpty() &&
+                rule.onAllNodesWithText("房租计划", substring = true).fetchSemanticsNodes().isNotEmpty() &&
+                rule.onAllNodesWithText("停用订阅", substring = true).fetchSemanticsNodes().isNotEmpty()
         }
         rule.waitForIdle()
         rule.onNodeWithText("房租计划", substring = true).assertExists()
@@ -42,7 +46,7 @@ class ScheduleUiTest {
         // The QA host has no server URL, so the restore call fails deterministically
         // and the failure surfaces through the accessible status line.
         rule.onNodeWithContentDescription("恢复待确认：订阅", useUnmergedTree = true).performScrollTo().performClick()
-        rule.onNodeWithText("恢复失败", substring = true).performScrollTo()
+        rule.onNodeWithText("结果待核对", substring = true).performScrollTo()
     }
 
     @Test fun planPageListsSchedulesAndEditorDialogIsReachable() {
@@ -86,10 +90,20 @@ class ScheduleUiTest {
         assertNull(parseOffsetText("+08:10"))
         assertNull(parseOffsetText("+15:00"))
         assertTrue(occurrenceAmount(
-            com.finexy.mobile.data.ScheduledOccurrenceEntity(1, 1, 2, type = 3, sourceAmountMinor = 420000)
-        ).startsWith("-¥ 4200"))
+            com.finexy.mobile.data.ScheduledOccurrenceEntity(1, 1, 2, type = 3, sourceAccountId = 10, sourceAmountMinor = 420000),
+            listOf(com.finexy.mobile.data.AccountEntity(10, "fixture", "CNY"))
+        ).startsWith("-CNY 4,200"))
         assertTrue(occurrenceAmount(
             com.finexy.mobile.data.ScheduledOccurrenceEntity(1, 1, 1, type = 3, sourceAmountMinor = 420000, hideAmount = true)
-        ).contains("···"))
+        ).contains("金额已隐藏"))
     }
+    @Test fun viewerHasNoFinancialOrTemplateManagementControls() {
+        rule.activity.runOnUiThread { rule.activity.role = com.finexy.mobile.data.RemoteLedgerMember.ROLE_VIEWER }
+        rule.onNodeWithContentDescription("确认入账：房租", useUnmergedTree = true).assertDoesNotExist()
+        rule.onNodeWithContentDescription("恢复待确认：订阅", useUnmergedTree = true).assertDoesNotExist()
+        usePlanPage()
+        rule.onNodeWithContentDescription("编辑计划：房租计划", useUnmergedTree = true).assertDoesNotExist()
+        rule.onNodeWithContentDescription("删除计划：房租计划", useUnmergedTree = true).assertDoesNotExist()
+    }
+
 }

@@ -1,0 +1,134 @@
+import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { mkdir, readFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
+
+// Only a named disposable container, no mounts, loopback published port and synthetic user.
+const container = process.env.FINEXY_E2E_CONTAINER;
+const targetUrl = process.env.FINEXY_E2E_BASE;
+assert(container && /^finexy-[a-z0-9-]*e2e[a-z0-9-]*$/.test(container), 'FINEXY_E2E_CONTAINER must name a disposable finexy e2e container');
+const target = new URL(targetUrl);
+assert(['127.0.0.1', 'localhost'].includes(target.hostname) && target.protocol === 'http:' && target.pathname === '/', 'loopback HTTP target required');
+const base = target.origin;
+const info = JSON.parse(execFileSync('docker', ['inspect', container], { encoding: 'utf8' }))[0];
+assert.deepEqual(info.Mounts, [], 'never connect this test to a user data volume');
+assert(info.Config.Env.includes('EBK_AUTH_ENABLE_REGISTER=true'), 'isolated registration required');
+assert(info.NetworkSettings.Ports['8080/tcp']?.some(port => port.HostPort === target.port), 'target must match the inspected container port');
+assert(process.env.PLAYWRIGHT_MODULE, 'PLAYWRIGHT_MODULE required');
+const username = `currency_${randomBytes(6).toString('hex')}`;
+const password = randomBytes(18).toString('hex');
+async function request(path, token, body) {
+    const response = await fetch(`${base}/api/${path}`, { method: body === undefined ? 'GET' : 'POST', headers: { 'Content-Type': 'application/json', 'X-Timezone-Offset': '480', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    const data = await response.json();
+    assert.equal(response.status, 200, path);
+    assert(data.success, path);
+    return data.result;
+}
+let browser;
+try {
+    assert((await fetch(`${base}/healthz.json`)).ok, 'isolated server healthy');
+    const user = await request('register.json', '', { username, password, email: `${username}@example.invalid`, nickname: '币种隔离验收', language: 'zh-Hans', defaultCurrency: 'CNY', categories: [] });
+    const accountDraft = { category: 2, type: 1, icon: '1', color: '000000', balance: 0, balanceTime: 946684800 };
+    const cny = await request('v1/accounts/add.json', user.token, { ...accountDraft, name: 'Synthetic CNY', currency: 'CNY' });
+    const usd = await request('v1/accounts/add.json', user.token, { ...accountDraft, name: 'Synthetic USD', currency: 'USD' });
+    async function category(type, name) {
+        const parent = await request('v1/transaction/categories/add.json', user.token, { name: `${name} root`, type, icon: '1', color: '000000' });
+        return request('v1/transaction/categories/add.json', user.token, { name, type, parentId: parent.id, icon: '1', color: '000000' });
+    }
+    const expense = await category(2, 'Synthetic expense');
+    const income = await category(1, 'Synthetic income');
+    const draft = { time: Math.floor(Date.now() / 1000), utcOffset: 480, type: 3, categoryId: expense.id };
+    await request('v1/transactions/add.json', user.token, { ...draft, sourceAccountId: cny.id, sourceAmount: 12345, comment: 'CNY fixture' });
+    await request('v1/transactions/add.json', user.token, { ...draft, sourceAccountId: usd.id, sourceAmount: 700, comment: 'USD fixture' });
+    await request('v1/transactions/add.json', user.token, { ...draft, type: 2, categoryId: income.id, sourceAccountId: cny.id, sourceAmount: 20000, comment: 'Income fixture' });
+    const now = new Date();
+    await request('v1/budget/monthly/set.json', user.token, { yearMonth: now.getFullYear() * 100 + now.getMonth() + 1, amount: 99900, categoryAmounts: {} });
+    await request('v1/transaction/templates/add.json', user.token, { templateType: 2, name: 'Synthetic personal-only plan', type: 3, categoryId: expense.id, sourceAccountId: cny.id, sourceAmount: 12300, destinationAccountId: '0', destinationAmount: 0, utcOffset: 480, hideAmount: false, tagIds: [], comment: '', scheduledFrequencyType: 0, scheduledFrequency: '', clientSessionId: randomBytes(16).toString('hex') });
+    const ledger = await request('v1/ledger/create.json', user.token, { type: 1, name: 'Synthetic separate ledger' });
+    const separate = await request('v1/accounts/add.json', user.token, { ...accountDraft, ledgerId: ledger.id, name: 'Separate USD', currency: 'USD' });
+    await request('v1/transactions/add.json', user.token, { ...draft, ledgerId: ledger.id, sourceAccountId: separate.id, sourceAmount: 900, comment: 'Separate fixture' });
+    const { chromium } = await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE).href);
+    browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH });
+    const page = await browser.newPage({ locale: 'zh-CN', timezoneId: 'Asia/Shanghai', viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
+    page.setDefaultTimeout(20000);
+    const errors = [];
+    page.on('pageerror', () => errors.push('pageerror'));
+    await page.goto(`${base}/desktop#/login`, { waitUntil: 'networkidle' });
+    await page.getByLabel('用户名', { exact: true }).fill(username);
+    await page.getByLabel('密码', { exact: true }).fill(password);
+    await page.getByRole('button', { name: '登录', exact: true }).click();
+    await page.waitForURL(/#\/$/);
+    await page.waitForFunction(() => document.querySelectorAll('.stat strong')[1]?.textContent?.includes('123.45'));
+    await page.getByLabel('收支与资产小计币种', { exact: true }).selectOption('USD');
+    await page.waitForFunction(() => document.querySelectorAll('.stat strong')[1]?.textContent?.includes('7.00'));
+    assert.match(await page.locator('.stat').nth(2).innerText(), /0\.00/);
+    await mkdir('artifacts/first-iteration-20261003', { recursive: true });
+    await page.screenshot({ path: 'artifacts/first-iteration-20261003/desktop-usd-home.png', fullPage: true });
+    console.log('PASS home original CNY/USD totals remain separate');
+
+    await page.goto(`${base}/desktop#/statistics/transaction`, { waitUntil: 'networkidle' });
+    await page.getByLabel('收支小计币种', { exact: true }).selectOption('USD');
+    await page.waitForFunction(() => document.querySelector('.breakdown .donut')?.textContent?.includes('7.00'));
+    await page.screenshot({ path: 'artifacts/first-iteration-20261003/desktop-usd-report.png', fullPage: true });
+    await page.getByRole('button', { name: '导出报表', exact: true }).click();
+    await page.getByRole('dialog').filter({ hasText: '确认导出报表' }).waitFor();
+    const downloadPromise = page.waitForEvent('download');
+    await page.getByRole('dialog').getByRole('button', { name: '确定', exact: true }).click();
+    const download = await downloadPromise;
+    await mkdir('artifacts/desktop-currency', { recursive: true });
+    const csvPath = 'artifacts/desktop-currency/synthetic-report.csv';
+    await download.saveAs(csvPath);
+    const csv = await readFile(csvPath, 'utf8');
+    assert.match(csv, /月份,币种,金额单位,收入,支出/);
+    assert.match(csv, /\d{4}-\d{2},USD,主货币单位,0\.00,7\.00/);
+    assert(!csv.includes(',700\n') && !csv.includes(',12345'), 'CSV uses major units and selected currency only');
+    console.log('PASS report chart, breakdown and confirmed CSV use USD without mixing or cents');
+
+    await page.getByRole('button', { name: '切换当前账本', exact: true }).click();
+    await page.getByRole('option').filter({ hasText: ledger.name }).click();
+    await page.waitForFunction(() => !document.querySelector('.page-data-error') && !document.querySelector('.spin'));
+    await page.goto(`${base}/desktop#/schedule/list`, { waitUntil: 'networkidle' });
+    assert((await page.locator('.scope-notice').innerText()).includes(ledger.name));
+    await page.getByText('账本周期计划', { exact: true }).waitFor();
+    assert(!(await page.locator('main').innerText()).includes('Synthetic personal-only plan'));
+    await page.locator('.monthly-budget-panel').getByText(/尚未设置预算/).waitFor();
+    assert.equal(await page.locator('.budget-editor').count(), 1);
+    assert.equal(await page.locator('.budget-editor').getByLabel('本月总额度', { exact: true }).inputValue(), '');
+    assert.equal(await page.getByRole('button', { name: '新建计划', exact: true }).isDisabled(), false);
+    await page.goto(`${base}/desktop#/`, { waitUntil: 'networkidle' });
+    await page.locator('.limit').waitFor();
+    assert.match(await page.locator('.limit').innerText(), /未设置预算/);
+    await page.locator('.finance-tasks').getByText('账本周期计划', { exact: true }).waitFor();
+    assert.match(await page.locator('.finance-tasks').innerText(), /0 笔待确认/);
+    assert(!(await page.locator('.finance-tasks').innerText()).includes('AI 待复核'));
+    assert(!(await page.locator('main').innerText()).includes('待确认队列已清空'));
+    console.log('PASS selected-ledger budget and owner plan management stay isolated from personal limits, queues and templates');
+
+    await page.goto(`${base}/desktop#/user/settings`, { waitUntil: 'networkidle' });
+    let metrics = await page.locator('.metrics').innerText();
+    assert(!/今天 12:30|2 台|均为可信设备/.test(metrics));
+    await page.goto(`${base}/desktop#/app/settings`, { waitUntil: 'networkidle' });
+    metrics = await page.locator('.metrics').innerText();
+    assert(!/486 MB|03:00 完成|1\.6\.1|全部服务可用/.test(metrics));
+    console.log('PASS account/device settings no longer claim mock health, backup or trusted-device state');
+
+    await page.route('**/api/v1/transactions/list/by_month.json?**', route => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ success: false }) }));
+    await page.goto(`${base}/desktop#/`, { waitUntil: 'networkidle' });
+    await page.locator('.home-data-error').filter({ hasText: '未能完整读取' }).waitFor();
+    assert.match(await page.locator('.stat').nth(1).innerText(), /未能读取/);
+    console.log('PASS read failure is visible and is not a zero/empty/success state');
+    await page.unroute('**/api/v1/transactions/list/by_month.json?**');
+    await page.route('**/api/v1/accounts/list.json?**', async route => {
+        const response = await route.fetch();
+        const data = await response.json();
+        data.result = [];
+        await route.fulfill({ response, json: data });
+    });
+    await page.locator('.cur').click();
+    await page.getByRole('button', { name: '刷新余额', exact: true }).click();
+    await page.locator('.home-data-error').filter({ hasText: '未完整计算' }).waitFor();
+    assert(!(await page.locator('.stat').nth(1).innerText()).includes('9.00'), 'unknown currency is not relabeled as default currency');
+    console.log('PASS missing account currency remains incomplete instead of becoming CNY');
+    assert.deepEqual(errors, []);
+} finally { await browser?.close(); }

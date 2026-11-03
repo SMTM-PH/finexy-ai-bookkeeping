@@ -144,5 +144,8 @@ func getPostgresConnectionString(dbConfig *settings.DatabaseConfig) (string, err
 }
 
 func getSqlite3ConnectionString(dbConfig *settings.DatabaseConfig) (string, error) {
-	return fmt.Sprintf("file:%s?cache=shared&mode=rwc", dbConfig.DatabasePath), nil
+	// Shared-cache table locks reject otherwise valid concurrent reads. Private
+	// connections read committed data; IMMEDIATE reserves the writer before a
+	// transaction's read/modify/write callback starts, without replaying it.
+	return fmt.Sprintf("file:%s?cache=private&mode=rwc&_busy_timeout=5000&_txlock=immediate", dbConfig.DatabasePath), nil
 }

@@ -588,11 +588,13 @@ func (s *UserService) RemoveUserFeatureRestriction(c core.Context, username stri
 	now := time.Now().Unix()
 
 	updateModel := &models.User{
-		FeatureRestriction: ^featureRestriction,
-		UpdatedUnixTime:    now,
+		UpdatedUnixTime: now,
 	}
 
-	updatedRows, err := s.UserDB().NewSession(c).SetExpr("feature_restriction", fmt.Sprintf("feature_restriction&(%d)", updateModel.FeatureRestriction)).Cols("updated_unix_time").Where("username=? AND deleted=?", username, false).Update(updateModel)
+	// SQL integer literals must remain signed int64. Printing the uint64
+	// complement exceeds SQLite's integer range and can leave every bit set.
+	mask := int64(^uint64(featureRestriction))
+	updatedRows, err := s.UserDB().NewSession(c).SetExpr("feature_restriction", fmt.Sprintf("feature_restriction&(%d)", mask)).Cols("updated_unix_time").Where("username=? AND deleted=?", username, false).Update(updateModel)
 
 	if err != nil {
 		return err

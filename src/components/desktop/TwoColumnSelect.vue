@@ -7,7 +7,7 @@
         :readonly="readonly"
         :disabled="disabled"
         :label="label"
-        :menu-props="{ contentClass: 'two-column-select-menu' }"
+        :menu-props="{ contentClass: 'two-column-select-menu', key: menuSession }"
         v-model="currentSecondaryValue"
         v-model:menu="menuState"
         @update:menu="onMenuStateChanged"
@@ -149,6 +149,7 @@ const filterInput = useTemplateRef<VTextField>('filterInput');
 const dropdownMenu = useTemplateRef<HTMLElement>('dropdownMenu');
 
 const menuState = ref<boolean>(false);
+const menuSession = ref(0);
 
 const filteredSubItems = computed<Record<string, unknown>[]>(() => getFilteredSubItems(selectedPrimaryItem.value));
 
@@ -245,6 +246,9 @@ function onSecondaryItemClicked(subItem: unknown): void {
 
 function onMenuStateChanged(state: boolean): void {
     if (state) {
+        // A reopened Vuetify menu must measure fresh content. Reusing the hidden
+        // overlay can apply its previous fixed-position offset twice.
+        menuSession.value++;
         nextTick(() => {
             if (dropdownMenu.value && dropdownMenu.value.parentElement) {
                 scrollToSelectedItem(dropdownMenu.value.parentElement, '.primary-list-container', '.primary-list-container', '.primary-list-item-selected');

@@ -47,10 +47,18 @@ private enum class CropDrag { TopLeft, TopRight, BottomLeft, BottomRight, Move, 
 internal fun ReceiptImageEditor(
     source: Bitmap,
     onCancel: () -> Unit,
-    onConfirm: (Bitmap, ReceiptCrop) -> Unit
+    onConfirm: (Bitmap, ReceiptCrop) -> Unit,
+    initialCrop: ReceiptCrop = ReceiptCrop.Default,
+    initialRotation: Int = 0,
+    onStateChanged: (ReceiptCrop, Int) -> Unit = { _, _ -> },
+    confirmLabel: String = "用于识别",
+    storageDescription: String = "原图仅保存在本机临时目录。",
+    cancelLabel: String = "取消"
 ) {
-    var bitmap by remember(source) { mutableStateOf(source) }
-    var crop by remember(source) { mutableStateOf(ReceiptCrop.Default) }
+    var rotation by remember(source) { mutableIntStateOf(initialRotation) }
+    var bitmap by remember(source) { mutableStateOf(if (initialRotation == 0) source else rotateReceiptBitmap(source, initialRotation.toFloat())) }
+    var crop by remember(source) { mutableStateOf(initialCrop) }
+    LaunchedEffect(crop, rotation) { onStateChanged(crop, rotation) }
     var viewport by remember { mutableStateOf(IntSize.Zero) }
     val imageBounds = remember(viewport, bitmap) { fittedImageBounds(viewport, bitmap.width, bitmap.height) }
     val primary = MaterialTheme.colorScheme.primary
@@ -84,12 +92,12 @@ internal fun ReceiptImageEditor(
                         .padding(start = 8.dp, end = 8.dp + landscapeEndInset, top = 6.dp, bottom = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    TextButton(onClick = onCancel, modifier = Modifier.heightIn(min = 48.dp)) { Text("取消") }
+                    TextButton(onClick = onCancel, modifier = Modifier.heightIn(min = 48.dp)) { Text(cancelLabel) }
                     Text("裁剪票据", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f).semantics { heading() })
-                    Button(onClick = { onConfirm(bitmap, crop) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("用于识别") }
+                    Button(onClick = { onStateChanged(crop, rotation); onConfirm(bitmap, crop) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(confirmLabel) }
                 }
                 Text(
-                    "拖动四角调整识别范围；旋转后会重置裁剪框。原图仅保存在本机临时目录。",
+                    "拖动四角调整识别范围；旋转后会重置裁剪框。$storageDescription",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp,
                     lineHeight = 18.sp,
@@ -104,7 +112,7 @@ internal fun ReceiptImageEditor(
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     OutlinedButton(
-                        onClick = { bitmap = rotateReceiptBitmap(bitmap); crop = ReceiptCrop.Default },
+                        onClick = { bitmap = rotateReceiptBitmap(bitmap); rotation = (rotation + 90) % 360; crop = ReceiptCrop.Default },
                         modifier = Modifier.weight(1f).fillMaxHeight()
                     ) { Text("向右旋转 90°") }
                     OutlinedButton(
@@ -252,6 +260,27 @@ internal fun decodeReceiptBitmap(context: android.content.Context, uri: Uri, max
         else -> 0f
     }
     return if (degrees == 0f) decoded else rotateReceiptBitmap(decoded, degrees)
+}
+
+internal fun decodeReceiptBytes(bytes: ByteArray, maxDimension: Int = 2400): Bitmap {
+    require(bytes.size in 1..com.finexy.mobile.data.AI_IMAGE_MAX_BYTES) { "原图超过限制" }
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    require(bounds.outWidth > 0 && bounds.outHeight > 0)
+    var sample = 1
+    while (max(bounds.outWidth, bounds.outHeight) / sample > maxDimension) sample *= 2
+    val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample }) ?: error("无法解析原图")
+    val orientation = bytes.inputStream().use { ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL) }
+    val matrix = Matrix().apply { when (orientation) {
+        ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> setScale(-1f, 1f)
+        ExifInterface.ORIENTATION_ROTATE_180 -> setRotate(180f)
+        ExifInterface.ORIENTATION_FLIP_VERTICAL -> setScale(1f, -1f)
+        ExifInterface.ORIENTATION_TRANSPOSE -> { setRotate(90f); postScale(-1f, 1f) }
+        ExifInterface.ORIENTATION_ROTATE_90 -> setRotate(90f)
+        ExifInterface.ORIENTATION_TRANSVERSE -> { setRotate(-90f); postScale(-1f, 1f) }
+        ExifInterface.ORIENTATION_ROTATE_270 -> setRotate(-90f)
+    } }
+    return if (matrix.isIdentity) decoded else Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
 }
 
 internal fun rotateReceiptBitmap(source: Bitmap, degrees: Float = 90f): Bitmap =

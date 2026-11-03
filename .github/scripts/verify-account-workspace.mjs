@@ -50,7 +50,8 @@ try {
     await page.waitForFunction(() => document.querySelector('.whead')?.textContent?.includes('共 15 个账户'));
     assert.match(await page.locator('.whead').innerText(), /共 15 个账户/);
     assert.match(await page.locator('.balance-meta').innerText(), /14 个可见账户/);
-    assert.equal(await page.locator('.wrow .w').count(), 3);
+    assert.equal(await page.locator('.wallet-carousel .holo-card').count(), 1);
+    assert.match(await page.locator('.wallet-pager').innerText(), /1 \/ 14/);
     await page.locator('.currency-switch .cur').click();
     await page.locator('.balance-menu').getByRole('button').filter({ hasText: 'USD' }).click();
     assert.match(await page.locator('.balance-card > .amount').innerText(), /13\.00/);
@@ -79,9 +80,10 @@ try {
     pass('keyboard selection and ID-based details survive server rename, balance change and refresh; edit uses same account');
     await picker.selectOption(hidden.id);
     assert.match(await page.locator('.account-detail').innerText(), /Synthetic hidden/);
-    assert.match(await page.locator('.holo-front').innerText(), /已隐藏/);
+    assert.match(await page.locator('.holo-caption').innerText(), /已隐藏/);
     await picker.selectOption(selected.id);
     await page.getByRole('link', { name: '查看流水', exact: true }).click();
+    await page.waitForURL(/#\/transaction\/list/);
     assert.equal(new URL(page.url().split('#')[1], base).searchParams.get('accountIds'), selected.id);
     await page.getByText('Refreshed account expense', { exact: true }).waitFor();
     assert.equal(await page.getByText('Other account expense', { exact: true }).count(), 0);
@@ -147,7 +149,7 @@ try {
     assert.equal(await page.locator('.holo-card').getAttribute('data-side'), 'back');
     assert.equal(await page.locator('.holo-front').getAttribute('aria-hidden'), 'true');
     assert.equal(await page.locator('.holo-back').getAttribute('aria-hidden'), 'false');
-    assert.match(await page.locator('.holo-back-note').innerText(), /Synthetic investment purpose/);
+    assert.match(await page.locator('.holo-outside-note').innerText(), /Synthetic investment purpose/);
     await page.locator('.holo-card').focus();
     await page.keyboard.press('ArrowLeft');
     assert.equal(await page.locator('.holo-card').getAttribute('data-side'), 'front');
@@ -156,7 +158,7 @@ try {
     const cardBounds = await page.locator('.holo-card').boundingBox();
     await page.mouse.move(cardBounds.x + cardBounds.width * 0.8, cardBounds.y + cardBounds.height * 0.3);
     assert.notEqual(await page.locator('.holo-card').evaluate(el => el.style.getPropertyValue('--tilt-y')), '0deg');
-    assert.match(await page.locator('.holo-front').evaluate(el => getComputedStyle(el).backgroundImage), /conic-gradient/);
+    assert.match(await page.locator('.holo-front .holo-foil').evaluate(el => getComputedStyle(el).backgroundImage), /conic-gradient/);
     await page.mouse.down();
     await page.mouse.move(cardBounds.x + cardBounds.width * 0.2, cardBounds.y + cardBounds.height * 0.6, { steps: 3 });
     await page.mouse.up();
@@ -171,7 +173,8 @@ try {
     await page.getByRole('button', { name: '复位卡片', exact: true }).click();
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await picker.selectOption(selected.id);
-    assert(await page.locator('.holo-card').evaluate(el => el.querySelector('.holo-account-title').getBoundingClientRect().bottom <= el.querySelector('.holo-card-balance').getBoundingClientRect().top), 'account title must not overlap balance');
+    assert.equal((await page.locator('.holo-card').innerText()).trim(), '', 'artwork faces contain no account typography');
+    assert.match(await page.locator('.holo-caption h3').innerText(), /Renamed selected account/);
     await picker.selectOption(accounts[0].id);
     assert(await page.getByRole('button', { name: '上一张账户卡片', exact: true }).isDisabled());
     await page.getByRole('button', { name: '下一张账户卡片', exact: true }).click();

@@ -38,7 +38,12 @@ class SecureStore(context: Context, preferencesName: String = "finexy_secure") {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key(), GCMParameterSpec(128, iv)) }
         val encrypted = cipher.doFinal(value.toByteArray(StandardCharsets.UTF_8))
         val editor = preferences.edit().putString(name, Base64.encodeToString(iv + encrypted, Base64.NO_WRAP))
-        if (durable) check(editor.commit()) { "无法保存账本归属信息" } else editor.apply()
+        try {
+            if (durable) check(editor.commit()) { "无法保存账本归属信息" } else editor.apply()
+        } finally {
+            // A failed commit can already have changed SharedPreferences' in-memory view.
+            notifySessionChange(name)
+        }
     }
 
     fun get(name: String): String? {
@@ -52,7 +57,17 @@ class SecureStore(context: Context, preferencesName: String = "finexy_secure") {
 
     internal fun contains(name: String): Boolean = preferences.contains(name)
 
-    fun remove(name: String) { check(preferences.edit().remove(name).commit()) { "无法清除本地凭据" } }
+    fun remove(name: String) {
+        try { check(preferences.edit().remove(name).commit()) { "无法清除本地凭据" } }
+        finally { notifySessionChange(name) }
+    }
+
+    /** Synchronous across SecureStore instances of this namespace, including Worker writes. */
+    internal fun observeSessionChanges(listener: () -> Unit): AutoCloseable = sessionChanges.observe(namespace, listener)
+    internal val sessionRevision: Long get() = sessionChanges.revision(namespace)
+    private fun notifySessionChange(name: String) {
+        if (name in sessionKeys) sessionChanges.changed(namespace)
+    }
 
     /** Compare-and-set prevents an old request from restoring a logged-out session. */
     fun replaceSession(expected: String?, token: String?): Boolean = synchronized(sessionLock) {
@@ -61,5 +76,9 @@ class SecureStore(context: Context, preferencesName: String = "finexy_secure") {
         true
     }
 
-    companion object { private val sessionLock = Any() }
+    companion object {
+        private val sessionLock = Any()
+        private val sessionChanges = TransientChangeRegistry()
+        private val sessionKeys = setOf(FinexyApi.KEY_SERVER_URL, FinexyApi.KEY_TOKEN, "local_mode")
+    }
 }

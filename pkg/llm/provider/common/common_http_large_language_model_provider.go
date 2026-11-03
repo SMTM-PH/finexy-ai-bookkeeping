@@ -64,18 +64,14 @@ func (p *CommonHttpLargeLanguageModelProvider) getTextualResponse(c core.Context
 	httpRequest, err := p.adapter.BuildTextualRequest(c, uid, request, responseType)
 
 	if err != nil {
-		log.Errorf(c, "[common_http_large_language_model_provider.getTextualResponse] failed to build requests for user \"uid:%d\", because %s", uid, err.Error())
+		log.Errorf(c, "[common_http_large_language_model_provider.getTextualResponse] failed to build requests for user \"uid:%d\", error type %T", uid, err)
 		return nil, errs.ErrFailedToRequestRemoteApi
 	}
-
-	httpRequest = httpRequest.WithContext(httpclient.CustomHttpResponseLog(c, func(data []byte) {
-		log.Debugf(c, "[common_http_large_language_model_provider.getTextualResponse] response is %s", data)
-	}))
 
 	resp, err := p.httpClient.Do(httpRequest)
 
 	if err != nil {
-		log.Errorf(c, "[common_http_large_language_model_provider.getTextualResponse] failed to request large language model api for user \"uid:%d\", because %s", uid, err.Error())
+		log.Errorf(c, "[common_http_large_language_model_provider.getTextualResponse] failed to request large language model api for user \"uid:%d\", error type %T", uid, err)
 		return nil, errs.ErrFailedToRequestRemoteApi
 	}
 
@@ -97,10 +93,12 @@ func (p *CommonHttpLargeLanguageModelProvider) getTextualResponse(c core.Context
 }
 
 // NewCommonHttpLargeLanguageModelProvider creates a http adapter based large language model provider instance
-func NewCommonHttpLargeLanguageModelProvider(llmConfig *settings.LLMConfig, enableResponseLog bool, adapter HttpLargeLanguageModelAdapter) *CommonHttpLargeLanguageModelProvider {
+func NewCommonHttpLargeLanguageModelProvider(llmConfig *settings.LLMConfig, _ bool, adapter HttpLargeLanguageModelAdapter) *CommonHttpLargeLanguageModelProvider {
 	return &CommonHttpLargeLanguageModelProvider{
-		adapter:    adapter,
-		config:     *llmConfig,
-		httpClient: httpclient.NewHttpClient(llmConfig.LargeLanguageModelAPIRequestTimeout, llmConfig.LargeLanguageModelAPIProxy, llmConfig.LargeLanguageModelAPISkipTLSVerify, core.GetOutgoingUserAgent(), enableResponseLog),
+		adapter: adapter,
+		config:  *llmConfig,
+		// Model responses can contain financial details even when debug logging
+		// is enabled. Usage is collected separately without retaining content.
+		httpClient: httpclient.NewHttpClient(llmConfig.LargeLanguageModelAPIRequestTimeout, llmConfig.LargeLanguageModelAPIProxy, llmConfig.LargeLanguageModelAPISkipTLSVerify, core.GetOutgoingUserAgent(), false),
 	}
 }

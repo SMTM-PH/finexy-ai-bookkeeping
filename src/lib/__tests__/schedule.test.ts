@@ -29,8 +29,13 @@ describe('schedule calendar rules', () => {
         expect(scheduleMatchesDate(everyTwoDays, new Date(2026, 8, 12))).toBe(false);
     });
 
-    it('does not render paused or hidden plans', () => {
+    it('does not render paused plans', () => {
         expect(scheduleDaysInMonth({ scheduledFrequencyType: 0, scheduledFrequency: '' }, 2026, 8)).toEqual([]);
-        expect(scheduleDaysInMonth({ scheduledFrequencyType: 3, scheduledFrequency: '0', hidden: true }, 2026, 8)).toEqual([]);
+    });
+
+    it('keeps hidden active plans in the calendar without treating them as paused', () => {
+        const rule = { scheduledFrequencyType: 3, scheduledFrequency: '0', hidden: true, scheduledStartDate: '2026-09-28' };
+        expect(scheduleDaysInMonth(rule, 2026, 8)).toEqual([28, 29, 30]);
+        expect(scheduleDaysInMonth({ ...rule, scheduledFrequencyType: 0, scheduledFrequency: '' }, 2026, 8)).toEqual([]);
     });
 });

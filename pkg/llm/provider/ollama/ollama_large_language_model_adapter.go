@@ -94,7 +94,7 @@ func (p *OllamaLargeLanguageModelAdapter) ParseTextualResponse(c core.Context, u
 	err := json.Unmarshal(body, &chatResponse)
 
 	if err != nil {
-		log.Errorf(c, "[ollama_large_language_model_adapter.ParseTextualResponse] failed to parse chat response for user \"uid:%d\", because %s", uid, err.Error())
+		log.Errorf(c, "[ollama_large_language_model_adapter.ParseTextualResponse] failed to parse chat response for user \"uid:%d\", error type %T", uid, err)
 		return nil, errs.ErrFailedToRequestRemoteApi
 	}
 
@@ -154,11 +154,11 @@ func (p *OllamaLargeLanguageModelAdapter) buildJsonRequestBody(c core.Context, u
 	requestBodyBytes, err := json.Marshal(chatRequest)
 
 	if err != nil {
-		log.Errorf(c, "[ollama_large_language_model_adapter.buildJsonRequestBody] failed to marshal request body for user \"uid:%d\", because %s", uid, err.Error())
+		log.Errorf(c, "[ollama_large_language_model_adapter.buildJsonRequestBody] failed to marshal request body for user \"uid:%d\", error type %T", uid, err)
 		return nil, errs.ErrOperationFailed
 	}
 
-	log.Debugf(c, "[ollama_large_language_model_adapter.buildJsonRequestBody] request body is %s", requestBodyBytes)
+	log.Debugf(c, "[ollama_large_language_model_adapter.buildJsonRequestBody] request prepared")
 	return requestBodyBytes, nil
 }
 

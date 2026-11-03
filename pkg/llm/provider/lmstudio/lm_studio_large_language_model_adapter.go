@@ -91,7 +91,7 @@ func (p *LMStudioLargeLanguageModelAdapter) ParseTextualResponse(c core.Context,
 	err := json.Unmarshal(body, &chatResponse)
 
 	if err != nil {
-		log.Errorf(c, "[lm_studio_large_language_model_adapter.ParseTextualResponse] failed to parse chat response for user \"uid:%d\", because %s", uid, err.Error())
+		log.Errorf(c, "[lm_studio_large_language_model_adapter.ParseTextualResponse] failed to parse chat response for user \"uid:%d\", error type %T", uid, err)
 		return nil, errs.ErrFailedToRequestRemoteApi
 	}
 
@@ -144,11 +144,11 @@ func (p *LMStudioLargeLanguageModelAdapter) buildJsonRequestBody(c core.Context,
 	requestBodyBytes, err := json.Marshal(chatRequest)
 
 	if err != nil {
-		log.Errorf(c, "[lm_studio_large_language_model_adapter.buildJsonRequestBody] failed to marshal request body for user \"uid:%d\", because %s", uid, err.Error())
+		log.Errorf(c, "[lm_studio_large_language_model_adapter.buildJsonRequestBody] failed to marshal request body for user \"uid:%d\", error type %T", uid, err)
 		return nil, errs.ErrOperationFailed
 	}
 
-	log.Debugf(c, "[lm_studio_large_language_model_adapter.buildJsonRequestBody] request body is %s", requestBodyBytes)
+	log.Debugf(c, "[lm_studio_large_language_model_adapter.buildJsonRequestBody] request prepared")
 	return requestBodyBytes, nil
 }
 

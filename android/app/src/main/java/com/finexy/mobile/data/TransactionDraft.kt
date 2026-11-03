@@ -15,7 +15,9 @@ data class TransactionDraft(
     val tagIdsJson: String,
     val destinationAccountId: Long? = null,
     val destinationAmountMinor: Long = 0,
-    val reviewItemId: Long? = null
+    val reviewItemId: Long? = null,
+    val hideAmount: Boolean? = null,
+    val transferDirection: TransactionTransferDirection = TransactionTransferDirection.INTERNAL
 )
 
 internal fun stringIds(raw: String): JSONArray {
@@ -33,7 +35,10 @@ internal fun TransactionEntity.toApiPayload(): JSONObject = JSONObject()
     .put("utcOffset", utcOffset)
     .put("sourceAccountId", sourceAccountId.toString())
     .put("destinationAccountId", (destinationAccountId ?: 0).toString())
-    .put("sourceAmount", sourceAmountMinor)
+    // Older server read models mirror an external incoming amount on both
+    // sides. Writes keep the inactive external side at account 0 / amount 0.
+    .put("sourceAmount", if (type == TransactionRepository.TYPE_TRANSFER && sourceAccountId == 0L &&
+        (destinationAccountId ?: 0L) > 0L) 0L else sourceAmountMinor)
     .put("destinationAmount", destinationAmountMinor)
     .put("tagIds", stringIds(tagIdsJson))
     .put("pictureIds", stringIds(pictureIdsJson))

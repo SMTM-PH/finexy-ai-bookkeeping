@@ -98,6 +98,7 @@ import {
 type SnackBarType = InstanceType<typeof SnackBar>;
 
 interface DesktopAmountInputProps extends CommonNumberInputProps {
+    rawValue?: string;
     class?: string;
     color?: string;
     density?: ComponentDensity;
@@ -113,7 +114,10 @@ interface DesktopAmountInputProps extends CommonNumberInputProps {
 }
 
 const props = defineProps<DesktopAmountInputProps>();
-const emit = defineEmits<CommonNumberInputEmits>();
+interface DesktopAmountInputEmits extends CommonNumberInputEmits {
+    (e: 'update:rawValue', value: string): void;
+}
+const emit = defineEmits<DesktopAmountInputEmits>();
 
 const {
     tt,
@@ -304,6 +308,7 @@ function getDisplayCurrencyPrependAndAppendText(): CurrencyPrependAndAppendText 
 }
 
 watch(() => props.currency, () => {
+    if (props.rawValue !== undefined) return;
     const newStringValue = getInitedFormattedValue(props.modelValue, props.flipNegative);
 
     if (!(newStringValue === numeralSystem.value.digitZero && currentValue.value === '')) {
@@ -336,6 +341,7 @@ watch(() => props.modelValue, (newValue) => {
 });
 
 watch(currentValue, (newValue) => {
+    if (!formulaMode.value) emit('update:rawValue', newValue);
     let actualNumeralSystem: NumeralSystem | undefined = undefined;
     let finalValue = '';
 
@@ -381,6 +387,12 @@ watch(currentValue, (newValue) => {
         emit('update:modelValue', value);
     }
 });
+watch([currentFormula, formulaMode], () => emit('update:rawValue', formulaMode.value ? `=${currentFormula.value}` : currentValue.value));
+watch(() => props.rawValue, raw => {
+    if (raw === undefined) return;
+    if (raw.startsWith('=')) { formulaMode.value = true; currentFormula.value = raw.slice(1); }
+    else { formulaMode.value = false; currentValue.value = raw; }
+}, { immediate: true });
 </script>
 
 <style>

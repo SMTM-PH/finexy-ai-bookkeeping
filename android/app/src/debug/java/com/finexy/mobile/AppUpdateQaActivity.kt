@@ -8,6 +8,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import com.finexy.mobile.data.AppUpdateInfo
 import com.finexy.mobile.data.SecureStore
+import com.finexy.mobile.data.CurrencyAmounts
 
 /** Non-exported visual and interaction fixture for the update reminder. */
 class AppUpdateQaActivity : PrivacyActivity() {
@@ -30,9 +31,7 @@ class AppUpdateQaActivity : PrivacyActivity() {
                 Scaffold(containerColor = CanvasBlack) { padding ->
                     Dashboard(
                         padding = padding,
-                        balance = 12888.0,
-                        income = 16800.0,
-                        expense = 3912.0,
+                        currencyAmounts = listOf(CurrencyAmounts("CNY", 1288800, 1680000, 391200)),
                         activities = emptyList(),
                         appUpdate = update,
                         appUpdateMessage = if (opened) "已打开发布页面" else null,

@@ -204,7 +204,7 @@ export default defineConfig(() => {
 
                         let assetType = fileExt;
 
-                        if (/png|jpe?g|gif|tiff|bmp|ico/i.test(fileExt)) {
+                        if (/^(png|jpe?g|gif|tiff|bmp|ico|webp)$/i.test(fileExt)) {
                             assetType = 'img';
                         } else if (/ttf|woff|woff2|svg|eot/i.test(fileExt)) {
                             assetType = 'fonts';
@@ -260,7 +260,7 @@ export default defineConfig(() => {
                                         return true;
                                     } else if (/[\\/]src[\\/]components[\\/](base|common)[\\/]/i.test(id)) {
                                         return true;
-                                    } else if (/[\\/]src[\\/]components[\\/](ReleaseUpdateNotice|AgentAccessPanel|AISettingsPanel|StatementMappingPanel)\.vue/i.test(id)) {
+                                    } else if (/[\\/]src[\\/]components[\\/](ReleaseUpdateNotice|AgentAccessPanel|AISettingsPanel|StatementMappingPanel|MonthlyBudgetPanel)\.vue/i.test(id)) {
                                         // Keep shared app code out of the preload helper used by vendor chunks.
                                         return true;
                                     } else if (/[\\/]src[\\/]views[\\/]base[\\/]/i.test(id)) {

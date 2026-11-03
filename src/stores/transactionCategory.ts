@@ -31,7 +31,9 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
     const allTransactionCategoriesMap = ref<Record<string, TransactionCategory>>({});
     const transactionCategoryListStateInvalid = ref<boolean>(true);
     const loadedLedgerId = ref<string>('0');
+    let categoryLoadGeneration = 0;
     let defaultCategoriesBackfillPromise: Promise<Record<number, TransactionCategory[]>> | null = null;
+    let defaultCategoriesBackfillUser = '';
 
     const allAvailablePrimaryCategoriesCount = computed<number>(() => {
         let count = 0;
@@ -209,15 +211,16 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
     }
 
     function resetTransactionCategories(): void {
+        ++categoryLoadGeneration;
         allTransactionCategories.value = {};
         allTransactionCategoriesMap.value = {};
         transactionCategoryListStateInvalid.value = true;
         loadedLedgerId.value = '0';
-        defaultCategoriesBackfillPromise = null;
     }
 
     function backfillDefaultCategories(categoryTypes: CategoryType[]): Promise<Record<number, TransactionCategory[]>> {
-        if (defaultCategoriesBackfillPromise) {
+        const username = userStore.currentUserBasicInfo?.username || '';
+        if (defaultCategoriesBackfillPromise && defaultCategoriesBackfillUser === username) {
             return defaultCategoriesBackfillPromise;
         }
 
@@ -231,7 +234,8 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
         const presetCategories = categorizedArrayToPlainArray(missingLocalizedCategories);
         const categories = localizedPresetCategoriesToTransactionCategoryCreateWithSubCategories(presetCategories);
 
-        defaultCategoriesBackfillPromise = services.addTransactionCategoryBatch({ categories }).then(response => {
+        defaultCategoriesBackfillUser = username;
+        const pendingBackfill = services.addTransactionCategoryBatch({ categories }).then(response => {
             const data = response.data;
 
             if (!data || !data.success || !data.result) {
@@ -240,30 +244,37 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
 
             return TransactionCategory.ofMap(data.result);
         }).finally(() => {
-            defaultCategoriesBackfillPromise = null;
+            if (defaultCategoriesBackfillPromise === pendingBackfill) defaultCategoriesBackfillPromise = null;
         });
-
+        defaultCategoriesBackfillPromise = pendingBackfill;
         return defaultCategoriesBackfillPromise;
     }
 
     function loadAllCategories({ force, ledgerId }: { force?: boolean, ledgerId?: string }): Promise<Record<number, TransactionCategory[]>> {
         const requestedLedgerId = ledgerId || '0';
+        const hadValidCache = !transactionCategoryListStateInvalid.value && loadedLedgerId.value === requestedLedgerId;
         if (loadedLedgerId.value !== requestedLedgerId) force = true;
-        if (defaultCategoriesBackfillPromise) {
-            return defaultCategoriesBackfillPromise;
-        }
-
         if (!force && !transactionCategoryListStateInvalid.value) {
             return new Promise((resolve) => {
                 resolve(allTransactionCategories.value);
             });
         }
 
+        if (loadedLedgerId.value !== requestedLedgerId) {
+            resetTransactionCategories();
+            loadedLedgerId.value = requestedLedgerId;
+        }
+        const generation = categoryLoadGeneration;
         return new Promise((resolve, reject) => {
-            services.getAllTransactionCategories(ledgerId).then(response => {
+            services.getAllTransactionCategories(requestedLedgerId).then(response => {
+                if (generation !== categoryLoadGeneration) {
+                    reject({ stale: true });
+                    return;
+                }
                 const data = response.data;
 
-                if (!data || !data.success || !data.result) {
+                if (!data || !data.success || !data.result || typeof data.result !== 'object' || Array.isArray(data.result) ||
+                    Object.values(data.result).some(value => !Array.isArray(value))) {
                     reject({ message: 'Unable to retrieve category list' });
                     return;
                 }
@@ -286,7 +297,7 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
 
                 const transactionCategories = TransactionCategory.ofMap(data.result);
 
-                if (force && loadedLedgerId.value === requestedLedgerId && data.result && isEquals(allTransactionCategories.value, transactionCategories)) {
+                if (force && hadValidCache && isEquals(allTransactionCategories.value, transactionCategories)) {
                     reject({ message: 'Category list is up to date', isUpToDate: true });
                     return;
                 }
@@ -297,6 +308,10 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
 
                 if (categoryTypesWithoutSelectableCategories.length > 0) {
                     backfillDefaultCategories(categoryTypesWithoutSelectableCategories).then(createdCategories => {
+                        if (generation !== categoryLoadGeneration) {
+                            reject({ stale: true });
+                            return;
+                        }
                         for (const categoryType of categoryTypesWithoutSelectableCategories) {
                             transactionCategories[categoryType] = [
                                 ...(transactionCategories[categoryType] || []),
@@ -308,6 +323,10 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
                         loadedLedgerId.value = requestedLedgerId;
                         resolve(transactionCategories);
                     }).catch(error => {
+                        if (generation !== categoryLoadGeneration) {
+                            reject({ stale: true });
+                            return;
+                        }
                         updateTransactionCategoryListInvalidState(true);
                         reject(error);
                     });
@@ -318,6 +337,10 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
                 loadedLedgerId.value = requestedLedgerId;
                 resolve(transactionCategories);
             }).catch(error => {
+                if (generation !== categoryLoadGeneration) {
+                    reject({ stale: true });
+                    return;
+                }
                 if (force) {
                     logger.error('failed to force load category list', error);
                 } else {
@@ -643,6 +666,7 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
         // states
         allTransactionCategories,
         allTransactionCategoriesMap,
+        loadedLedgerId,
         transactionCategoryListStateInvalid,
         // computed states
         allAvailablePrimaryCategoriesCount,

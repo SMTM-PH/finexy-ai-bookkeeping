@@ -1,0 +1,130 @@
+import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
+import { mkdir, writeFile } from 'node:fs/promises';
+
+const base = 'http://127.0.0.1:18110';
+assert.deepEqual(JSON.parse(execFileSync('docker', ['inspect', 'finexy-agent-e2e'], {encoding:'utf8'}))[0].Mounts, []);
+const password = randomBytes(18).toString('hex');
+const evidence = [];
+const pass = name => { evidence.push(name); console.log('PASS ' + name); };
+for (let attempt=0; attempt<60; attempt++) {
+    try { if ((await fetch(`${base}/healthz.json`)).ok) break; } catch { /* container starting */ }
+    await new Promise(resolve=>setTimeout(resolve,250));
+}
+async function request(path, token, body) {
+    const response = await fetch(`${base}/api/${path}`, { method: body === undefined ? 'GET' : 'POST', headers: {'Content-Type':'application/json','X-Timezone-Offset':'480', ...(token ? {Authorization:`Bearer ${token}`} : {})}, ...(body === undefined ? {} : {body:JSON.stringify(body)}) });
+    const data = await response.json();
+    assert(response.ok && data.success, `REST rejected ${path}`);
+    return data.result;
+}
+async function mcp(token, method, params = {}) {
+    const response = await fetch(`${base}/mcp`, {method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json, text/event-stream','MCP-Protocol-Version':'2025-03-26',Authorization:`Bearer ${token}`},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})});
+    return {status:response.status,data:await response.json()};
+}
+async function call(token, name, args, allowed = true) {
+    const response = await mcp(token,'tools/call',{name,arguments:args});
+    const ok = response.status === 200 && !response.data.error && !response.data.result?.isError;
+    assert.equal(ok, allowed, `${name} authorization/result (${response.status}, ${response.data.error?.message || ''})`);
+    if (ok) return response.data.result.structuredContent || JSON.parse(response.data.result.content[0].text);
+}
+const username = `manage_${randomBytes(6).toString('hex')}`;
+const session = (await request('register.json','',{username,email:`${username}@example.invalid`,nickname:'隔离管理测试',password,language:'zh-Hans',defaultCurrency:'CNY',categories:[]})).token;
+const issue = async scopes => (await request('v1/tokens/generate/mcp.json',session,{password,name:'Synthetic management',scopes,ledgerId:'0',expiresInSeconds:86400})).token;
+const read = await issue(['read']);
+const manage = await issue(['read','accounts:manage']);
+const imports = await issue(['read','bills:import']);
+const tools = (await mcp(manage,'tools/list')).data.result.tools;
+assert.equal(tools.filter(t => ['create_account','update_account','set_account_hidden','delete_account','create_category','update_category','set_category_hidden','delete_category'].includes(t.name)).length,8);
+assert(!(await mcp(read,'tools/list')).data.result.tools.some(t => t.name === 'create_account'));
+const grant = {ledgerId:'0',confirmed:true,utcOffset:480};
+const draft = {...grant,name:'Synthetic MCP account',category:2,type:1,icon:'1',color:'123456',currency:'CNY',balance:0,comment:'Before'};
+await call(read,'create_account',draft,false);
+await call(imports,'create_account',draft,false);
+await call(manage,'create_account',{...draft,confirmed:false},false);
+await call(manage,'create_account',{...draft,ledgerId:undefined},false);
+await call(manage,'create_account',{...draft,ledgerId:0},false);
+await call(manage,'create_account',{...draft,type:2},false);
+pass('scope, explicit string ledger and user confirmation enforced; read tokens unchanged');
+const account = await call(manage,'create_account',draft);
+assert.equal(typeof account.id,'string');
+const updated = await call(manage,'update_account',{...grant,...account,balance:undefined,name:'Synthetic renamed account',comment:'After'});
+assert.equal(updated.name,'Synthetic renamed account');
+await call(manage,'set_account_hidden',{...grant,id:account.id,hidden:true});
+let context = await call(manage,'query_management_context',{ledgerId:'0'});
+assert.equal(context.accountDetails.find(a=>a.id===account.id).hidden,true);
+await call(manage,'set_account_hidden',{...grant,id:account.id,hidden:false});
+await call(manage,'delete_account',{...grant,id:account.id});
+assert(!(await call(manage,'query_management_context',{ledgerId:'0'})).accountDetails.some(a=>a.id===account.id));
+pass('real MCP account create, update, hide, restore and protected API delete');
+const root = await call(manage,'create_category',{...grant,name:'Synthetic root',type:2,parentId:'0',icon:'1',color:'123456'});
+const category = await call(manage,'create_category',{...grant,name:'Synthetic leaf',type:2,parentId:root.id,icon:'1',color:'123456'});
+const modified = await call(manage,'update_category',{...grant,...category,name:'Synthetic renamed leaf'});
+assert.equal(modified.name,'Synthetic renamed leaf');
+await call(manage,'set_category_hidden',{...grant,id:category.id,hidden:true});
+context = await call(manage,'query_management_context',{ledgerId:'0'});
+assert.equal(context.categoryDetails.find(c=>c.id===category.id).hidden,true);
+await call(manage,'set_category_hidden',{...grant,id:category.id,hidden:false});
+await call(manage,'delete_category',{...grant,id:category.id});
+await call(manage,'delete_category',{...grant,id:root.id});
+pass('real MCP category root/leaf create, update, hide, restore and delete');
+const ledger = await request('v1/ledger/create.json',session,{type:1,name:'Other synthetic ledger'});
+const otherAccount = await request('v1/accounts/add.json',session,{...draft,ledgerId:ledger.id,name:'Foreign ledger account'});
+await call(manage,'set_account_hidden',{...grant,id:otherAccount.id,hidden:true},false);
+await call(manage,'delete_account',{...grant,id:otherAccount.id},false);
+await call(manage,'update_account',{...grant,...otherAccount,ledgerId:'0',name:'Wrong ledger'},false);
+await call(manage,'create_account',{...draft,ledgerId:ledger.id},false);
+await call(manage,'query_management_context',{ledgerId:ledger.id},false);
+assert.equal((await request(`v1/accounts/get.json?id=${otherAccount.id}&ledgerId=${ledger.id}`,session)).hidden,false);
+pass('persisted account ownership prevents forged ledger operations');
+const memberName=`member_${randomBytes(6).toString('hex')}`;
+const memberSession=(await request('register.json','',{username:memberName,email:`${memberName}@example.invalid`,nickname:'Synthetic member',password,language:'zh-Hans',defaultCurrency:'CNY',categories:[]})).token;
+const invitation=await request('v1/ledger/invitation/create.json',session,{ledgerId:ledger.id,inviteeName:memberName,role:4,expiresInSeconds:86400});
+await request('v1/ledger/invitation/accept.json',memberSession,{token:invitation.token});
+const memberToken=(await request('v1/tokens/generate/mcp.json',memberSession,{password,name:'Member management',scopes:['read','accounts:manage'],ledgerId:ledger.id,expiresInSeconds:86400})).token;
+await call(memberToken,'create_account',{...draft,ledgerId:ledger.id},false);
+const member=(await request(`v1/ledger/member/list.json?ledgerId=${ledger.id}`,session)).find(m=>!m.isCurrentUser);
+await request('v1/ledger/member/change_role.json',session,{ledgerId:ledger.id,memberId:member.id,role:2});
+const sharedAccount=await call(memberToken,'create_account',{...draft,ledgerId:ledger.id,name:'Managed shared account'});
+assert.equal(sharedAccount.ledgerId,ledger.id);
+await call(memberToken,'create_category',{...grant,ledgerId:ledger.id,name:'Wrong taxonomy',type:2,parentId:'0',icon:'1',color:'123456'},false);
+await request('v1/ledger/member/change_role.json',session,{ledgerId:ledger.id,memberId:member.id,role:4});
+await call(memberToken,'set_account_hidden',{...grant,ledgerId:ledger.id,id:sharedAccount.id,hidden:true},false);
+await call(memberToken,'delete_account',{...grant,ledgerId:ledger.id,id:sharedAccount.id},false);
+pass('current member role, shared account access and owner taxonomy enforced');
+const protectedAccount = await call(manage,'create_account',{...draft,name:'Referenced account'});
+const protectedRoot = await call(manage,'create_category',{...grant,name:'Referenced root',type:2,parentId:'0',icon:'1',color:'123456'});
+const protectedCategory = await call(manage,'create_category',{...grant,name:'Referenced leaf',type:2,parentId:protectedRoot.id,icon:'1',color:'123456'});
+await request('v1/transactions/add.json',session,{type:3,time:1790928000,utcOffset:480,categoryId:protectedCategory.id,sourceAccountId:protectedAccount.id,sourceAmount:123,comment:'Synthetic protected transaction'});
+await call(manage,'delete_category',{...grant,id:protectedCategory.id},false);
+pass('referenced category deletion retains production protection');
+let browser;
+try {
+    const {chromium} = await import(process.env.PLAYWRIGHT_MODULE ? pathToFileURL(process.env.PLAYWRIGHT_MODULE).href : 'playwright');
+    browser = await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_EXECUTABLE_PATH ? {executablePath:process.env.PLAYWRIGHT_EXECUTABLE_PATH} : {})});
+    const page = await browser.newPage({viewport:{width:1440,height:1000},locale:'zh-CN'});
+    const errors=[]; page.on('pageerror',e=>errors.push(e.message));
+    await page.goto(`${base}/desktop#/login`,{waitUntil:'networkidle'});
+    await page.getByLabel('用户名',{exact:true}).fill(username); await page.getByLabel('密码',{exact:true}).fill(password);
+    await page.getByRole('button',{name:'登录',exact:true}).click(); await page.waitForURL(/#\/$/);
+    await page.goto(`${base}/desktop#/user/settings?tab=aiSetting`,{waitUntil:'networkidle'});
+    const panel=page.locator('.agent-access');
+    await panel.getByLabel('连接方式').selectOption('mcp');
+    const management=panel.locator('input[value="accounts:manage"]');
+    assert.equal(await management.isEnabled(),true); await management.check();
+    await panel.getByLabel('连接方式').selectOption('api'); await panel.getByLabel('连接方式').selectOption('mcp');
+    assert.equal(await management.isChecked(),true);
+    await panel.locator('input[value="transactions:write"]').check(); await panel.locator('input[value="bills:import"]').check();
+    await panel.getByLabel('Finexy 登录密码').fill(password);
+    const response=page.waitForResponse(r=>r.url().includes('/tokens/generate/mcp.json'));
+    await panel.getByRole('button',{name:'生成令牌',exact:true}).click();
+    const token=(await (await response).json()).result.token;
+    const names=(await mcp(token,'tools/list')).data.result.tools.map(t=>t.name);
+    assert(names.includes('create_account') && names.includes('create_category') && names.includes('preview_bill_import') && names.includes('add_transaction'));
+    assert.deepEqual(errors,[]);
+    pass('browser MCP management selectable, preserves scopes, generates real four-scope token');
+} finally { await browser?.close(); }
+await mkdir('artifacts/agent-access',{recursive:true});
+await writeFile('artifacts/agent-access/mcp-management-http-final.json',JSON.stringify({passed:evidence.length,groups:evidence},null,2));
+console.log(`OK (${evidence.length} groups)`);

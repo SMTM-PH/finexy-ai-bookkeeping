@@ -93,6 +93,7 @@ import logger from '@/lib/logger.ts';
 
 const props = defineProps<{
     modelValue: number;
+    rawValue?: string;
     minValue?: number;
     maxValue?: number;
     currency?: string;
@@ -104,6 +105,7 @@ const props = defineProps<{
 const emit = defineEmits<{
     (e: 'update:modelValue', value: number): void;
     (e: 'update:show', value: boolean): void;
+    (e: 'update:rawValue', value: string): void;
 }>();
 
 const {
@@ -428,6 +430,7 @@ function confirm(): boolean {
         }
 
         emit('update:modelValue', value);
+        emit('update:rawValue', `numpad:${JSON.stringify({ value: currentValue.value, previous: '', symbol: '', confirmed: true })}`);
         close();
 
         return true;
@@ -439,9 +442,18 @@ function close(): void {
 }
 
 function onSheetOpen(): void {
+    const savedRaw = props.rawValue;
     currentValue.value = getInitedStringValue(props.modelValue, props.flipNegative);
     previousValue.value = '';
     currentSymbol.value = '';
+    if (savedRaw?.startsWith('numpad:')) {
+        try {
+            const state = JSON.parse(savedRaw.slice(7)) as { value: string; previous: string; symbol: string; confirmed: boolean };
+            if (typeof state.value === 'string' && typeof state.previous === 'string' && ['', '+', '−', '×', '÷'].includes(state.symbol)) {
+                currentValue.value = state.value; previousValue.value = state.previous; currentSymbol.value = state.symbol;
+            }
+        } catch { /* Keep the original draft; invalid raw state cannot confirm. */ }
+    }
 }
 
 function onSheetClosed(): void {
@@ -463,6 +475,10 @@ function onDisplayValueClick(): void {
 watch(() => props.flipNegative, (newValue) => {
     currentValue.value = getInitedStringValue(props.modelValue, newValue);
 });
+watch([currentValue, previousValue, currentSymbol], () => {
+    if (!props.show) return;
+    emit('update:rawValue', `numpad:${JSON.stringify({ value: currentValue.value, previous: previousValue.value, symbol: currentSymbol.value, confirmed: false })}`);
+}, { flush: 'sync' });
 </script>
 
 <style>

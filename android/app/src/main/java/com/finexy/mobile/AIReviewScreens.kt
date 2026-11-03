@@ -239,6 +239,10 @@ internal fun AIReviewPage(
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            item {
+                Text("目标账本：默认个人账本。核对后会切换到该账本；切换到其他账本会放弃本轮编辑，待复核草稿仍保留。",
+                    color = Muted, fontSize = 13.sp, lineHeight = 20.sp)
+            }
             if (loading) item { LinearProgressIndicator(Modifier.fillMaxWidth().semantics { contentDescription = "正在刷新 AI 待复核队列" }) }
             message?.let { item { StatusText(it, true) } }
             if (!loading && reviewItems.isEmpty()) item {
@@ -285,26 +289,33 @@ private fun RecognizedTransaction.typeLabel(): String = when (type) {
 }
 
 @Composable
-private fun AIPageScaffold(title: String, onBack: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+internal fun AIPageScaffold(title: String, onBack: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     Scaffold(containerColor = CanvasBlack, topBar = {
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = onBack, modifier = Modifier.heightIn(min = 48.dp)) { Text("返回") }
             Text(title, fontSize = 19.sp, fontWeight = FontWeight.Bold, modifier = Modifier.semantics { heading() })
         }
     }) { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            item { Column(verticalArrangement = Arrangement.spacedBy(16.dp), content = content) }
+        Box(Modifier.fillMaxSize().padding(padding).navigationBarsPadding().imePadding(), contentAlignment = Alignment.TopCenter) {
+            LazyColumn(Modifier.widthIn(max = 640.dp).fillMaxWidth(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                item { Column(verticalArrangement = Arrangement.spacedBy(16.dp), content = content) }
+            }
         }
     }
 }
 
 @Composable
-private fun ReviewPanel(content: @Composable ColumnScope.() -> Unit) {
+internal fun ReviewPanel(content: @Composable ColumnScope.() -> Unit) {
     Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(24.dp)).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
 }
 
 @Composable
-private fun StatusText(text: String, isError: Boolean) {
-    Text(text, color = if (isError) MaterialTheme.colorScheme.error else IncomeGreen, fontSize = 12.sp, lineHeight = 18.sp,
+internal fun StatusText(text: String, isError: Boolean) {
+    Text(text, color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary, fontSize = 12.sp, lineHeight = 18.sp,
         modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite; if (isError) error(text) })
+}
+
+@Composable
+internal fun AIScrollableConfirmationText(text: String) {
+    Text(text, modifier = Modifier.heightIn(max = 280.dp).verticalScroll(rememberScrollState()))
 }

@@ -172,11 +172,11 @@ class ScheduleOccurrenceTest {
             downgrade.execSQL("DROP TABLE scheduled_occurrences")
             downgrade.execSQL("ALTER TABLE transaction_templates DROP COLUMN pausedFromFrequencyType")
             downgrade.execSQL("ALTER TABLE transaction_templates DROP COLUMN pausedFromFrequency")
-            downgrade.version = 13
+            downgrade.removeAIImageSchemaForTest(); downgrade.version = 13
             downgrade.close()
             migrated = Room.databaseBuilder(context, FinexyDatabase::class.java, name)
                 .addMigrations(FinexyDatabase.MIGRATION_13_14, FinexyDatabase.MIGRATION_14_15, FinexyDatabase.MIGRATION_15_16, FinexyDatabase.MIGRATION_16_17,
-                FinexyDatabase.MIGRATION_17_18, FinexyDatabase.MIGRATION_18_19, FinexyDatabase.MIGRATION_19_20, FinexyDatabase.MIGRATION_20_21).build()
+                FinexyDatabase.MIGRATION_17_18, FinexyDatabase.MIGRATION_18_19, FinexyDatabase.MIGRATION_19_20, FinexyDatabase.MIGRATION_20_21, FinexyDatabase.MIGRATION_21_22, FinexyDatabase.MIGRATION_22_23, FinexyDatabase.MIGRATION_23_24, FinexyDatabase.MIGRATION_24_25, FinexyDatabase.MIGRATION_25_26).build()
             lateinit var template: TemplateEntity
             lateinit var occurrence: ScheduledOccurrenceEntity
             kotlinx.coroutines.runBlocking {

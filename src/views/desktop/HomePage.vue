@@ -19,7 +19,7 @@
                         @select="onGlobalLedgerSelect"
                     />
                     <button class="ic" :class="{active:utilityPanel==='search'}" type="button" aria-label="搜索" :aria-expanded="utilityPanel==='search'" @click="toggleUtilityPanel('search')"><v-icon :icon="mdiMagnify" size="17"/></button>
-                    <button class="ic" :class="{active:utilityPanel==='notifications'}" type="button" aria-label="通知" :aria-expanded="utilityPanel==='notifications'" @click="toggleUtilityPanel('notifications')"><v-icon :icon="mdiBellOutline" size="17"/><span v-if="attentionActivities.length" class="dot"></span></button>
+                    <button class="ic" :class="{active:utilityPanel==='notifications'}" type="button" aria-label="通知" :aria-expanded="utilityPanel==='notifications'" @click="toggleUtilityPanel('notifications')"><v-icon :icon="mdiBellOutline" size="17"/><span v-if="pendingSummary && (pendingSummary.knownCount > 0 || pendingSummary.exactTotal === null)" class="dot"></span></button>
                     <button class="ic" :class="{active:utilityPanel==='help'}" type="button" aria-label="帮助与信息" :aria-expanded="utilityPanel==='help'" @click="toggleUtilityPanel('help')"><v-icon :icon="mdiInformationOutline" size="17"/></button>
                     <button class="user" type="button" :aria-expanded="accountMenuOpen" @click="toggleAccountMenu">
                         <span class="avatar">{{ currentUserInitial }}</span>
@@ -36,16 +36,6 @@
                                 <p v-if="!globalSearchResults.length">没有找到匹配内容</p>
                             </div>
                             <button class="utility-primary" type="button" @click="submitGlobalSearch">在全部流水中搜索</button>
-                        </section>
-                    </transition>
-                    <transition name="account-drop">
-                        <section v-if="utilityPanel==='notifications'" class="utility-panel notification-panel">
-                            <header><div><b>通知</b><small>{{ attentionActivities.length ? `${attentionActivities.length} 项需要关注` : '没有需要处理的事项' }}</small></div><button type="button" aria-label="关闭" @click="utilityPanel=null">×</button></header>
-                            <div v-if="attentionActivities.length" class="notice-list">
-                                <button v-for="row in attentionActivities" :key="row.id" type="button" @click="openNotification(row)"><i :class="row.statusClass"></i><span><b>{{ row.name }}</b><small>{{ row.status }} · {{ row.date }}</small></span><v-icon :icon="mdiChevronRight" size="16"/></button>
-                            </div>
-                            <div v-else class="utility-empty"><v-icon :icon="mdiBellOutline" size="22"/><b>全部处理完毕</b><small>新的提醒会显示在这里</small></div>
-                            <router-link class="utility-primary" to="/transaction/list">查看全部流水</router-link>
                         </section>
                     </transition>
                     <transition name="account-drop">
@@ -90,7 +80,6 @@
 
                 <main>
                     <h1>{{ homeGreeting }}，{{ currentUserName }}</h1>
-                    <p class="sub">这里是「{{ selectedLedgerName }}」的余额、收支、目标与待办。</p>
                     <ReleaseUpdateNotice />
 
                     <section class="ledger-context" aria-label="当前账本信息">
@@ -103,101 +92,112 @@
                         <router-link to="/ledger/manage">管理账本<v-icon :icon="mdiChevronRight" size="15"/></router-link>
                     </section>
 
+                    <p v-if="overviewError" class="home-data-error" role="alert">{{ overviewError }} <button type="button" @click="reload(true, false)">重试读取</button></p>
+                    <label class="summary-currency">收支与资产小计币种<select v-model="summaryCurrency" aria-label="收支与资产小计币种"><option v-for="code in summaryCurrencies" :key="code" :value="code">{{ code }}</option></select><span>只统计同币种，不折算其他币种</span></label>
+                    <p v-if="monthlySummary.unresolvedCount" class="home-data-error" role="status">{{ monthlySummary.unresolvedCount }} 笔收支缺少有效账户币种或金额，当前小计未完整计算。</p>
+                    <p v-if="walletIncompleteCount" class="home-data-error" role="status">{{ walletIncompleteCount }} 个账户缺少有效币种或整数余额，余额小计未完整计算。</p>
+
                     <div class="grid">
-                        <section class="card balance-card">
-                            <div class="bhead">
-                                <span>总余额</span>
-                                <div class="currency-switch">
-                                    <button class="cur" :class="{active:balanceCurrencyMenuOpen}" type="button" :aria-expanded="balanceCurrencyMenuOpen" @click="balanceCurrencyMenuOpen=!balanceCurrencyMenuOpen"><span class="flag" :class="currencyFlag(balanceCurrency)"></span>{{ balanceCurrency }} <v-icon :icon="mdiChevronDown" size="12"/></button>
-                                    <transition name="account-drop"><div v-if="balanceCurrencyMenuOpen" class="balance-menu">
-                                        <small>余额显示币种</small>
-                                        <button v-for="currency in balanceCurrencies" :key="currency" type="button" :class="{active:balanceCurrency===currency}" @click="selectBalanceCurrency(currency)"><span class="flag" :class="currencyFlag(currency)"></span><span><b>{{ currency }}</b><small>{{ currency===defaultCurrency?'本位币汇总':'同币种账户小计' }}</small></span><v-icon v-if="balanceCurrency===currency" :icon="mdiCheck" size="16"/></button>
-                                        <div class="balance-menu-actions"><button type="button" @click="toggleBalanceVisibility"><v-icon :icon="showAmountInHomePage?mdiEyeOffOutline:mdiEyeOutline" size="16"/>{{ showAmountInHomePage?'隐藏金额':'显示金额' }}</button><button type="button" @click="refreshBalance"><v-icon :icon="mdiRefresh" size="16"/>刷新余额</button></div>
-                                    </div></transition>
+                        <div class="home-left-column">
+                            <section class="card balance-card">
+                                <div class="bhead">
+                                    <span>同币种净余额</span>
+                                    <div class="currency-switch">
+                                        <button class="cur" :class="{active:balanceCurrencyMenuOpen}" type="button" :aria-expanded="balanceCurrencyMenuOpen" @click="balanceCurrencyMenuOpen=!balanceCurrencyMenuOpen"><span class="flag" :class="currencyFlag(balanceCurrency)"></span>{{ balanceCurrency }} <v-icon :icon="mdiChevronDown" size="12"/></button>
+                                        <transition name="account-drop"><div v-if="balanceCurrencyMenuOpen" class="balance-menu">
+                                            <small>余额显示币种</small>
+                                            <button v-for="currency in balanceCurrencies" :key="currency" type="button" :class="{active:balanceCurrency===currency}" @click="selectBalanceCurrency(currency)"><span class="flag" :class="currencyFlag(currency)"></span><span><b>{{ currency }}</b><small>同币种账户小计 · 不折算</small></span><v-icon v-if="balanceCurrency===currency" :icon="mdiCheck" size="16"/></button>
+                                            <div class="balance-menu-actions"><button type="button" @click="toggleBalanceVisibility"><v-icon :icon="showAmountInHomePage?mdiEyeOffOutline:mdiEyeOutline" size="16"/>{{ showAmountInHomePage?'隐藏金额':'显示金额' }}</button><button type="button" @click="refreshBalance"><v-icon :icon="mdiRefresh" size="16"/>刷新余额</button></div>
+                                        </div></transition>
+                                    </div>
                                 </div>
-                            </div>
-                            <div class="amount">{{ loadingOverview ? '—' : balanceDisplayAmount }}</div>
-                            <div class="trend balance-meta"><b><i></i>实时汇总</b><span>{{ balanceAccountSummary }}</span></div>
-                            <div class="bactions">
-                                <button class="btn-dark" @click="openQuickTransaction(TransactionType.Expense)"><v-icon :icon="mdiMinusCircleOutline" size="16"/>记录支出</button>
-                                <button class="btn-light" @click="openQuickTransaction(TransactionType.Income)"><v-icon :icon="mdiPlusCircleOutline" size="16"/>记录收入</button>
-                            </div>
-                            <div class="wallets">
-                                <div class="whead"><b>钱包</b><span>|&nbsp;&nbsp;共 {{ displayAccountCount }} 个账户</span><button class="wallet-add" type="button" @click="openAccountEditor()">+ 添加账户</button></div>
-                                <div v-if="displayWallets.length" class="wrow">
-                                    <button v-for="account in displayWallets" :key="account.id" class="w" type="button" :aria-label="`查看${account.name}账户详情`" @click="openWalletDetails(account.raw)">
-                                        <span class="wt"><span class="flag" :class="account.flag"></span><b>{{ account.code }}</b><i>⋮</i></span>
-                                        <strong>{{ showAmountInHomePage?account.amount:'******' }}</strong><small>{{ account.name }} · {{ account.note }}</small><em :class="account.active ? 'ok' : 'off'">{{ account.active ? '正常' : '停用' }}</em>
-                                    </button>
+                                <div class="amount">{{ loadingOverview ? '—' : balanceDisplayAmount }}</div>
+                                <div class="trend balance-meta"><span>{{ balanceAccountSummary }}</span></div>
+                                <div class="bactions">
+                                    <button class="btn-dark" @click="openQuickTransaction(TransactionType.Expense)"><v-icon :icon="mdiMinusCircleOutline" size="16"/>记录支出</button>
+                                    <button class="btn-light" @click="openQuickTransaction(TransactionType.Income)"><v-icon :icon="mdiPlusCircleOutline" size="16"/>记录收入</button>
                                 </div>
-                                <div v-else class="wallet-empty"><span>还没有可用账户</span><button type="button" @click="openAccountEditor()">添加第一个账户</button></div>
-                                <router-link class="wallet-view-all" to="/account/list">查看全部 {{ displayAccountCount }} 个账户</router-link>
-                            </div>
-                        </section>
-
-                        <section class="panel stats">
-                            <div class="stat orange">
-                                <div class="shead"><span>本月结余</span><i class="sic"><v-icon :icon="mdiWalletOutline" size="15"/></i></div>
-                                <strong>{{ thisMonthNet }}</strong><div class="strend"><b>收入减支出</b><span>本月</span></div>
-                            </div>
-                            <div class="stat">
-                                <div class="shead"><span>本月支出</span><i class="sic"><v-icon :icon="mdiCreditCardOutline" size="15"/></i></div>
-                                <strong>{{ thisMonthExpense }}</strong><div class="strend down"><b>实时</b><span>本月</span></div>
-                            </div>
-                            <div class="stat">
-                                <div class="shead"><span>本月收入</span><i class="sic"><v-icon :icon="mdiCashMultiple" size="15"/></i></div>
-                                <strong>{{ thisMonthIncome }}</strong><div class="strend up"><b>实时</b><span>本月</span></div>
-                            </div>
-                            <div class="stat">
-                                <div class="shead"><span>账户余额</span><i class="sic"><v-icon :icon="mdiSackPercent" size="15"/></i></div>
-                                <strong>{{ homeTotalAssets }}</strong><div class="strend up"><b>账本内</b><span>当前</span></div>
-                            </div>
-                        </section>
-
-                        <section class="card chart-card">
-                            <h3>近八个月收支</h3><p class="csub">收入与支出的月度变化</p>
-                            <div class="plot-wrap">
-                                <div class="plot-head"><b>收支趋势</b><span class="legend"><i class="b"></i>收入<i class="k"></i>支出</span></div>
-                                <div class="plot">
-                                    <div v-for="top in [0,20,40,60,80]" :key="top" class="gl" :style="{top: `${top}%`}"></div><div class="gl gl-bottom"></div>
-                                    <span v-for="(label,index) in chartYAxisLabels" :key="`${label}-${index}`" class="ylab" :style="{top: `${index*20}%`}">{{ label }}</span><span class="ylab ylab-bottom">0</span>
-                                    <div class="bars"><div v-for="bar in chartBars" :key="bar.month" class="grp"><i class="p" :style="{height: `${bar.profit}%`}"></i><i class="l" :style="{height: `${bar.loss}%`}"></i><span>{{ bar.month }}</span></div></div>
+                                <div class="wallets">
+                                    <div class="whead"><b>钱包</b><span>|&nbsp;&nbsp;共 {{ displayAccountCount }} 个账户</span><button class="wallet-add" type="button" @click="openAccountEditor()">+ 添加账户</button></div>
+                                    <section v-if="activeWallet" class="wallet-carousel" aria-label="钱包账户卡片">
+                                        <WalletHoloCard :account="activeWallet.raw" :ledger-id="selectedLedgerId" :category-name="activeWallet.note" :display-amount="showAmountInHomePage?activeWallet.amount:'******'" :refresh-key="walletAppearanceRefresh" @navigate="direction => navigateWallet(direction < 0 ? -1 : 1)" @details="openWalletDetails(activeWallet.raw)" />
+                                        <div class="wallet-pager">
+                                            <button type="button" aria-label="上一张钱包卡片" :disabled="walletPosition <= 0" @click="navigateWallet(-1)"><v-icon :icon="mdiChevronLeft" size="20"/></button>
+                                            <span role="status" aria-live="polite" aria-atomic="true">{{ walletPosition + 1 }} / {{ displayWallets.length }} <small>个可见账户</small></span>
+                                            <button type="button" aria-label="下一张钱包卡片" :disabled="walletPosition >= displayWallets.length - 1" @click="navigateWallet(1)"><v-icon :icon="mdiChevronRight" size="20"/></button>
+                                        </div>
+                                    </section>
+                                    <div v-else class="wallet-empty" role="status"><span>{{ loadingOverview ? '正在读取账户…' : overviewError ? '账户暂不可用，请重试读取。' : '还没有可用账户' }}</span><button v-if="!loadingOverview && !overviewError" type="button" @click="openAccountEditor()">添加第一个账户</button></div>
+                                    <router-link class="wallet-view-all" to="/account/list">查看全部 {{ displayAccountCount }} 个账户</router-link>
                                 </div>
-                            </div>
-                        </section>
-
-                        <div class="col-left">
-                            <section v-if="featuredSavingsGoal" class="card savings-goal-card" role="button" tabindex="0" :aria-label="`查看存钱目标：${featuredSavingsGoal.name}`" @click="router.push('/savings/goals')" @keyup.enter="router.push('/savings/goals')">
-                                <div class="savings-goal-head">
-                                    <div><small>SAVINGS GOAL</small><h3>{{ featuredSavingsGoal.name }}</h3></div>
-                                    <span>{{ savingsGoalsStore.goals.length > 1 ? `${savingsGoalsStore.goals.length} 个目标` : featuredSavingsGoal.achieved ? '已达成' : '进行中' }}</span>
-                                </div>
-                                <div class="savings-goal-amount"><strong>{{ formatBudgetMoney(featuredSavingsGoal.savedAmount) }}</strong><span>/ {{ formatBudgetMoney(featuredSavingsGoal.targetAmount) }}</span></div>
-                                <div class="savings-goal-progress" role="img" :aria-label="`目标进度 ${featuredSavingsGoalProgress.toFixed(1)}%`"><i :style="{width:`${featuredSavingsGoalProgress}%`}"></i></div>
-                                <footer><span>已完成 {{ featuredSavingsGoalProgress.toFixed(0) }}%</span><button type="button" @click.stop="router.push('/savings/goals')">查看计划<v-icon :icon="mdiChevronRight" size="15"/></button></footer>
                             </section>
-                            <section class="card limit" @click="router.push('/schedule/list?panel=budget')">
-                                <h3>每月支出限额</h3>
-                                <div class="limitbar"><div class="used" :style="{width: `${Math.min(budgetPercentage,100)}%`}"></div><div class="rest"></div></div>
-                                <div class="limitmeta"><span><b>{{ formatBudgetMoney(currentMonthExpense) }}</b> 已支出</span><b>{{ monthlyBudget ? formatBudgetMoney(monthlyBudget.amount) : '未设置限额' }}</b></div>
-                            </section>
-                            <section class="card finance-tasks">
-                                <div class="mhead"><div><h3><v-icon :icon="mdiFileDocumentOutline" size="17"/>需要你处理</h3><p>核对识别结果与周期计划后再入账</p></div><button class="add" @click="router.push('/transaction/list')">全部流水</button></div>
-                                <div class="task-list">
-                                    <button type="button" :class="{done:pendingReviewCount===0}" @click="router.push({path:'/transaction/list',query:{search:'待确认'}})"><i class="task-icon pending">待</i><span><b>{{ pendingReviewCount ? '待确认记录' : '待确认队列已清空' }}</b><small>{{ pendingReviewCount ? '核对识别内容，完成入账或忽略' : '新识别出的异常记录会显示在这里' }}</small></span><strong>{{ pendingReviewCount ? `${pendingReviewCount} 笔` : '已完成' }}</strong><v-icon :icon="mdiChevronRight" size="17"/></button>
-                                    <button type="button" @click="router.push('/schedule/list')"><i class="task-icon plan">计</i><span><b>周期计划</b><small>到期后确认入账，不会自动改变余额</small></span><strong>查看</strong><v-icon :icon="mdiChevronRight" size="17"/></button>
+                            <div class="col-left">
+                                <section v-if="featuredSavingsGoal" class="card savings-goal-card" role="button" tabindex="0" :aria-label="`查看存钱目标：${featuredSavingsGoal.name}`" @click="router.push('/savings/goals')" @keyup.enter="router.push('/savings/goals')">
+                                    <div class="savings-goal-head">
+                                        <div><small>SAVINGS GOAL</small><h3>{{ featuredSavingsGoal.name }}</h3></div>
+                                        <span>{{ savingsGoalsStore.goals.length > 1 ? `${savingsGoalsStore.goals.length} 个目标` : featuredSavingsGoal.achieved ? '已达成' : '进行中' }}</span>
+                                    </div>
+                                    <div class="savings-goal-amount"><strong>{{ formatBudgetMoney(featuredSavingsGoal.savedAmount) }}</strong><span>/ {{ formatBudgetMoney(featuredSavingsGoal.targetAmount) }}</span></div>
+                                    <div class="savings-goal-progress" role="img" :aria-label="`目标进度 ${featuredSavingsGoalProgress.toFixed(1)}%`"><i :style="{width:`${featuredSavingsGoalProgress}%`}"></i></div>
+                                    <footer><span>已完成 {{ featuredSavingsGoalProgress.toFixed(0) }}%</span><button type="button" @click.stop="router.push('/savings/goals')">查看计划<v-icon :icon="mdiChevronRight" size="15"/></button></footer>
+                                </section>
+                                <section v-if="!budgetError && !loadingOverview && !overviewError" class="card limit" role="button" tabindex="0" aria-label="查看当前账本月度预算" @click="router.push('/schedule/list?panel=budget')" @keydown.enter="router.push('/schedule/list?panel=budget')" @keydown.space.prevent="router.push('/schedule/list?panel=budget')">
+                                    <h3>本月预算 · {{ budgetCurrency }}</h3>
+                                    <div v-if="monthlyBudget && showAmountInHomePage && budgetExpense !== null" class="limitbar" aria-hidden="true"><div class="used" :style="{width: `${Math.min(Math.max(budgetPercentage,0),100)}%`}"></div><div class="rest"></div></div>
+                                    <div class="limitmeta"><span><b>{{ budgetExpense === null ? '未完整计算' : formatBudgetLimitMoney(budgetExpense) }}</b> 同币种支出</span><b>{{ monthlyBudget ? formatBudgetLimitMoney(monthlyBudget.amount) : '未设置预算' }}</b></div>
+                                    <p v-if="monthlyBudget && budgetExpense !== null && showAmountInHomePage" class="scope-copy">已用 {{ budgetPercentage.toFixed(1) }}% · {{ budgetExpense > monthlyBudget.amount ? '超支' : '剩余' }} {{ formatBudgetLimitMoney(Math.abs(monthlyBudget.amount - budgetExpense)) }}</p>
+                                    <p v-if="monthlySummary.totals.some(item => item.currency !== budgetCurrency) || monthlySummary.unresolvedCount" class="scope-copy">只比较 {{ budgetCurrency }} 支出，其他币种不折算；缺失数据时不计算使用率。</p>
+                                </section>
+                                <p v-if="budgetError" class="home-data-error" role="alert">{{ budgetError }} <button type="button" @click="reload(true, false)">重试预算读取</button></p>
+                                <LedgerPendingPanel compact @open="openPendingTarget" />
+                            </div>
+                        </div>
+                        <div class="home-right-column">
+                            <section class="panel stats">
+                                <div class="stat orange">
+                                    <div class="shead"><span>本月结余</span><i class="sic"><v-icon :icon="mdiWalletOutline" size="15"/></i></div>
+                                    <strong>{{ thisMonthNet }}</strong>
                                 </div>
+                                <div class="stat">
+                                    <div class="shead"><span>本月支出</span><i class="sic"><v-icon :icon="mdiCreditCardOutline" size="15"/></i></div>
+                                    <strong>{{ thisMonthExpense }}</strong>
+                                </div>
+                                <div class="stat">
+                                    <div class="shead"><span>本月收入</span><i class="sic"><v-icon :icon="mdiCashMultiple" size="15"/></i></div>
+                                    <strong>{{ thisMonthIncome }}</strong>
+                                </div>
+                                <div class="stat">
+                                    <div class="shead"><span>资产余额</span><i class="sic"><v-icon :icon="mdiSackPercent" size="15"/></i></div>
+                                    <strong>{{ homeTotalAssets }}</strong>
+                                </div>
+                            </section>
+
+                            <section class="card chart-card">
+                                <h3>近八个月同币种收支 <small>{{ summaryCurrency }}</small></h3>
+                                <p v-if="chartIncompleteCount" class="scope-copy" role="status">{{ chartIncompleteCount }} 项趋势数据缺少有效账户币种、分类或金额，趋势未完整计算。</p>
+                                <p v-if="loadingOverview" role="status">正在读取收支趋势…</p>
+                                <p v-else-if="overviewError" role="status">趋势暂不可用，请重试读取。</p>
+                                <p v-else-if="!chartMaximum" role="status">当前币种与时间范围暂无收支数据。</p>
+                                <p v-if="!loadingOverview && !overviewError && chartAmounts.some(item => item.incomeAmount < 0 || item.expenseAmount < 0)" class="scope-copy">柱高显示金额绝对值，退款后的负净额见下方金额表。</p>
+                                <div v-if="!loadingOverview && !overviewError && chartMaximum" class="plot-wrap">
+                                    <div class="plot-head"><b>收支趋势</b><span class="legend"><i class="b"></i>收入<i class="k"></i>支出</span></div>
+                                    <div class="plot">
+                                        <div v-for="top in [0,20,40,60,80]" :key="top" class="gl" :style="{top: `calc((100% - 24px) * ${top / 100})`}"></div><div class="gl gl-bottom"></div>
+                                        <span v-for="(label,index) in chartYAxisLabels" :key="`${label}-${index}`" class="ylab" :style="{top: `calc((100% - 24px) * ${index / 5})`}">{{ label }}</span><span class="ylab ylab-bottom">0</span>
+                                        <div class="bars"><div v-for="bar in chartBars" :key="bar.month" class="grp"><i class="p" :style="{height: `${bar.profit}%`}"></i><i class="l" :style="{height: `${bar.loss}%`}"></i><span>{{ bar.month }}</span></div></div>
+                                    </div>
+                                </div>
+                                <details v-if="!loadingOverview && !overviewError" class="trend-values"><summary>查看趋势金额</summary><table><thead><tr><th>月份</th><th>收入 · {{ summaryCurrency }}</th><th>支出 · {{ summaryCurrency }}</th></tr></thead><tbody><tr v-for="row in chartAmounts" :key="row.yearMonth"><td>{{ row.yearMonth }}</td><td>{{ formatSummaryMoney(row.incomeAmount) }}</td><td>{{ formatSummaryMoney(row.expenseAmount) }}</td></tr></tbody></table></details>
+                            </section>
+                            <section class="card activities">
+                                <div class="ahead"><h3>近期活动</h3><span v-if="selectedActivityCount" class="selected-summary">已选择 {{ selectedActivityCount }} 笔<button type="button" @click="clearActivitySelection">取消选择</button></span><label class="searchbox"><v-icon :icon="mdiMagnify" size="14"/><input v-model.trim="activityQuery" placeholder="搜索流水" aria-label="搜索近期活动"></label><button class="filter" :class="{active:activityFilterOpen}" :aria-expanded="activityFilterOpen" @click="activityFilterOpen=!activityFilterOpen"><v-icon :icon="mdiFilterOutline" size="14"/>筛选</button></div>
+                                <transition name="account-drop"><div v-if="activityFilterOpen" class="activity-filters"><span>交易类型</span><button v-for="item in activityTypes" :key="item.value" type="button" :class="{active:activityType===item.value}" @click="activityType=item.value">{{ item.label }}</button><button class="reset-filter" type="button" @click="resetActivityFilters">清除</button></div></transition>
+                                <div class="activity-table-wrap"><table><thead><tr><th class="check-col"><input v-model="allActivitiesSelected" :indeterminate="someActivitiesSelected" type="checkbox" class="cb" aria-label="全选近期活动"></th><th>流水号</th><th>活动</th><th>类型</th><th>金额</th><th>状态</th><th>日期</th><th class="more-col"></th></tr></thead>
+                                    <tbody><tr v-for="row in filteredActivities" :key="`${row.id}-${row.name}`" tabindex="0" @click="openActivity(row)" @keyup.enter="openActivity(row)"><td @click.stop><input v-model="row.selected" type="checkbox" class="cb" :aria-label="`选择 ${row.id}`"></td><td class="id">{{ row.id }}</td><td><span class="act"><span class="aic" :style="{background:row.color}">{{ row.icon }}</span>{{ row.name }}</span></td><td><span class="type-pill">{{ row.typeLabel }}</span></td><td class="price" :class="{income:row.type==='income'}">{{ row.price }}</td><td><span class="status"><i :class="row.statusClass"></i>{{ row.status }}</span></td><td class="date">{{ row.date }}</td><td class="row-actions"><button class="more" :aria-label="`${row.id} 更多操作`" :aria-expanded="activityMenuId===row.id" @click.stop="activityMenuId=activityMenuId===row.id?null:row.id"><v-icon :icon="mdiDotsHorizontal" size="16"/></button><div v-if="activityMenuId===row.id" class="activity-menu"><button type="button" @click.stop="openActivity(row)">查看详情</button><button type="button" @click.stop="viewActivityInList(row)">在流水中查看</button></div></td></tr><tr v-if="!filteredActivities.length"><td class="activity-empty" colspan="8" role="status"><b>{{ loadingOverview ? '正在读取近期活动…' : overviewError ? '近期活动暂不可用' : activityRows.length ? '没有匹配的近期活动' : '本月还没有流水' }}</b><span>{{ loadingOverview ? '请稍候' : overviewError ? '请重试读取，失败不能视为空账本' : activityRows.length ? '调整搜索或筛选条件后重试' : '记录一笔支出或收入后会显示在这里' }}</span><button v-if="!loadingOverview && !overviewError && !activityRows.length" type="button" @click="router.push('/transaction/list?action=expense')">记录第一笔流水</button></td></tr></tbody>
+                                </table></div>
+                                <footer class="activity-footer"><span>显示 {{ filteredActivities.length }} 笔{{ activityRows.length?`，本月共 ${activityRows.length} 笔`:'' }}</span><button type="button" @click="router.push('/transaction/list')">查看全部流水<v-icon :icon="mdiChevronRight" size="15"/></button></footer>
                             </section>
                         </div>
-
-                        <section class="card activities">
-                            <div class="ahead"><h3>近期活动</h3><span v-if="selectedActivityCount" class="selected-summary">已选择 {{ selectedActivityCount }} 笔<button type="button" @click="clearActivitySelection">取消选择</button></span><label class="searchbox"><v-icon :icon="mdiMagnify" size="14"/><input v-model.trim="activityQuery" placeholder="搜索流水" aria-label="搜索近期活动"></label><button class="filter" :class="{active:activityFilterOpen}" :aria-expanded="activityFilterOpen" @click="activityFilterOpen=!activityFilterOpen"><v-icon :icon="mdiFilterOutline" size="14"/>筛选</button></div>
-                            <transition name="account-drop"><div v-if="activityFilterOpen" class="activity-filters"><span>交易类型</span><button v-for="item in activityTypes" :key="item.value" type="button" :class="{active:activityType===item.value}" @click="activityType=item.value">{{ item.label }}</button><button class="reset-filter" type="button" @click="resetActivityFilters">清除</button></div></transition>
-                            <div class="activity-table-wrap"><table><thead><tr><th class="check-col"><input v-model="allActivitiesSelected" :indeterminate="someActivitiesSelected" type="checkbox" class="cb" aria-label="全选近期活动"></th><th>流水号</th><th>活动</th><th>类型</th><th>金额</th><th>状态</th><th>日期</th><th class="more-col"></th></tr></thead>
-                                <tbody><tr v-for="row in filteredActivities" :key="`${row.id}-${row.name}`" tabindex="0" @click="openActivity(row)" @keyup.enter="openActivity(row)"><td @click.stop><input v-model="row.selected" type="checkbox" class="cb" :aria-label="`选择 ${row.id}`"></td><td class="id">{{ row.id }}</td><td><span class="act"><span class="aic" :style="{background:row.color}">{{ row.icon }}</span>{{ row.name }}</span></td><td><span class="type-pill">{{ row.typeLabel }}</span></td><td class="price" :class="{income:row.type==='income'}">{{ row.price }}</td><td><span class="status"><i :class="row.statusClass"></i>{{ row.status }}</span></td><td class="date">{{ row.date }}</td><td class="row-actions"><button class="more" :aria-label="`${row.id} 更多操作`" :aria-expanded="activityMenuId===row.id" @click.stop="activityMenuId=activityMenuId===row.id?null:row.id"><v-icon :icon="mdiDotsHorizontal" size="16"/></button><div v-if="activityMenuId===row.id" class="activity-menu"><button type="button" @click.stop="openActivity(row)">查看详情</button><button type="button" @click.stop="viewActivityInList(row)">在流水中查看</button></div></td></tr><tr v-if="!filteredActivities.length"><td class="activity-empty" colspan="8"><b>{{ activityRows.length?'没有匹配的近期活动':'本月还没有流水' }}</b><span>{{ activityRows.length?'调整搜索或筛选条件后重试':'记录一笔支出或收入后会显示在这里' }}</span><button v-if="!activityRows.length" type="button" @click="router.push('/transaction/list?action=expense')">记录第一笔流水</button></td></tr></tbody>
-                            </table></div>
-                            <footer class="activity-footer"><span>显示 {{ filteredActivities.length }} 笔{{ activityRows.length?`，本月共 ${activityRows.length} 笔`:'' }}</span><button type="button" @click="router.push('/transaction/list')">查看全部流水<v-icon :icon="mdiChevronRight" size="15"/></button></footer>
-                        </section>
                     </div>
                 </main>
             </div>
@@ -215,6 +215,7 @@
             </aside>
         </div></transition></Teleport>
 
+    <LedgerPendingDialog v-if="utilityPanel === 'notifications'" @close="utilityPanel = null" @open="openPendingTarget" />
     <snack-bar ref="snackbar" />
     <TransactionEditDialog ref="transactionEditDialog" :type="TransactionEditPageType.Transaction"/>
     <AccountEditDialog ref="accountEditDialog"/>
@@ -225,11 +226,17 @@
 import SnackBar from '@/components/desktop/SnackBar.vue';
 import ReleaseUpdateNotice from '@/components/ReleaseUpdateNotice.vue';
 import GlobalLedgerSwitcher from '@/components/desktop/GlobalLedgerSwitcher.vue';
+import WalletHoloCard from '@/components/desktop/WalletHoloCard.vue';
 import TransactionEditDialog from '@/views/desktop/transactions/list/dialogs/EditDialog.vue';
 import AccountEditDialog from '@/views/desktop/accounts/list/dialogs/EditDialog.vue';
+import LedgerPendingPanel from '@/components/common/LedgerPendingPanel.vue';
+import LedgerPendingDialog from '@/components/common/LedgerPendingDialog.vue';
+import { useLedgerPendingStore } from '@/stores/ledgerPending.ts';
+import { desktopLedgerPendingLocation } from '@/lib/ledger_pending_navigation.ts';
+import type { LedgerPendingTarget } from '@/models/ledger_pending.ts';
 import { TransactionEditPageType } from '@/views/base/transactions/TransactionEditPageBase.ts';
 
-import { ref, computed, useTemplateRef } from 'vue';
+import { ref, computed, watch, useTemplateRef, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 
 import { useI18n } from '@/locales/helpers.ts';
@@ -237,10 +244,7 @@ import { useHomePageBase } from '@/views/base/HomePageBase.ts';
 
 import { useAccountsStore } from '@/stores/account.ts';
 import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
-import { useOverviewStore } from '@/stores/overview.ts';
 import { useMonthlyBudgetStore } from '@/stores/monthlyBudget.ts';
-import { useTransactionsStore } from '@/stores/transaction.ts';
-import { useAIReviewItemsStore } from '@/stores/aiReviewItem.ts';
 import { useRootStore } from '@/stores/index.ts';
 import { useUserStore } from '@/stores/user.ts';
 import { useLedgersStore } from '@/stores/ledger.ts';
@@ -250,8 +254,10 @@ import { AccountCategory } from '@/core/account.ts';
 import type { Account } from '@/models/account.ts';
 import { isUserLogined, isUserUnlocked } from '@/lib/userstate.ts';
 import type { MonthlyBudgetInfoResponse } from '@/models/monthly_budget.ts';
-import { Transaction } from '@/models/transaction.ts';
+import { Transaction, type TransactionStatisticTrendsResponseItem } from '@/models/transaction.ts';
 import { TransactionType } from '@/core/transaction.ts';
+import services from '@/lib/services.ts';
+import { accountCurrency, exactMinorUnitSum, summarizeCurrencyAmounts, summarizeStatisticCurrencyAmounts } from '@/lib/currency_totals.ts';
 
 import {
     mdiWalletOutline,
@@ -260,6 +266,7 @@ import {
     mdiInformationOutline,
     mdiChevronDown,
     mdiChevronRight,
+    mdiChevronLeft,
     mdiFileDocumentOutline,
     mdiLayersOutline,
     mdiTagOutline,
@@ -310,17 +317,12 @@ const router = useRouter();
 const { formatNumberToLocalizedNumerals, formatAmountToLocalizedNumeralsWithCurrency } = useI18n();
 const {
     showAmountInHomePage,
-    netAssets,
-    totalAssets,
-    transactionOverview
 } = useHomePageBase();
 
 const accountsStore = useAccountsStore();
 const transactionCategoriesStore = useTransactionCategoriesStore();
-const overviewStore = useOverviewStore();
 const monthlyBudgetStore = useMonthlyBudgetStore();
-const transactionsStore = useTransactionsStore();
-const aiReviewItemsStore = useAIReviewItemsStore();
+const ledgerPendingStore = useLedgerPendingStore();
 const rootStore = useRootStore();
 const userStore = useUserStore();
 const ledgersStore = useLedgersStore();
@@ -331,6 +333,8 @@ const transactionEditDialog = useTemplateRef<TransactionDialogType>('transaction
 const accountEditDialog = useTemplateRef<AccountDialogType>('accountEditDialog');
 
 const loadingOverview = ref<boolean>(true);
+const overviewError = ref('');
+const budgetError = ref('');
 const balanceCurrencyMenuOpen = ref<boolean>(false);
 const balanceCurrency = ref<string>(userStore.currentUserDefaultCurrency || 'CNY');
 const selectedWallet = ref<Account | null>(null);
@@ -360,44 +364,56 @@ const selectedLedgerSummary = computed<string>(() => {
     const activeMembers = ledgersStore.members.filter(member => member.status === 1).length;
     return activeMembers > 0 ? `${ledgerRoleLabel.value} · ${activeMembers} 位成员` : '共享账本';
 });
-const walletAccounts = computed<Account[]>(() => accountsStore.allVisiblePlainAccounts);
-const pendingReviewCount = computed<number>(() => familyLedgerSelected.value ? 0 : aiReviewItemsStore.items.length);
-const featuredSavingsGoal = computed(() => savingsGoalsStore.goals.find(goal => !goal.achieved) ?? savingsGoalsStore.goals[0] ?? null);
+const walletAccounts = computed<Account[]>(() => accountsStore.accountListLedgerId === selectedLedgerId.value ? accountsStore.allVisiblePlainAccounts : []);
+const walletIncompleteCount = computed(() => walletAccounts.value.filter(account => !/^[A-Z]{3}$/.test(account.currency) || !Number.isSafeInteger(account.balance)).length);
+const pendingSummary = computed(() => ledgerPendingStore.summaryFor(selectedLedgerId.value));
+const featuredSavingsGoal = computed(() => {
+    if (loadingOverview.value || overviewError.value) return null;
+    const goals = savingsGoalsStore.goals.filter(goal => goal.ledgerId === selectedLedgerId.value);
+    return goals.find(goal => !goal.achieved) ?? goals[0] ?? null;
+});
 const featuredSavingsGoalProgress = computed(() => Math.min(100, Math.max(0, featuredSavingsGoal.value?.progressPercent ?? 0)));
 
 const defaultCurrency = computed<string>(() => userStore.currentUserDefaultCurrency || 'CNY');
-const displayAccountCount = computed<string>(() => formatNumberToLocalizedNumerals(accountsStore.allPlainAccounts.length));
-const balanceCurrencies = computed<string[]>(() => Array.from(new Set([defaultCurrency.value, ...walletAccounts.value.map(account => account.currency)])));
+const displayAccountCount = computed<string>(() => formatNumberToLocalizedNumerals(accountsStore.accountListLedgerId === selectedLedgerId.value ? accountsStore.allPlainAccounts.length : 0));
+const balanceCurrencies = computed<string[]>(() => Array.from(new Set([defaultCurrency.value, ...walletAccounts.value.map(account => account.currency).filter(code => /^[A-Z]{3}$/.test(code))])));
 const balanceDisplayAmount = computed<string>(() => {
     if (!showAmountInHomePage.value) {
         return '******';
     }
-
-    if (balanceCurrency.value === defaultCurrency.value) {
-        return netAssets.value;
-    }
-
-    const currencyBalance = walletAccounts.value.filter(account => account.currency === balanceCurrency.value).reduce((total, account) => total + account.balance, 0);
-    return formatAmountToLocalizedNumeralsWithCurrency(currencyBalance, balanceCurrency.value);
+    if (overviewError.value) return '未能读取';
+    if (loadingOverview.value || accountsStore.accountListLedgerId !== selectedLedgerId.value) return '—';
+    const currencyBalance = exactMinorUnitSum(walletAccounts.value.filter(account => account.currency === balanceCurrency.value).map(account => account.balance));
+    return currencyBalance !== null ? formatAmountToLocalizedNumeralsWithCurrency(currencyBalance, balanceCurrency.value) : '未完整计算';
 });
 const balanceAccountSummary = computed<string>(() => {
-    const count = balanceCurrency.value === defaultCurrency.value ? walletAccounts.value.length : walletAccounts.value.filter(account => account.currency === balanceCurrency.value).length;
-    return `${formatNumberToLocalizedNumerals(count)} 个可见账户 · ${balanceCurrency.value}`;
+    const count = walletAccounts.value.filter(account => account.currency === balanceCurrency.value).length;
+    return `${formatNumberToLocalizedNumerals(count)} 个同币种可见账户 · ${balanceCurrency.value} · 不折算`;
 });
 const currentYearMonth = computed<number>(() => {
     const now = new Date();
     return now.getFullYear() * 100 + now.getMonth() + 1;
 });
-const monthlyBudget = computed<MonthlyBudgetInfoResponse | null>(() => monthlyBudgetStore.budgets[currentYearMonth.value] ?? null);
+const monthlyBudget = computed<MonthlyBudgetInfoResponse | null>(() => monthlyBudgetStore.budgetFor(currentYearMonth.value, selectedLedgerId.value) ?? null);
+const budgetCurrency = computed(() => monthlyBudget.value?.currency || defaultCurrency.value);
 const monthlyTransactions = ref<Transaction[]>([]);
-const currentMonthIncome = computed<number>(() => monthlyTransactions.value.filter(transaction => transaction.type === TransactionType.Income).reduce((sum, transaction) => sum + transaction.sourceAmount, 0));
-const currentMonthExpense = computed<number>(() => monthlyTransactions.value.filter(transaction => transaction.type === TransactionType.Expense).reduce((sum, transaction) => sum + transaction.sourceAmount, 0));
+const summaryCurrency = ref(userStore.currentUserDefaultCurrency || 'CNY');
+const summaryAccounts = computed(() => accountsStore.accountListLedgerId === selectedLedgerId.value ? accountsStore.allAccountsMap : {});
+const summaryCurrencies = computed(() => [...new Set([defaultCurrency.value, ...Object.values(summaryAccounts.value).map(account => account.currency).filter(code => /^[A-Z]{3}$/.test(code))])].sort());
+const monthlySummary = computed(() => summarizeCurrencyAmounts(monthlyTransactions.value.map(item => ({ type: item.type, accountId: item.sourceAccountId, amount: item.sourceAmount })), summaryAccounts.value));
+const currentMonthTotals = computed(() => monthlySummary.value.totals.find(item => item.currency === summaryCurrency.value));
+const currentMonthIncome = computed<number>(() => currentMonthTotals.value?.income ?? 0);
+const currentMonthExpense = computed<number>(() => currentMonthTotals.value?.expense ?? 0);
 const currentMonthNet = computed<number>(() => currentMonthIncome.value - currentMonthExpense.value);
-const budgetPercentage = computed<number>(() => monthlyBudget.value ? currentMonthExpense.value * 100 / monthlyBudget.value.amount : 0);
-const thisMonthNet = computed<string>(() => formatAmountToLocalizedNumeralsWithCurrency(currentMonthNet.value, defaultCurrency.value));
-const thisMonthIncome = computed<string>(() => formatAmountToLocalizedNumeralsWithCurrency(currentMonthIncome.value, defaultCurrency.value));
-const thisMonthExpense = computed<string>(() => formatAmountToLocalizedNumeralsWithCurrency(currentMonthExpense.value, defaultCurrency.value));
-const homeTotalAssets = computed<string>(() => totalAssets.value);
+const budgetExpense = computed<number | null>(() => monthlySummary.value.unresolvedCount ? null : monthlySummary.value.totals.find(item => item.currency === budgetCurrency.value)?.expense ?? 0);
+const budgetPercentage = computed<number>(() => monthlyBudget.value && budgetExpense.value !== null ? budgetExpense.value * 100 / monthlyBudget.value.amount : 0);
+function formatBudgetLimitMoney(value: number): string { return showAmountInHomePage.value ? formatAmountToLocalizedNumeralsWithCurrency(value, budgetCurrency.value) : '******'; }
+function formatSummaryMoney(amount: number | null): string { return !showAmountInHomePage.value ? '******' : loadingOverview.value ? '—' : overviewError.value ? '未能读取' : amount === null || !Number.isSafeInteger(amount) ? '未完整计算' : formatAmountToLocalizedNumeralsWithCurrency(amount, summaryCurrency.value); }
+const thisMonthNet = computed<string>(() => formatSummaryMoney(currentMonthNet.value));
+const thisMonthIncome = computed<string>(() => formatSummaryMoney(currentMonthIncome.value));
+const thisMonthExpense = computed<string>(() => formatSummaryMoney(currentMonthExpense.value));
+const homeTotalAssets = computed<string>(() => formatSummaryMoney(exactMinorUnitSum(walletAccounts.value.filter(account => account.currency === summaryCurrency.value && account.isAsset).map(account => account.balance))));
+const homeTrendRows = ref<TransactionStatisticTrendsResponseItem[]>([]);
 
 const overviewMonthKeys = [
     'monthBeforeLast6Months',
@@ -409,21 +425,26 @@ const overviewMonthKeys = [
     'lastMonth',
     'thisMonth'
 ] as const;
-const chartAmounts = computed(() => overviewMonthKeys.map((key, index) => {
-    const date = new Date();
-    date.setMonth(date.getMonth() - (overviewMonthKeys.length - 1 - index));
-    const item = familyLedgerSelected.value ? undefined : transactionOverview.value[key];
+const chartAmounts = computed(() => overviewMonthKeys.map((_, index) => {
+    const now = new Date();
+    const date = new Date(now.getFullYear(), now.getMonth() - (overviewMonthKeys.length - 1 - index), 1);
+    const row = homeTrendRows.value.find(item => item.year === date.getFullYear() && item.month === date.getMonth() + 1);
+    const summary = summarizeStatisticCurrencyAmounts(row?.items ?? [], summaryAccounts.value, transactionCategoriesStore.allTransactionCategoriesMap);
+    const item = summary.totals.find(item => item.currency === summaryCurrency.value);
     return {
         month: `${date.getMonth() + 1}月`,
-        incomeAmount: item?.incomeAmount ?? 0,
-        expenseAmount: item?.expenseAmount ?? 0
+        yearMonth: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`,
+        incomeAmount: item?.income ?? 0,
+        expenseAmount: item?.expense ?? 0,
+        unresolvedCount: summary.unresolvedCount,
     };
 }));
-const chartMaximum = computed(() => Math.max(0, ...chartAmounts.value.flatMap(item => [item.incomeAmount, item.expenseAmount])));
+const chartIncompleteCount = computed(() => chartAmounts.value.reduce((sum, item) => sum + item.unresolvedCount, 0));
+const chartMaximum = computed(() => Math.max(0, ...chartAmounts.value.flatMap(item => [Math.abs(item.incomeAmount), Math.abs(item.expenseAmount)])));
 const chartBars = computed(() => chartAmounts.value.map(item => ({
     month: item.month,
-    profit: chartMaximum.value ? Math.max(2, item.incomeAmount * 100 / chartMaximum.value) : 0,
-    loss: chartMaximum.value ? Math.max(2, item.expenseAmount * 100 / chartMaximum.value) : 0
+    profit: chartMaximum.value && item.incomeAmount ? Math.max(2, Math.abs(item.incomeAmount) * 100 / chartMaximum.value) : 0,
+    loss: chartMaximum.value && item.expenseAmount ? Math.max(2, Math.abs(item.expenseAmount) * 100 / chartMaximum.value) : 0
 })));
 const chartYAxisLabels = computed(() => Array.from({ length: 5 }, (_, index) => {
     const value = chartMaximum.value * (5 - index) / 500;
@@ -444,7 +465,6 @@ const filteredActivities = computed(() => {
 const selectedActivityCount = computed(() => activityRows.value.filter(row => row.selected).length);
 const allActivitiesSelected = computed({get:()=>filteredActivities.value.length>0&&filteredActivities.value.every(row=>row.selected),set:(selected:boolean)=>filteredActivities.value.forEach(row=>row.selected=selected)});
 const someActivitiesSelected = computed(()=>selectedActivityCount.value>0&&!allActivitiesSelected.value);
-const attentionActivities = computed(() => activityRows.value.filter(row => row.status !== '已完成'));
 const globalSearchResults = computed(() => {
     const query = globalSearchQuery.value.trim().toLowerCase();
     if (!query) return activityRows.value.slice(0, 3);
@@ -452,10 +472,10 @@ const globalSearchResults = computed(() => {
 });
 
 const displayWallets = computed(() => {
-    return walletAccounts.value.slice(0, 3).map(account => ({
+    return walletAccounts.value.map(account => ({
         id: account.id,
         flag: currencyFlag(account.currency),
-        code: account.currency || 'CNY',
+        code: account.currency || '币种未读取',
         amount: formatWalletBalance(account.balance, account.currency),
         name: account.name,
         note: walletCategoryLabel(account.category),
@@ -463,8 +483,24 @@ const displayWallets = computed(() => {
         raw: account
     }));
 });
+const walletAccountId = ref('');
+const walletAppearanceRefresh = ref(0);
+const walletPosition = computed(() => Math.max(0, displayWallets.value.findIndex(account => account.id === walletAccountId.value)));
+const activeWallet = computed(() => displayWallets.value[walletPosition.value]);
+watch(displayWallets, accounts => {
+    if (!accounts.some(account => account.id === walletAccountId.value)) walletAccountId.value = accounts[0]?.id || '';
+}, { immediate: true });
+watch(selectedLedgerId, () => {
+    walletAccountId.value = '';
+    selectedWallet.value = null;
+}, { flush: 'sync' });
+function navigateWallet(direction: -1 | 1): void {
+    const account = displayWallets.value[walletPosition.value + direction];
+    if (account) walletAccountId.value = account.id;
+}
 
 function formatBudgetMoney(value: number): string {
+    if (!showAmountInHomePage.value) return '******';
     return formatAmountToLocalizedNumeralsWithCurrency(value, defaultCurrency.value);
 }
 
@@ -487,6 +523,7 @@ function toggleBalanceVisibility(): void {
 
 function refreshBalance(): void {
     balanceCurrencyMenuOpen.value = false;
+    walletAppearanceRefresh.value++;
     reload(true);
 }
 
@@ -529,8 +566,8 @@ function transactionToActivity(transaction: Transaction): ActivityRow {
     const isTransfer = transaction.type === TransactionType.Transfer;
     const type: ActivityRow['type'] = isModifyBalance ? 'balance' : isIncome ? 'income' : isTransfer ? 'transfer' : 'expense';
     const typeLabel = isModifyBalance ? '余额调整' : isIncome ? '收入' : isTransfer ? '转账' : '支出';
-    const currency = transaction.sourceAccount?.currency || userStore.currentUserDefaultCurrency;
-    const amount = formatAmountToLocalizedNumeralsWithCurrency(isModifyBalance ? Math.abs(transaction.sourceAmount) : transaction.sourceAmount, currency);
+    const currency = accountCurrency(summaryAccounts.value, transaction.sourceAccountId);
+    const amount = currency ? formatAmountToLocalizedNumeralsWithCurrency(isModifyBalance ? Math.abs(transaction.sourceAmount) : transaction.sourceAmount, currency) : '币种未读取';
     const prefix = isModifyBalance ? (transaction.sourceAmount >= 0 ? '+' : '-') : isIncome ? '+' : isTransfer ? '↔ ' : '-';
     const date = new Date(transaction.time * 1000);
     const title = transaction.comment || transaction.category?.name || typeLabel;
@@ -578,7 +615,7 @@ function viewActivityInList(row: ActivityRow): void {
 }
 
 function formatWalletBalance(balance: number, currency: string): string {
-    return formatAmountToLocalizedNumeralsWithCurrency(balance, currency);
+    return /^[A-Z]{3}$/.test(currency) && Number.isSafeInteger(balance) ? formatAmountToLocalizedNumeralsWithCurrency(balance, currency) : '未完整计算';
 }
 
 function walletCategoryLabel(category: number): string {
@@ -617,9 +654,9 @@ function openSearchResult(row: { id: string; name: string }): void {
     router.push({ path: '/transaction/list', query: { search: row.id || row.name } });
 }
 
-function openNotification(row: { id: string }): void {
+function openPendingTarget(target: LedgerPendingTarget): void {
     utilityPanel.value = null;
-    router.push({ path: '/transaction/list', query: { search: row.id } });
+    void router.push(desktopLedgerPendingLocation(target));
 }
 
 function switchAccount(): void {
@@ -643,35 +680,71 @@ function logoutAccount(): void {
     });
 }
 
+let overviewLoadSerial = 0;
+onUnmounted(() => { overviewLoadSerial++; });
+async function loadHomeAccounts(force: boolean, ledgerId: string) {
+    try { await accountsStore.loadAllAccounts({ force, ledgerId }); }
+    catch (error) {
+        if ((error as { isUpToDate?: boolean } | null)?.isUpToDate === true && selectedLedgerId.value === ledgerId && accountsStore.accountListLedgerId === ledgerId && !accountsStore.accountListStateInvalid) return;
+        throw error;
+    }
+}
+async function loadHomeCategories(ledgerId: string) {
+    try { await transactionCategoriesStore.loadAllCategories({ force: false, ledgerId }); }
+    catch (error) {
+        if ((error as { isUpToDate?: boolean } | null)?.isUpToDate === true && selectedLedgerId.value === ledgerId && transactionCategoriesStore.loadedLedgerId === ledgerId && !transactionCategoriesStore.transactionCategoryListStateInvalid) return;
+        throw error;
+    }
+}
 async function reload(force: boolean, showRefreshMessage = force): Promise<void> {
+    const serial = ++overviewLoadSerial;
     loadingOverview.value = true;
+    overviewError.value = ''; budgetError.value = '';
     const now = new Date();
     try {
         await ledgersStore.load();
         const ledgerId = selectedLedgerId.value;
         const explicitLedgerId = ledgerId === DefaultLedgerId ? undefined : ledgerId;
-        const promises: Array<Promise<unknown>> = [
+        const isCurrent = () => serial === overviewLoadSerial && ledgerId === selectedLedgerId.value;
+        await Promise.all([
             ledgersStore.loadAccess(ledgerId),
-            accountsStore.loadAllAccounts({ force, ledgerId }),
+            loadHomeAccounts(force, ledgerId),
+            loadHomeCategories(ledgerId),
+        ]);
+        if (!isCurrent()) return;
+        const start = new Date(now.getFullYear(), now.getMonth() - 7, 1);
+        const yearMonth = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+        const promises: Array<Promise<unknown>> = [
             savingsGoalsStore.load(ledgerId),
-            transactionCategoriesStore.loadAllCategories({ force: false }),
-            transactionsStore.loadMonthlyAllTransactions({ ledgerId: explicitLedgerId, year: now.getFullYear(), month: now.getMonth() + 1, autoExpand: true, defaultCurrency: userStore.currentUserDefaultCurrency }).then(result => {
-                monthlyTransactions.value = result.items;
-                activityRows.value = result.items.slice(0, 5).map(transactionToActivity);
+            services.getTransactionStatisticsTrends({ ledgerId: explicitLedgerId, startYearMonth: yearMonth(start), endYearMonth: yearMonth(now), tagFilter: '', keyword: '', matchMode: 0, useTransactionTimezone: false }).then(response => {
+                if (!response.data?.success || !Array.isArray(response.data.result) || !response.data.result.every(row => Array.isArray(row.items))) throw new Error('无法读取收支趋势');
+                if (isCurrent()) homeTrendRows.value = response.data.result;
+            }),
+            services.getAllTransactionsByMonth({ ledgerId: explicitLedgerId, year: now.getFullYear(), month: now.getMonth() + 1, type: 0, categoryIds: '', accountIds: '', tagFilter: '', amountFilter: '', keyword: '', matchMode: 0 }).then(response => {
+                if (!response.data?.success || !Array.isArray(response.data.result?.items)) throw new Error('无法读取本月流水');
+                if (!isCurrent()) return;
+                const items = Transaction.ofMulti(response.data.result.items);
+                items.forEach(transaction => {
+                    transaction.setSourceAccount(accountsStore.allAccountsMap[transaction.sourceAccountId]);
+                    transaction.setCategory(transactionCategoriesStore.allTransactionCategoriesMap[transaction.categoryId]);
+                });
+                monthlyTransactions.value = items;
+                activityRows.value = items.slice(0, 5).map(transactionToActivity);
                 activityMenuId.value = null;
             })
         ];
-        if (!familyLedgerSelected.value) {
-            promises.push(overviewStore.loadTransactionOverview({ force, loadLast11Months: true }));
-            promises.push(monthlyBudgetStore.load(currentYearMonth.value, force));
-            promises.push(aiReviewItemsStore.load());
-        }
+        promises.push(monthlyBudgetStore.load(currentYearMonth.value, force, ledgerId).catch(() => {
+            if (isCurrent()) budgetError.value = '未能读取当前账本预算。';
+        }));
         await Promise.all(promises);
+        if (!isCurrent()) return;
         loadingOverview.value = false;
         if (showRefreshMessage) {
             snackbar.value?.showMessage('余额数据已更新');
         }
     } catch (error) {
+        if (serial !== overviewLoadSerial) return;
+        overviewError.value = '未能完整读取当前账本，请检查连接后重试。';
         loadingOverview.value = false;
         if (!(error as { processed?: boolean }).processed) {
             snackbar.value?.showError(error as Error);
@@ -683,10 +756,12 @@ function onGlobalLedgerSelect(ledgerId: string): void {
     try {
         ledgersStore.select(ledgerId);
         monthlyTransactions.value = [];
+        homeTrendRows.value = [];
         activityRows.value = [];
         selectedWallet.value = null;
         balanceCurrency.value = defaultCurrency.value;
-        void reload(true, false).then(() => snackbar.value?.showMessage(`已切换到「${selectedLedgerName.value}」`));
+        summaryCurrency.value = defaultCurrency.value;
+        void reload(true, false).then(() => { if (!overviewError.value) snackbar.value?.showMessage(`已切换到「${selectedLedgerName.value}」`); });
     } catch (error) {
         snackbar.value?.showError(error as Error);
     }
@@ -698,6 +773,13 @@ if (isUserLogined() && isUserUnlocked()) {
 </script>
 
 <style scoped>
+.summary-currency { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 14px 0; font-size: 14px; color: var(--muted); }
+.summary-currency select, .home-data-error button { min-height: 44px; padding: 8px 12px; color: var(--ink); border: 1px solid var(--line); border-radius: 12px; background: var(--panel); font: inherit; }
+.home-data-error { padding: 12px; border: 1px solid var(--red); border-radius: 12px; color: var(--red); font-size: 14px; }
+.scope-copy { font-size: 14px; color: var(--muted); line-height: 1.5; }
+.trend-values summary { min-height: 44px; padding: 12px 0; cursor: pointer; }
+.trend-values table { width: 100%; font-size: 14px; border-collapse: collapse; }
+.trend-values :is(th, td) { text-align: left; padding: 6px; border-bottom: 1px solid var(--line); }
 /* finexy-replica.html exact layout tokens and geometry */
 .finance-home {
     --page:#F1F2F6; --card:#FFFFFF; --panel:#F7F8FA; --line:#EFF0F4;
@@ -801,4 +883,42 @@ table th{font-size:12.5px;color:var(--muted)}table td{font-size:13px}.status{fon
 
 .wallet-view-all { display: flex; align-items: center; min-height: 44px; margin-top: 8px; color: var(--ink); font-size: 13px; font-weight: 600; text-decoration: underline; }
 .wallet-view-all:focus-visible { outline: 2px solid var(--orange); outline-offset: 3px; }
+.wallet-carousel { margin-top: 12px; }
+.grid { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
+.home-left-column { display: grid; gap: 18px; align-content: start; min-width: 0; }
+.home-right-column { grid-column: 2 / 4; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: start; min-width: 0; }
+.home-right-column .activities { grid-column: 1 / -1; }
+.balance-card { padding: 18px; }
+.balance-card .wallets { margin-top: 16px; padding: 12px; }
+.balance-card .amount { font-size: 28px; }
+.balance-card .bactions { margin-top: 14px; gap: 8px; }
+.home-right-column .stats, .home-right-column .chart-card { grid-column: 1 / -1; }
+.stats { grid-template-columns: repeat(4, minmax(0, 1fr)); grid-auto-rows: minmax(116px, auto); padding: 8px; gap: 8px; }
+.stat { padding: 12px; }
+.stat strong { font-size: clamp(18px, 1.4vw, 22px); white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; font-weight: 650; }
+.stats .shead span { font-size: 13px; font-weight: 600; }
+.stats .sic { width: 24px; height: 24px; flex: none; }
+.chart-card { padding: 18px; }
+.chart-card h3 { font-size: 16px; font-weight: 650; display: flex; align-items: center; justify-content: space-between; }
+.chart-card h3 small { font-size: 12px; color: var(--muted); font-weight: 500; }
+.chart-card .plot-wrap { margin-top: 12px; padding: 12px 14px 8px; }
+.chart-card .plot { height: 160px; }
+.finance-home main h1 { font-size: 30px; font-weight: 650; margin-bottom: 16px; }
+.ledger-context { margin-bottom: 16px; }
+.ledger-context-copy > small { display: none; }
+.balance-card .wallets { background: transparent; padding: 0; border-top: 1px solid var(--line); padding-top: 12px; }
+.balance-card .amount { font-weight: 650; }
+.wallet-carousel { margin-top: 4px; }
+.balance-card .wallet-view-all { justify-content: center; margin-top: 0; }
+.wallet-pager { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
+.wallet-pager > button { display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid var(--line); border-radius: 50%; background: #fff !important; }
+.wallet-pager > button:disabled { opacity: .4; cursor: not-allowed; }
+.wallet-pager > span { color: var(--ink); font-size: 13px; font-variant-numeric: tabular-nums; text-align: center; }
+.wallet-pager small { color: var(--muted); font-size: 12px; }
+.wallet-pager > button:focus-visible { outline: 2px solid var(--orange); outline-offset: 3px; }
+.wallet-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@media (max-width: 1160px) {
+    .finance-home { min-width: 0; }
+    .finance-home .app { min-width: 1080px; }
+}
 </style>

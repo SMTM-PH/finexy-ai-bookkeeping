@@ -392,6 +392,7 @@ try {
         await page.emulateMedia({ colorScheme: theme });
         await page.evaluate(value => { document.documentElement.style.zoom = value; }, zoom);
         await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        await page.waitForFunction(expectedZoom => Math.abs(document.querySelector('.agent-permission input').getBoundingClientRect().width / expectedZoom - 18) < 1, zoom);
         const checkbox = await page.locator('.agent-permission input').first().boundingBox();
         assert(Math.abs(checkbox.width / zoom - 18) < 1, `checkbox width ${checkbox.width}, zoom ${zoom}`);
         assert.equal(await page.locator('.agent-access').evaluate(el => el.scrollWidth <= el.clientWidth + 1), true);

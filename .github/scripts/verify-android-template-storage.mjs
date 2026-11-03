@@ -1,0 +1,40 @@
+import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { readFile, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { resolve } from 'node:path';
+
+const run = promisify(execFile);
+const command = async (program, args, timeout = 30000) => (await run(program, args, { encoding: 'utf8', timeout, maxBuffer: 4 * 1024 * 1024 })).stdout;
+const container = 'finexy-template-storage-android-e2e';
+const evidence = resolve('artifacts/template-creation-android-20261005');
+const imageId = 'sha256:4b61a406d48be8a93472c4832ec199f56e6765fe5eb11e109c8473356133364b';
+const runner = 'com.finexy.mobile.qa.test/androidx.test.runner.AndroidJUnitRunner';
+const inspected = JSON.parse(await command('docker', ['inspect', container]))[0];
+assert.equal(inspected.Name, `/${container}`);
+assert.equal(inspected.Config.Image, 'finexy-template-submission-candidate:20261005-root1');
+assert.equal(inspected.Image, imageId); assert.equal(inspected.State.Running, true); assert.deepEqual(inspected.Mounts, []);
+for (const entry of ['EBK_UUID_SERVER_ID=240', 'EBK_AUTH_ENABLE_REGISTER=true', 'EBK_USER_ENABLE_SCHEDULED_TRANSACTION=true', 'EBK_DUPLICATE_CHECKER_DUPLICATE_SUBMISSIONS_INTERVAL=0', 'EBK_CRON_ENABLE_CREATE_SCHEDULED_TRANSACTION=false']) assert(inspected.Config.Env.includes(entry));
+assert.deepEqual(inspected.NetworkSettings.Ports['8080/tcp'], [{ HostIp: '127.0.0.1', HostPort: '18116' }]);
+assert.equal((await (await fetch('http://127.0.0.1:18116/healthz.json')).json()).success, true);
+const packages = await command('adb', ['-s', 'emulator-5554', 'shell', 'pm', 'list', 'packages', '-U', 'com.finexy.mobile']);
+const uids = new Map([...packages.matchAll(/^package:(\S+) uid:(\d+)\s*$/gm)].map(m => [m[1], m[2]]));
+assert(uids.has('com.finexy.mobile.qa') && uids.get('com.finexy.mobile.qa') !== uids.get('com.finexy.mobile'));
+assert((await command('adb', ['-s', 'emulator-5554', 'shell', 'pm', 'list', 'instrumentation'])).split(/\r?\n/).includes(`instrumentation:${runner} (target=com.finexy.mobile.qa)`));
+const apkHashes = {};
+for (const [pkg, apk] of [['com.finexy.mobile.qa', 'app-qa.apk'], ['com.finexy.mobile.qa.test', 'app-qa-androidTest.apk']]) {
+    const path = (await command('adb', ['-s', 'emulator-5554', 'shell', 'pm', 'path', pkg])).trim();
+    assert.match(path, /^package:\/data\/app\/[^\r\n]+\/base\.apk$/);
+    const hash = createHash('sha256').update(await readFile(resolve(evidence, apk))).digest('hex');
+    const installed = await command('adb', ['-s', 'emulator-5554', 'shell', 'sha256sum', path.slice(8)]);
+    assert.equal(installed.trim().split(/\s+/)[0], hash); apkHashes[pkg] = hash;
+}
+await writeFile(resolve(evidence, 'container-guard.json'), JSON.stringify({ containerId: inspected.Id, imageId, mounts: [], port: 18116, uuidServerId: 240, apkHashes, qaUid: uids.get('com.finexy.mobile.qa'), mainUid: uids.get('com.finexy.mobile') }, null, 2));
+console.log('PASS isolated server, no volumes, QA UID, runner and installed APK hashes');
+const classes = (await command('python', ['.github/scripts/verify-android-instrumentation.py', '--scope', 'template-storage-e2e', '--print-classes'])).trim();
+const output = await command('adb', ['-s', 'emulator-5554', 'shell', 'am', 'instrument', '-w', '-r', '-e', 'finexy.e2e.url', 'http://10.0.2.2:18116', '-e', 'class', classes, runner], 180000);
+await writeFile(resolve(evidence, 'instrumentation-e2e.txt'), output);
+const summary = JSON.parse(await command('python', ['.github/scripts/verify-android-instrumentation.py', '--scope', 'template-storage-e2e', resolve(evidence, 'instrumentation-e2e.txt')]));
+await writeFile(resolve(evidence, 'e2e-summary.json'), JSON.stringify({ ...summary, containerId: inspected.Id, imageId }, null, 2));
+console.log('PASS real template API replay after Room reopen, ordinary/scheduled requests, draft-only ledger, later edits, unchanged balances and deleted receipt');
