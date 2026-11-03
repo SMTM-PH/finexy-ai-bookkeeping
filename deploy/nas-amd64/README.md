@@ -23,17 +23,17 @@ docker compose ps
 离线镜像包用户先运行：
 
 ```bash
-docker load -i Finexy-NAS-1.9.2-linux-amd64.tar
+docker load -i Finexy-NAS-1.9.3-linux-amd64.tar
 ```
 
-本版本的镜像包包含 `ph97/finexy-bookkeeping:1.9.2-amd64` 记账服务。
+本版本的镜像包包含 `ph97/finexy-bookkeeping:1.9.3` 记账服务。
 OCR 镜像沿用 `ph97/finexy-bookkeeping:ocr-1.0-amd64`，需要单独拉取；
 完全离线部署时，请同时准备 OCR 镜像包。加载后可使用同目录的 `compose.yaml` 启动。
 
 ## 从旧版本升级
 
 先备份现有 `data/`、`storage/`、`.env`，保持密钥和挂载路径不变，
-将记账镜像更新为 `1.9.2-amd64` 后执行：
+将记账镜像更新为 `1.9.3` 后执行：
 
 ```bash
 docker compose pull bookkeeping

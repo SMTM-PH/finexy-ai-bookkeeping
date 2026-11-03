@@ -339,7 +339,7 @@
             <span class="step-no">1</span>
             <h3>拉取镜像</h3>
             <div class="code-block">
-              <code>docker pull ph97/finexy-bookkeeping:1.9.2-amd64</code>
+              <code>docker pull ph97/finexy-bookkeeping:1.9.3</code>
               <button class="copy-btn" type="button" aria-label="复制拉取镜像命令">复制</button>
             </div>
             <p>公开镜像，无需登录。搜索时请使用完整名称 <code class="inline-code">ph97/finexy-bookkeeping</code>。</p>
@@ -412,7 +412,7 @@
             <h3>获取镜像</h3>
             <p>公开仓库，无需登录：</p>
             <div class="code-block">
-              <code>docker pull ph97/finexy-bookkeeping:1.9.2-amd64</code>
+              <code>docker pull ph97/finexy-bookkeeping:1.9.3</code>
               <button class="copy-btn" type="button" aria-label="复制拉取记账镜像命令">复制</button>
             </div>
             <div class="code-block">
@@ -421,11 +421,11 @@
             </div>
             <p>NAS 无法访问 Docker Hub 时，改用离线导入：</p>
             <div class="fnos-pre"><code># 在有 Docker 的电脑上导出
-docker save -o finexy-1.9.2-amd64.tar ph97/finexy-bookkeeping:1.9.2-amd64
+docker save -o finexy-1.9.3.tar ph97/finexy-bookkeeping:1.9.3
 docker save -o finexy-ocr-1.0-amd64.tar ph97/finexy-bookkeeping:ocr-1.0-amd64
 
 # 上传到 NAS 后导入，tag 会保留
-docker load -i finexy-1.9.2-amd64.tar
+docker load -i finexy-1.9.3.tar
 docker load -i finexy-ocr-1.0-amd64.tar</code></div>
           </li>
           <li class="fnos-card reveal">
@@ -474,7 +474,7 @@ DEEPSEEK_MODEL=deepseek-v4-flash</code></div>
           <button class="copy-btn" type="button" aria-label="复制完整 compose 配置">复制</button>
           <pre class="fnos-pre"><code>services:
   bookkeeping:
-    image: ph97/finexy-bookkeeping:1.9.2-amd64
+    image: ph97/finexy-bookkeeping:1.9.3
     platform: linux/amd64
     restart: unless-stopped
     ports:
@@ -542,7 +542,7 @@ volumes:
             <h3>版本升级与回退</h3>
             <ol>
               <li>升级前备份 <code class="inline-code">data/</code>、<code class="inline-code">storage/</code>、<code class="inline-code">.env</code>，保持挂载路径与 <code class="inline-code">APP_SECRET_KEY</code> 不变。</li>
-              <li>把 <code class="inline-code">compose.yaml</code> 中的镜像 tag 改为新版本，例如 <code class="inline-code">1.9.3-amd64</code>。</li>
+              <li>把 <code class="inline-code">compose.yaml</code> 中的镜像 tag 改为新的固定版本号（不要用 <code class="inline-code">latest</code>）。</li>
               <li>执行 <code class="inline-code">docker compose pull bookkeeping</code>、<code class="inline-code">docker compose up -d --no-deps bookkeeping</code>，再用 <code class="inline-code">docker compose ps</code> 确认健康。</li>
               <li>回退时把 tag 改回旧版本并重复上述命令；旧镜像需仍在本机或仓库中。若新版本已迁移数据库结构，直接回退可能无法读取，此时用升级前的完整备份恢复。</li>
               <li>不要使用浮动的 <code class="inline-code">latest</code>，固定版本 tag 更便于回退。</li>
