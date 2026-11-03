@@ -14,9 +14,11 @@
 
 历史包已移入 `release/fnos/archive/`，不随本版本发布：
 
-- `finexy-1.9.3-original-install-init-failed-x86_64.fpk`：初版 1.9.3，`install_init` 权限失败，真机安装即回滚，请勿使用。
-- `finexy-1.9.3-2-iframe-x86_64.fpk`：安装/启动已修复，桌面入口仍为 `iframe`（内嵌窗口）。
-- `finexy-1.9.3-3-url-x86_64.fpk`：入口已改 `url`，但版本带 `-3` 构建号；当前包是其内容等价、版本号改回 `1.9.3` 的重打包。
+- `finexy-1.9.3-original-install-init-failed-x86_64.fpk`：初版 1.9.3，`install_init` 权限失败，真机安装即回滚，请勿使用。SHA-256 `5bd67e0928f66e76dbea1e9f432a2f9c501e2d320b3a23e94bab1edc467fc8ac`。
+- `finexy-1.9.3-2-iframe-x86_64.fpk`：安装/启动已修复，桌面入口仍为 `iframe`（内嵌窗口）。SHA-256 `e191bee5efb4608b2c42df59eb282e7cf59190b92d19fa44d6f6a35c91772924`。
+- `finexy-1.9.3-3-url-x86_64.fpk`：入口已改 `url`，但版本带 `-3` 构建号；当前包是其内容等价、版本号改回 `1.9.3` 的重打包。SHA-256 `4922f63b15aaba69b5bc6c00dfd822a4762f5440206962d2d59b6abdaf221786`。
+
+以上三个包均不发布，仓库 `release/fnos/SHA256SUMS.txt` 只列实际发布的 Release 资产。
 
 ## 规范依据（官方文档）
 

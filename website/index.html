@@ -527,6 +527,14 @@ volumes:
   ocr-models:</code></pre>
         </div>
 
+        <div class="fnos-block fnos-full reveal">
+          <h3>另一种方式：FPK 应用包（fnOS 应用中心）</h3>
+          <p>不想手写 compose 时，可直接安装飞牛应用包：下载 <code class="inline-code">finexy-1.9.3-x86_64.fpk</code> 后，在 fnOS「应用中心 → 手动安装」上传并选择存储空间即可。安装包仅支持 AMD64，内含记账服务程序与 Web 资源，<strong>不包含你的账本数据，也不包含独立的 OCR 容器</strong>；需要图片 OCR 时仍请使用上面的 Compose 方式。</p>
+          <p>安装完成后在应用中心启动一次，数据目录与配置文件会在首次启动时创建（数据位于 <code class="inline-code">/volN/@appdata/finexy/</code>，配置位于 <code class="inline-code">/volN/@appconf/finexy/finexy.ini</code>）。点击桌面「Finexy 记账」图标会在浏览器新标签页打开 <code class="inline-code">http://NAS的IP:8080/</code>，首次访问按第 6 步注册管理员。</p>
+          <p><a class="btn btn-primary" href="https://github.com/SMTM-PH/finexy-ai-bookkeeping/releases/download/v1.9.3/finexy-1.9.3-x86_64.fpk" target="_blank" rel="noopener">下载 finexy-1.9.3-x86_64.fpk（约 27 MB）</a></p>
+          <p>下载后用 <code class="inline-code">sha256sum finexy-1.9.3-x86_64.fpk</code> 与 <a href="https://github.com/SMTM-PH/finexy-ai-bookkeeping/releases/download/v1.9.3/SHA256SUMS.txt" target="_blank" rel="noopener">SHA256SUMS.txt</a> 比对，完整说明见 <a href="https://github.com/SMTM-PH/finexy-ai-bookkeeping/releases/tag/v1.9.3" target="_blank" rel="noopener">Release 页面</a>。升级覆盖安装前请先备份数据；若设备上装过 <code class="inline-code">-2</code>/<code class="inline-code">-3</code> 历史测试构建，覆盖安装可能被应用中心判为降级，需先备份再卸载重装。</p>
+        </div>
+
         <div class="fnos-two">
           <div class="fnos-block reveal">
             <h3>数据备份与恢复</h3>
