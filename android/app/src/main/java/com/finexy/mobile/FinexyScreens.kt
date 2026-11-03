@@ -441,7 +441,7 @@ private fun activityDisplayAmount(row: Activity): String = when {
 }
 
 @Composable
-internal fun EntryScreen(padding: PaddingValues, initialIncome: Boolean, existing: Activity? = null, customCategories: List<String> = emptyList(), accounts: List<AccountEntity> = emptyList(), serverCategories: List<CategoryEntity> = emptyList(), tags: List<TagEntity> = emptyList(), exchangeRates: List<ExchangeRateEntity> = emptyList(), defaultAccountId: Long = TransactionEntity.LOCAL_ACCOUNT_ID, saving: Boolean = false, saveError: String? = null, onAIRecognition: () -> Unit = {}, onlineOnly: Boolean = false, categoriesLoading: Boolean = false, categoriesError: String? = null, onRetryCategories: () -> Unit = {}, useServerCategories: Boolean = false, preserveOriginalKind: Boolean = false, onSave: (Long, String, Int, String, Long?, String?, Long, String, Long?, Long) -> Unit) {
+internal fun EntryScreen(padding: PaddingValues, initialIncome: Boolean, existing: Activity? = null, customCategories: List<String> = emptyList(), accounts: List<AccountEntity> = emptyList(), serverCategories: List<CategoryEntity> = emptyList(), tags: List<TagEntity> = emptyList(), exchangeRates: List<ExchangeRateEntity> = emptyList(), defaultAccountId: Long = TransactionEntity.LOCAL_ACCOUNT_ID, saving: Boolean = false, saveError: String? = null, onAIRecognition: () -> Unit = {}, onlineOnly: Boolean = false, nonDefaultLedger: Boolean = false, categoriesLoading: Boolean = false, categoriesError: String? = null, onRetryCategories: () -> Unit = {}, useServerCategories: Boolean = false, preserveOriginalKind: Boolean = false, onSave: (Long, String, Int, String, Long?, String?, Long, String, Long?, Long) -> Unit) {
     var transactionType by rememberSaveable(existing?.id, initialIncome) { mutableStateOf(existing?.kind ?: if (initialIncome) "收入" else "支出") }
     val initialDirection = initialTransactionTransferDirection(if (existing?.kind == "转账") TransactionRepository.TYPE_TRANSFER else null,
         existing?.accountId ?: 0L, existing?.destinationAccountId)
@@ -501,6 +501,8 @@ internal fun EntryScreen(padding: PaddingValues, initialIncome: Boolean, existin
             Mark("spark", Coral, 18); Spacer(Modifier.width(8.dp)); Text("AI 文本 / 票据识别 · 当前账本")
         }
         if (existing != null) Text("正在编辑已有流水，请先保存或取消，再使用 AI 来源录入。", color = Muted, fontSize = 12.sp)
+        // 非默认账本不能写入 AI 待复核（ACCOUNT_AI_REVIEW_LEDGER_ID），在入口处说明范围，避免误导。
+        if (nonDefaultLedger) Text("此账本使用手动记账；账号 AI 待复核目前归默认个人账本。", color = Muted, fontSize = 12.sp)
         if (onlineOnly && !isBalance && (categoriesLoading || categoriesError != null || (if (isTransfer) transferCategories.isEmpty() else availableCategories.isEmpty()))) {
             val message = when {
                 categoriesLoading -> "正在读取账本分类…"

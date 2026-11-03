@@ -29,7 +29,7 @@ class EntryReliabilityQaActivity : PrivacyActivity() {
                         currencyAmounts = listOf(CurrencyAmounts("CNY", 1200, 0, 100), CurrencyAmounts("USD", null, null, 200)),
                         activities = emptyList(), onAll = {}, onWallet = {}, onSettings = {}, onEntry = {})
                     else EntryScreen(padding, false, accounts = listOf(AccountEntity(10, "测试账户", "CNY")),
-                        serverCategories = categories, defaultAccountId = 10, onlineOnly = true,
+                        serverCategories = categories, defaultAccountId = 10, onlineOnly = true, nonDefaultLedger = true,
                         categoriesLoading = loading, categoriesError = categoryError,
                         onRetryCategories = {
                             loading = false; categoryError = null

@@ -776,7 +776,7 @@ private fun LedgerContent(store: SecureStore, repository: TransactionRepository,
                         finally { entrySaving = false }
                     }
                 }
-            } else EntryScreen(padding, entryIncome, editingActivity, if (familyLedgerSelected) emptyList() else categories, displayedAccounts, if (familyLedgerSelected) ledgerCategories else roomCategories, if (familyLedgerSelected) emptyList() else roomTags, roomExchangeRates, entryAccountOverride ?: if (familyLedgerSelected) displayedAccounts.firstOrNull { !it.hidden && it.type == 1 }?.id ?: 0L else defaultAccountId, entrySaving, entrySaveError, ::openAIWithConsent, onlineOnly = familyLedgerSelected,
+            } else EntryScreen(padding, entryIncome, editingActivity, if (familyLedgerSelected) emptyList() else categories, displayedAccounts, if (familyLedgerSelected) ledgerCategories else roomCategories, if (familyLedgerSelected) emptyList() else roomTags, roomExchangeRates, entryAccountOverride ?: if (familyLedgerSelected) displayedAccounts.firstOrNull { !it.hidden && it.type == 1 }?.id ?: 0L else defaultAccountId, entrySaving, entrySaveError, ::openAIWithConsent, onlineOnly = familyLedgerSelected, nonDefaultLedger = familyLedgerSelected,
                 categoriesLoading = familyLedgerSelected && ledgerCategoriesLoading,
                 categoriesError = if (familyLedgerSelected) ledgerCategoriesError else null,
                 onRetryCategories = { ledgerCategoryRetry++ }) { amountMinor, note, type, category, categoryId, existingId, accountId, tagIdsJson, destinationAccountId, destinationAmountMinor ->
