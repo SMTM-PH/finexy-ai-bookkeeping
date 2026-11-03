@@ -75,9 +75,10 @@ func InitializeMCPHandlers(config *settings.Config) error {
 		mcpTools:                 make([]*MCPTool, 0),
 	}
 
-	for _, name := range []string{"query_import_context", "preview_bill_import", "map_bill_import", "confirm_bill_import"} {
+	for _, name := range []string{"query_import_context", "query_management_context", "preview_bill_import", "map_bill_import", "confirm_bill_import"} {
 		registerMCPTextContentToolHandler(container, &agentImportTool{name: name})
 	}
+	registerManagementTools(container)
 	registerMCPTextContentToolHandler(container, MCPAddTransactionToolHandler)
 	registerMCPTextContentToolHandler(container, MCPQueryTransactionsToolHandler)
 	registerMCPTextContentToolHandler(container, MCPQueryAllAccountsToolHandler)

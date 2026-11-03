@@ -19,6 +19,8 @@ type importContextRequest struct {
 func (h *agentImportTool) Name() string { return h.name }
 func (h *agentImportTool) Description() string {
 	switch h.name {
+	case "query_management_context":
+		return "Read complete account and category metadata, including hidden accounts and root categories, in the explicitly specified authorized ledgerId. Query before updating and preserve existing fields. Does not change data."
 	case "query_import_context":
 		return "List accessible ledgers and read the accounts and leaf categories with string IDs for the specified ledgerId. Choose the user requested ledger before importing; never assume the browser selection is available to MCP."
 	case "preview_bill_import":
@@ -31,7 +33,7 @@ func (h *agentImportTool) Description() string {
 }
 func (h *agentImportTool) InputType() reflect.Type {
 	switch h.name {
-	case "query_import_context":
+	case "query_import_context", "query_management_context":
 		return reflect.TypeOf(&importContextRequest{})
 	case "preview_bill_import":
 		return reflect.TypeOf(&models.AgentImportPreviewRequest{})
@@ -43,13 +45,13 @@ func (h *agentImportTool) InputType() reflect.Type {
 }
 func (h *agentImportTool) OutputType() reflect.Type { return nil }
 func (h *agentImportTool) Handle(c *core.WebContext, req *MCPCallToolRequest, user *models.User, config *settings.Config, available MCPAvailableServices) (any, []*MCPTextContent, error) {
-	if h.name != "query_import_context" && (!config.EnableDataImport || user.FeatureRestriction.Contains(core.USER_FEATURE_RESTRICTION_TYPE_IMPORT_TRANSACTION)) {
+	if h.name != "query_import_context" && h.name != "query_management_context" && (!config.EnableDataImport || user.FeatureRestriction.Contains(core.USER_FEATURE_RESTRICTION_TYPE_IMPORT_TRANSACTION)) {
 		return nil, nil, errs.ErrNotPermittedToPerformThisAction
 	}
 	var result any
 	var err error
 	switch h.name {
-	case "query_import_context":
+	case "query_import_context", "query_management_context":
 		var args importContextRequest
 		if err = json.Unmarshal(req.Arguments, &args); err == nil {
 			if !c.GetTokenClaims().HasAgentLedger(args.LedgerId) {
@@ -102,6 +104,18 @@ func (h *agentImportTool) Handle(c *core.WebContext, req *MCPCallToolRequest, us
 				catRows = append(catRows, map[string]any{"id": strconv.FormatInt(cat.CategoryId, 10), "name": cat.Name, "parentName": parent.Name, "type": cat.Type})
 			}
 			result = map[string]any{"ledgers": ledgers, "ledgerId": strconv.FormatInt(args.LedgerId, 10), "accounts": accountRows, "categories": catRows}
+			if h.name == "query_management_context" {
+				accountDetails := make([]*models.AccountInfoResponse, 0, len(accounts))
+				categoryDetails := make([]*models.TransactionCategoryInfoResponse, 0, len(cats))
+				for _, account := range accounts {
+					accountDetails = append(accountDetails, account.ToAccountInfoResponse())
+				}
+				for _, category := range cats {
+					categoryDetails = append(categoryDetails, category.ToTransactionCategoryInfoResponse())
+				}
+				result.(map[string]any)["accountDetails"] = accountDetails
+				result.(map[string]any)["categoryDetails"] = categoryDetails
+			}
 		}
 	case "preview_bill_import":
 		var args models.AgentImportPreviewRequest
@@ -130,11 +144,13 @@ func (h *agentImportTool) Handle(c *core.WebContext, req *MCPCallToolRequest, us
 
 func AgentToolScope(name string) string {
 	switch name {
+	case "create_account", "update_account", "set_account_hidden", "delete_account", "create_category", "update_category", "set_category_hidden", "delete_category":
+		return core.AgentScopeManage
 	case "add_transaction":
 		return core.AgentScopeWrite
 	case "preview_bill_import", "map_bill_import", "confirm_bill_import":
 		return core.AgentScopeImport
-	case "query_import_context", "query_all_accounts", "query_all_accounts_balance", "query_all_transaction_categories", "query_all_transaction_tags", "query_transactions", "query_latest_exchange_rates", "recognize_receipt_image":
+	case "query_import_context", "query_management_context", "query_all_accounts", "query_all_accounts_balance", "query_all_transaction_categories", "query_all_transaction_tags", "query_transactions", "query_latest_exchange_rates", "recognize_receipt_image":
 		return core.AgentScopeRead
 	}
 	return ""

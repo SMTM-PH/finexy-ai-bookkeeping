@@ -21,7 +21,8 @@ function frequencyValues(value?: string): number[] {
 
 export function scheduleMatchesDate(rule: ScheduleCalendarRule, date: Date): boolean {
     const frequencyType = rule.scheduledFrequencyType;
-    if (rule.hidden || !frequencyType || frequencyType === ScheduledTemplateFrequencyType.Disabled.type) return false;
+    // Hidden plans still dispatch. Only a disabled frequency pauses execution.
+    if (!frequencyType || frequencyType === ScheduledTemplateFrequencyType.Disabled.type) return false;
 
     const current = dateKey(date);
     if (rule.scheduledStartDate && current < rule.scheduledStartDate) return false;

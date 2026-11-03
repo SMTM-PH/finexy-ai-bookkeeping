@@ -257,7 +257,7 @@
 <script setup lang="ts">
 import SnackBar from '@/components/desktop/SnackBar.vue';
 
-import { ref, computed, onMounted, onUnmounted, useTemplateRef } from 'vue';
+import { ref, computed, onMounted, onUnmounted, useTemplateRef, watch } from 'vue';
 
 import { useDisplay } from 'vuetify';
 import { useRoute, useRouter } from 'vue-router';
@@ -272,6 +272,8 @@ import { useTransactionTemplatesStore } from '@/stores/transactionTemplate.ts';
 import { useMonthlyBudgetStore } from '@/stores/monthlyBudget.ts';
 import { useAIReviewItemsStore } from '@/stores/aiReviewItem.ts';
 import { useOverviewStore } from '@/stores/overview.ts';
+import { useLedgersStore } from '@/stores/ledger.ts';
+import { DefaultLedgerId } from '@/models/ledger.ts';
 
 import { APPLICATION_LOGO_PATH } from '@/consts/asset.ts';
 import { TemplateType } from '@/core/template.ts';
@@ -325,6 +327,7 @@ const transactionTemplatesStore = useTransactionTemplatesStore();
 const monthlyBudgetStore = useMonthlyBudgetStore();
 const aiReviewItemsStore = useAIReviewItemsStore();
 const overviewStore = useOverviewStore();
+const ledgersStore = useLedgersStore();
 
 const snackbar = useTemplateRef<SnackBarType>('snackbar');
 
@@ -365,7 +368,8 @@ const currentYearMonth = computed<number>(() => {
 
 const inAppReminders = computed<InAppReminder[]>(() => {
     const reminders: InAppReminder[] = [];
-    const budget = monthlyBudgetStore.budgets[currentYearMonth.value];
+    const defaultLedgerSelected = ledgersStore.selectedLedgerId === DefaultLedgerId;
+    const budget = defaultLedgerSelected ? monthlyBudgetStore.budgetFor(currentYearMonth.value, DefaultLedgerId) : null;
     const expense = overviewStore.transactionOverview.thisMonth?.expenseAmount ?? 0;
     if (budget && budget.amount > 0) {
         const percentage = expense * 100 / budget.amount;
@@ -376,7 +380,7 @@ const inAppReminders = computed<InAppReminder[]>(() => {
         }
     }
 
-    if (aiReviewItemsStore.items.length > 0) {
+    if (defaultLedgerSelected && aiReviewItemsStore.items.length > 0) {
         reminders.push({
             key: 'ai-review', title: `${aiReviewItemsStore.items.length} 条 AI 记录待处理`,
             detail: '自动入账信息不完整，请检查后确认', to: '/transaction/list?search=待确认', icon: mdiAlertCircleOutline
@@ -385,13 +389,14 @@ const inAppReminders = computed<InAppReminder[]>(() => {
 
     const now = Math.floor(Date.now() / 1000);
     const sevenDaysLater = now + 7 * 24 * 60 * 60;
-    const templates = transactionTemplatesStore.allTransactionTemplates[TemplateType.Schedule.type] || [];
+    const templates = transactionTemplatesStore.loadedLedgerId === ledgersStore.selectedLedgerId
+        ? transactionTemplatesStore.allTransactionTemplates[TemplateType.Schedule.type] || [] : [];
     templates.filter(template => !template.hidden && template.nextScheduledTime && template.nextScheduledTime > now && template.nextScheduledTime <= sevenDaysLater)
         .sort((left, right) => (left.nextScheduledTime || 0) - (right.nextScheduledTime || 0))
         .forEach(template => {
             reminders.push({
                 key: `schedule-${template.id}`, title: template.name,
-                detail: `将在 ${new Date((template.nextScheduledTime || 0) * 1000).toLocaleString('zh-CN')} 自动入账`,
+                detail: `「${ledgersStore.selectedLedger.name}」${new Date((template.nextScheduledTime || 0) * 1000).toLocaleString('zh-CN')} 到期后待确认`,
                 to: '/schedule/list', icon: mdiClipboardTextClockOutline
             });
         });
@@ -401,16 +406,18 @@ const inAppReminders = computed<InAppReminder[]>(() => {
 let reminderRefreshTimer: number | undefined;
 
 function refreshInAppReminders(force: boolean): void {
-    const tasks: Promise<unknown>[] = [
-        monthlyBudgetStore.load(currentYearMonth.value, force),
+    const ledgerId = ledgersStore.selectedLedgerId;
+    const tasks: Promise<unknown>[] = ledgerId === DefaultLedgerId ? [
+        monthlyBudgetStore.load(currentYearMonth.value, force, ledgerId),
         overviewStore.loadTransactionOverview({ force, loadLast11Months: false }),
         aiReviewItemsStore.load()
-    ];
+    ] : [];
     if (isUserScheduledTransactionEnabled()) {
-        tasks.push(transactionTemplatesStore.loadAllTemplates({ templateType: TemplateType.Schedule.type, force }));
+        tasks.push(transactionTemplatesStore.loadAllTemplates({ templateType: TemplateType.Schedule.type, force, ledgerId }));
     }
     void Promise.allSettled(tasks);
 }
+watch(() => ledgersStore.selectedLedgerId, () => refreshInAppReminders(false));
 
 function refreshDailyQuestState(): void {
     noTransactionsToday.value = isNoTransactionsDay();

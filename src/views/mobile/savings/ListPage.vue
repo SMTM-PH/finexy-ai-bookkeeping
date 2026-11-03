@@ -1,13 +1,13 @@
 <template>
     <f7-page ptr @ptr:refresh="refresh">
         <f7-navbar title="存钱计划" back-link="返回"></f7-navbar>
-        <f7-block v-if="error" class="text-color-red" role="alert">{{ error }}</f7-block>
+        <f7-block v-if="error" class="text-color-red" role="alert">{{ error }} <f7-button :disabled="busy" @click="load">重试</f7-button></f7-block>
         <f7-list strong inset>
             <f7-list-item title="账本" smart-select :smart-select-params="{ openIn: 'sheet' }">
-                <select v-model="ledgerId" @change="load"><option v-for="ledger in ledgers.allLedgers" :key="ledger.id" :value="ledger.id">{{ ledger.name }}</option></select>
+                <select v-model="ledgerId" :disabled="busy" @change="changeViewedLedger"><option v-for="ledger in ledgers.allLedgers" :key="ledger.id" :value="ledger.id">{{ ledger.name }}</option></select>
             </f7-list-item>
         </f7-list>
-        <f7-card v-for="goal in goals.goals" :key="goal.id" class="goal-card">
+        <f7-card v-for="goal in visibleGoals" :key="goal.id" class="goal-card">
             <f7-card-header><span>{{ goal.name }}</span><small>{{ Math.min(100, goal.progressPercent).toFixed(0) }}%</small></f7-card-header>
             <f7-card-content>
                 <div class="progress"><i :style="{ width: `${Math.min(100, goal.progressPercent)}%` }"></i></div>
@@ -16,7 +16,7 @@
             </f7-card-content>
             <f7-card-footer><f7-button @click="openMove(goal, 'deposit')">存入</f7-button><f7-button @click="openMove(goal, 'withdraw')">取出</f7-button></f7-card-footer>
         </f7-card>
-        <f7-block v-if="!goals.loading && !goals.goals.length" class="text-align-center text-color-gray">此账本还没有存钱目标。</f7-block>
+        <f7-block v-if="!error && !goals.loading && goals.loaded && goals.loadedLedgerId === ledgerId && !visibleGoals.length" class="text-align-center text-color-gray">此账本还没有存钱目标。</f7-block>
 
         <f7-block-title>新建目标</f7-block-title>
         <f7-list strong inset>
@@ -43,7 +43,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import type { SavingsGoal } from '@/models/savings_goal.ts';
 import { useLedgersStore } from '@/stores/ledger.ts';
 import { useSavingsGoalsStore } from '@/stores/savingsGoal.ts';
@@ -53,15 +53,20 @@ const ledgerId = ref('0'); const busy = ref(false); const error = ref('');
 const name = ref(''); const target = ref(''); const comment = ref('');
 const moveOpen = ref(false); const moveMode = ref<'deposit'|'withdraw'>('deposit'); const moveGoal = ref<SavingsGoal>();
 const moveAmount = ref(''); const moveComment = ref(''); const accountId = ref('');
+const visibleGoals = computed(() => goals.loadedLedgerId === ledgerId.value ? goals.goals : []);
+let viewedGeneration = 0;
+let reloadPending = false;
 function money(value: number): string { return (value / 100).toFixed(2); }
 function messageOf(reason: unknown): string { return reason instanceof Error ? reason.message : String((reason as { message?: unknown })?.message || reason); }
-async function run(action: () => Promise<void>): Promise<void> { if (busy.value) return; busy.value = true; error.value = ''; try { await action(); } catch (reason) { error.value = messageOf(reason); showToast(error.value); } finally { busy.value = false; } }
+async function run(action: () => Promise<void>): Promise<void> { if (busy.value) return; const generation = viewedGeneration; busy.value = true; error.value = ''; try { await action(); } catch (reason) { if (generation === viewedGeneration) { error.value = messageOf(reason); showToast(error.value); } } finally { busy.value = false; if (reloadPending) { reloadPending = false; void load(); } } }
 async function load(): Promise<void> { await run(async () => { await goals.load(ledgerId.value); }); }
-async function refresh(done?: () => void): Promise<void> { await ledgers.load(); await load(); done?.(); }
+async function refresh(done?: () => void): Promise<void> { try { await ledgers.load(); await load(); } catch (reason) { error.value = messageOf(reason); } finally { done?.(); } }
 async function createGoal(): Promise<void> { await run(async () => { await goals.createGoal(ledgerId.value, name.value.trim(), Math.round(Number(target.value) * 100), 0, comment.value.trim()); name.value = ''; target.value = ''; comment.value = ''; }); }
-async function openMove(goal: SavingsGoal, mode: 'deposit'|'withdraw'): Promise<void> { moveGoal.value = goal; moveMode.value = mode; moveAmount.value = ''; moveComment.value = ''; await run(async () => { await goals.loadFundAccounts(ledgerId.value); accountId.value = goals.fundAccounts[0]?.id || ''; moveOpen.value = true; }); }
-async function submitMove(): Promise<void> { const goal = moveGoal.value; if (!goal) return; await run(async () => { const amount = Math.round(Number(moveAmount.value) * 100); if (moveMode.value === 'deposit') await goals.deposit(goal, amount, accountId.value, moveComment.value.trim()); else await goals.withdraw(goal, amount, accountId.value, moveComment.value.trim()); moveOpen.value = false; }); }
-onMounted(async () => { await ledgers.load(); ledgerId.value = ledgers.selectedLedgerId; await load(); });
+async function openMove(goal: SavingsGoal, mode: 'deposit'|'withdraw'): Promise<void> { if (goal.ledgerId !== ledgerId.value) return; const generation = viewedGeneration; moveGoal.value = goal; moveMode.value = mode; moveAmount.value = ''; moveComment.value = ''; await run(async () => { await goals.loadFundAccounts(goal.ledgerId); if (generation !== viewedGeneration || goal.ledgerId !== ledgerId.value) return; accountId.value = goals.fundAccounts[0]?.id || ''; moveOpen.value = true; }); }
+async function submitMove(): Promise<void> { const goal = moveGoal.value; if (!goal || goal.ledgerId !== ledgerId.value || goals.loadedLedgerId !== ledgerId.value) { error.value = '账本已切换，请重新打开目标'; return; } await run(async () => { const amount = Math.round(Number(moveAmount.value) * 100); if (moveMode.value === 'deposit') await goals.deposit(goal, amount, accountId.value, moveComment.value.trim()); else await goals.withdraw(goal, amount, accountId.value, moveComment.value.trim()); moveOpen.value = false; }); }
+function changeViewedLedger(): void { ++viewedGeneration; moveOpen.value = false; moveGoal.value = undefined; goals.reset(); error.value = ''; if (busy.value) reloadPending = true; else void load(); }
+watch(() => ledgers.selectedLedgerId, id => { ledgerId.value = id; changeViewedLedger(); });
+onMounted(async () => { try { await ledgers.load(); ledgerId.value = ledgers.selectedLedgerId; await load(); } catch (reason) { error.value = messageOf(reason); } });
 </script>
 
 <style scoped>

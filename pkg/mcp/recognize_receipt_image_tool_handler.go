@@ -23,6 +23,7 @@ type MCPRecognizeReceiptImageRequest struct {
 
 // MCPRecognizeReceiptImageResponse is a reviewable transaction draft. It is never saved automatically.
 type MCPRecognizeReceiptImageResponse struct {
+	LedgerId                  string   `json:"ledger_id"`
 	Type                      string   `json:"type"`
 	Time                      string   `json:"time,omitempty"`
 	Amount                    string   `json:"amount,omitempty"`
@@ -85,14 +86,22 @@ func (h *mcpRecognizeReceiptImageToolHandler) Handle(c *core.WebContext, callToo
 	if err != nil {
 		return nil, nil, errs.NewIncompleteOrIncorrectSubmissionError(err)
 	}
+	if request.TimezoneOffsetMinutes < -720 || request.TimezoneOffsetMinutes > 840 {
+		return nil, nil, errs.ErrClientTimezoneOffsetInvalid
+	}
+	if c == nil || c.GetTokenClaims() == nil || availableServices == nil {
+		return nil, nil, errs.ErrNotPermittedToPerformThisAction
+	}
+	ledgerID := c.GetTokenClaims().AgentLedgerId
 
 	timezone := time.FixedZone("MCP Client Timezone", int(request.TimezoneOffsetMinutes)*60)
-	recognized, raw, err := availableServices.GetAIRecognitionService().RecognizeReceiptImage(c, user, currentConfig, imageData, request.MimeType, timezone)
+	recognized, raw, err := availableServices.GetAIRecognitionService().RecognizeReceiptImageInLedger(c, user, currentConfig, ledgerID, imageData, request.MimeType, timezone)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	response := &MCPRecognizeReceiptImageResponse{
+		LedgerId:                  utils.Int64ToString(ledgerID),
 		Type:                      raw.Type,
 		AccountName:               raw.AccountName,
 		CategoryName:              raw.CategoryName,
@@ -109,7 +118,7 @@ func (h *mcpRecognizeReceiptImageToolHandler) Handle(c *core.WebContext, callToo
 	if recognized.Time > 0 {
 		response.Time = time.Unix(recognized.Time, 0).In(timezone).Format(time.RFC3339)
 	}
-	if recognized.SourceAmount > 0 {
+	if recognized.SourceAmount != 0 {
 		response.Amount = utils.FormatAmount(recognized.SourceAmount)
 	}
 	if recognized.DestinationAmount > 0 {

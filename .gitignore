@@ -183,3 +183,11 @@ android/.gradle/
 android/.kotlin/
 android/app/build/
 /.gradle-home/
+
+# fnOS FPK packaging payload (generated from release artifacts, not source)
+/packaging/fnos/finexy/app/finexy/public/
+/packaging/fnos/finexy/app/finexy/templates/
+/packaging/fnos/finexy/app/finexy/LICENSE
+/packaging/fnos/finexy/app/finexy/ezbookkeeping
+/packaging/fnos/finexy/*.fpk
+*.fpk

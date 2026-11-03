@@ -32,7 +32,7 @@ internal fun TemplateEntity.validateSchedule() {
         0 -> values.isEmpty()
         1 -> values.isNotEmpty() && values.all { it in 0..6 }
         2 -> values.isNotEmpty() && values.all { it in 1..31 || it in -31..-1 }
-        3 -> values.isNotEmpty()
+        3 -> values.size == 1 && frequency in setOf("0", "1")
         4 -> values.isNotEmpty() && values.all { runCatching { MonthDay.of(it / 100, it % 100) }.isSuccess }
         5 -> values.size == 1 && values.single() > 0 && !scheduledStartDate.isNullOrBlank()
         else -> false

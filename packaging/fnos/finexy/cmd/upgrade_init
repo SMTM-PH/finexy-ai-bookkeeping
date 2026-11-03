@@ -1,0 +1,7 @@
+#!/bin/bash
+set -u
+
+# 升级阶段同样不写 @appdata：目录与配置由 cmd/main start 在应用运行身份下创建。
+# 此处保持无副作用，避免升级因权限问题失败。
+
+exit 0

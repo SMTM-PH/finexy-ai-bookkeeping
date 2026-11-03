@@ -33,6 +33,7 @@ export const useAccountsStore = defineStore('accounts', () => {
     const allCategorizedAccountsMap = ref<Record<number, CategorizedAccount>>({});
     const accountListStateInvalid = ref<boolean>(true);
     const accountListLedgerId = ref<string>('0');
+    let accountLoadGeneration = 0;
 
     const allPlainAccounts = computed<Account[]>(() => {
         const allAccountsList: Account[] = [];
@@ -352,6 +353,7 @@ export const useAccountsStore = defineStore('accounts', () => {
     }
 
     function resetAccounts(): void {
+        ++accountLoadGeneration;
         allAccounts.value = [];
         allAccountsMap.value = {};
         allCategorizedAccountsMap.value = {};
@@ -773,20 +775,30 @@ export const useAccountsStore = defineStore('accounts', () => {
     }
 
     function loadAllAccounts({ force, ledgerId = '0' }: { force: boolean, ledgerId?: string }): Promise<Account[]> {
+        const hadValidCache = !accountListStateInvalid.value && accountListLedgerId.value === ledgerId;
         if (!force && !accountListStateInvalid.value && accountListLedgerId.value === ledgerId) {
             return new Promise((resolve) => {
                 resolve(allAccounts.value);
             });
         }
 
+        if (accountListLedgerId.value !== ledgerId) {
+            resetAccounts();
+            accountListLedgerId.value = ledgerId;
+        }
+        const generation = accountLoadGeneration;
         return new Promise((resolve, reject) => {
             services.getAllAccounts({
                 visibleOnly: false,
                 ledgerId
             }).then(response => {
+                if (generation !== accountLoadGeneration) {
+                    reject({ stale: true });
+                    return;
+                }
                 const data = response.data;
 
-                if (!data || !data.success || !data.result) {
+                if (!data || !data.success || !Array.isArray(data.result)) {
                     reject({ message: 'Unable to retrieve account list' });
                     return;
                 }
@@ -796,9 +808,12 @@ export const useAccountsStore = defineStore('accounts', () => {
                 }
 
                 const accounts = Account.sortAccounts(Account.ofMulti(data.result), settingsStore.accountCategoryDisplayOrders);
-                const sameLedger = accountListLedgerId.value === ledgerId;
-
-                if (force && sameLedger && data.result && isEquals(allAccounts.value, accounts)) {
+                if (accounts.some(account => account.ledgerId !== ledgerId || account.subAccounts?.some(child => child.ledgerId !== ledgerId))) {
+                    reject({ message: '账户响应的账本归属不匹配，请重试' });
+                    updateAccountListInvalidState(true);
+                    return;
+                }
+                if (force && hadValidCache && isEquals(allAccounts.value, accounts)) {
                     reject({ message: 'Account list is up to date', isUpToDate: true });
                     return;
                 }
@@ -808,6 +823,10 @@ export const useAccountsStore = defineStore('accounts', () => {
 
                 resolve(accounts);
             }).catch(error => {
+                if (generation !== accountLoadGeneration) {
+                    reject({ stale: true });
+                    return;
+                }
                 if (force) {
                     logger.error('failed to force load account list', error);
                 } else {

@@ -101,9 +101,9 @@ data class TagEntity(
     val updatedAt: Long = System.currentTimeMillis()
 )
 
-@Entity(tableName = "transaction_templates")
+@Entity(tableName = "transaction_templates", primaryKeys = ["ledgerId", "id"])
 data class TemplateEntity(
-    @PrimaryKey val id: Long,
+    val id: Long,
     val name: String,
     val type: Int,
     val categoryId: Long,
@@ -126,7 +126,8 @@ data class TemplateEntity(
     val nextScheduledTime: Long? = null,
     val displayOrder: Int = 0,
     val pausedFromFrequencyType: Int? = null,
-    val pausedFromFrequency: String? = null
+    val pausedFromFrequency: String? = null,
+    @ColumnInfo(defaultValue = "0") val ledgerId: Long = 0
 )
 
 @Entity(tableName = "sync_conflicts")
@@ -146,7 +147,7 @@ data class SyncConflictEntity(
  * One server-side review item of a due schedule. The composite key matches the
  * server's uniqueness rule; confirming posts the snapshot exactly once there.
  */
-@Entity(tableName = "scheduled_occurrences", primaryKeys = ["templateId", "scheduledUnixTime"])
+@Entity(tableName = "scheduled_occurrences", primaryKeys = ["ledgerId", "templateId", "scheduledUnixTime"])
 data class ScheduledOccurrenceEntity(
     val templateId: Long,
     val scheduledUnixTime: Long,
@@ -163,9 +164,16 @@ data class ScheduledOccurrenceEntity(
     val hideAmount: Boolean = false,
     val tagIdsJson: String = "[]",
     val comment: String = "",
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    @ColumnInfo(defaultValue = "0") val ledgerId: Long = 0,
+    @ColumnInfo(defaultValue = "0") val pendingAction: Int = 0,
+    @ColumnInfo(defaultValue = "0") val pendingActionQueuedAt: Long = 0
 ) {
     companion object {
+        const val ACTION_NONE = 0
+        const val ACTION_CONFIRM = 1
+        const val ACTION_DISMISS = 2
+        const val ACTION_RESTORE = 3
         const val STATUS_PENDING = 1
         const val STATUS_CONFIRMED = 2
         const val STATUS_DISMISSED = 3
@@ -372,6 +380,9 @@ interface FinexyDao {
     @Query("SELECT * FROM transactions WHERE localId = :localId LIMIT 1")
     suspend fun findTransaction(localId: String): TransactionEntity?
 
+    @Query("SELECT * FROM transactions WHERE localId = :localId LIMIT 1")
+    fun observeOriginalTransaction(localId: String): Flow<TransactionEntity?>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertTransactions(items: List<TransactionEntity>)
 
@@ -420,17 +431,33 @@ interface FinexyDao {
     @Query("DELETE FROM tags WHERE id = :id")
     suspend fun deleteTag(id: Long)
 
-    @Query("SELECT * FROM transaction_templates WHERE hidden = 0 AND templateType = 1 ORDER BY name")
-    fun observeTemplates(): Flow<List<TemplateEntity>>
+    @Query("SELECT * FROM transaction_templates WHERE ledgerId = :ledgerId AND hidden = 0 AND templateType = 1 ORDER BY name")
+    fun observeTemplates(ledgerId: Long = 0): Flow<List<TemplateEntity>>
 
-    @Query("SELECT * FROM transaction_templates WHERE templateType = 2 ORDER BY displayOrder, name")
-    fun observeScheduledTemplates(): Flow<List<TemplateEntity>>
+    @Query("SELECT * FROM transaction_templates WHERE ledgerId = :ledgerId AND templateType = 1 ORDER BY displayOrder, name, id")
+    fun observeNormalTemplates(ledgerId: Long): Flow<List<TemplateEntity>>
+
+    @Query("SELECT * FROM transaction_templates WHERE ledgerId = :ledgerId AND templateType = 2 ORDER BY displayOrder, name")
+    fun observeScheduledTemplates(ledgerId: Long = 0): Flow<List<TemplateEntity>>
 
     @Query("SELECT * FROM transaction_templates")
     suspend fun allTemplates(): List<TemplateEntity>
 
-    @Query("SELECT * FROM scheduled_occurrences ORDER BY scheduledUnixTime, templateId")
-    fun observeOccurrences(): Flow<List<ScheduledOccurrenceEntity>>
+    @Query("SELECT * FROM transaction_templates WHERE ledgerId = :ledgerId ORDER BY templateType, displayOrder, id")
+    suspend fun templatesInLedger(ledgerId: Long = 0): List<TemplateEntity>
+
+    @Query("SELECT * FROM transaction_templates WHERE ledgerId = :ledgerId AND id = :id LIMIT 1")
+    suspend fun findTemplate(id: Long, ledgerId: Long = 0): TemplateEntity?
+
+    @Query("DELETE FROM transaction_templates WHERE ledgerId = :ledgerId AND templateType = :templateType AND id NOT IN (:ids)")
+    suspend fun deleteMissingTemplates(ids: List<Long>, templateType: Int, ledgerId: Long = 0)
+
+    @Query("DELETE FROM transaction_templates WHERE ledgerId NOT IN (:ledgerIds)")
+    suspend fun deleteTemplatesOutside(ledgerIds: List<Long>)
+
+
+    @Query("SELECT * FROM scheduled_occurrences WHERE ledgerId = :ledgerId ORDER BY scheduledUnixTime, templateId")
+    fun observeOccurrences(ledgerId: Long = 0): Flow<List<ScheduledOccurrenceEntity>>
 
     @Query("SELECT * FROM ai_review_items WHERE status = 1 AND id NOT IN (SELECT reviewItemId FROM transactions WHERE reviewItemId IS NOT NULL AND deleted = 0) ORDER BY createdUnixTime DESC, id DESC")
     fun observeAIReviewItems(): Flow<List<AIReviewItemEntity>>
@@ -554,20 +581,32 @@ interface FinexyDao {
     @Query("SELECT * FROM scheduled_occurrences")
     suspend fun allOccurrences(): List<ScheduledOccurrenceEntity>
 
+    @Query("SELECT * FROM scheduled_occurrences WHERE ledgerId = :ledgerId ORDER BY scheduledUnixTime, templateId")
+    suspend fun occurrencesInLedger(ledgerId: Long = 0): List<ScheduledOccurrenceEntity>
+
+    @Query("SELECT * FROM scheduled_occurrences WHERE ledgerId = :ledgerId AND templateId = :templateId AND scheduledUnixTime = :scheduledUnixTime LIMIT 1")
+    suspend fun findOccurrence(ledgerId: Long, templateId: Long, scheduledUnixTime: Long): ScheduledOccurrenceEntity?
+
+    suspend fun findOccurrence(templateId: Long, scheduledUnixTime: Long): ScheduledOccurrenceEntity? = findOccurrence(0, templateId, scheduledUnixTime)
+
+    @Query("DELETE FROM scheduled_occurrences WHERE pendingAction = 0 AND ledgerId NOT IN (:ledgerIds)")
+    suspend fun deleteOccurrencesOutside(ledgerIds: List<Long>)
+
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertOccurrences(items: List<ScheduledOccurrenceEntity>)
 
-    @Query("DELETE FROM scheduled_occurrences WHERE templateId || ':' || scheduledUnixTime NOT IN (:keys)")
-    suspend fun deleteOccurrencesNotIn(keys: List<String>)
+    @Query("DELETE FROM scheduled_occurrences WHERE ledgerId = :ledgerId AND pendingAction = 0 AND templateId || ':' || scheduledUnixTime NOT IN (:keys)")
+    suspend fun deleteOccurrencesNotIn(keys: List<String>, ledgerId: Long = 0)
 
-    @Query("DELETE FROM transaction_templates WHERE templateType = 2 AND id NOT IN (:ids)")
-    suspend fun deleteMissingScheduledTemplates(ids: List<Long>)
+    @Query("DELETE FROM transaction_templates WHERE ledgerId = :ledgerId AND templateType = 2 AND id NOT IN (:ids)")
+    suspend fun deleteMissingScheduledTemplates(ids: List<Long>, ledgerId: Long = 0)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertTemplates(items: List<TemplateEntity>)
 
-    @Query("DELETE FROM transaction_templates WHERE id = :id")
-    suspend fun deleteTemplate(id: Long)
+    @Query("DELETE FROM transaction_templates WHERE ledgerId = :ledgerId AND id = :id")
+    suspend fun deleteTemplate(id: Long, ledgerId: Long = 0)
 
     @Query("SELECT * FROM categories WHERE name = :name AND hidden = 0 ORDER BY parentId")
     suspend fun findCategoriesByName(name: String): List<CategoryEntity>
@@ -625,9 +664,140 @@ interface FinexyDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertSyncStatus(status: SyncStatusEntity)
+
+    @Query("SELECT * FROM ledger_write_queue ORDER BY createdAt")
+    fun observeLedgerWrites(): Flow<List<LedgerWriteEntity>>
+
+    @Query("SELECT * FROM ledger_write_queue ORDER BY createdAt")
+    suspend fun allLedgerWrites(): List<LedgerWriteEntity>
+
+    @Query("SELECT * FROM ledger_write_queue WHERE ledgerId = :ledgerId")
+    suspend fun findLedgerWrite(ledgerId: Long): LedgerWriteEntity?
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertLedgerWrite(write: LedgerWriteEntity)
+
+    @Query("UPDATE ledger_write_queue SET state = 'posted', serverId = :serverId, lastError = '' WHERE ledgerId = :ledgerId AND localId = :localId")
+    suspend fun markLedgerWritePosted(ledgerId: Long, localId: String, serverId: Long)
+
+    @Query("UPDATE ledger_write_queue SET lastError = :message WHERE ledgerId = :ledgerId AND localId = :localId AND state = 'pending'")
+    suspend fun markLedgerWriteFailed(ledgerId: Long, localId: String, message: String)
+
+    @Query("DELETE FROM ledger_write_queue WHERE ledgerId = :ledgerId AND state = 'posted'")
+    suspend fun acknowledgeLedgerWrites(ledgerId: Long)
+
+    @Query("DELETE FROM ledger_write_queue WHERE ledgerId = :ledgerId AND localId = :localId AND createdAt = :createdAt AND payloadJson = :payloadJson AND state = 'posted' AND serverId = :serverId")
+    suspend fun acknowledgeOriginalLedgerWrite(ledgerId: Long, localId: String, createdAt: Long,
+        payloadJson: String, serverId: Long): Int
+
+    @Query("SELECT * FROM template_form_drafts WHERE ledgerId = :ledgerId AND templateType = :templateType")
+    fun observeTemplateDraft(ledgerId: Long, templateType: Int): Flow<TemplateFormDraftEntity?>
+
+    @Query("SELECT * FROM template_form_drafts WHERE ledgerId = :ledgerId AND templateType = :templateType")
+    suspend fun findTemplateDraft(ledgerId: Long, templateType: Int): TemplateFormDraftEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertTemplateDraft(draft: TemplateFormDraftEntity)
+
+    @Query("DELETE FROM template_form_drafts WHERE ledgerId = :ledgerId AND templateType = :templateType AND draftId = :draftId AND revision = :revision")
+    suspend fun deleteTemplateDraft(ledgerId: Long, templateType: Int, draftId: String, revision: Long): Int
+
+    @Query("SELECT * FROM template_creation_queue ORDER BY createdAt")
+    fun observeTemplateCreations(): Flow<List<TemplateCreationEntity>>
+
+    @Query("SELECT * FROM template_creation_queue ORDER BY createdAt")
+    suspend fun allTemplateCreations(): List<TemplateCreationEntity>
+
+    @Query("SELECT * FROM template_creation_queue WHERE ledgerId = :ledgerId AND templateType = :templateType")
+    suspend fun findTemplateCreation(ledgerId: Long, templateType: Int): TemplateCreationEntity?
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertTemplateCreation(write: TemplateCreationEntity)
+
+    @Query("UPDATE template_creation_queue SET state = 'posted', serverId = :serverId, serverDeleted = :deleted, lastError = '' WHERE ledgerId = :ledgerId AND templateType = :templateType AND clientSessionId = :clientSessionId AND state = 'pending'")
+    suspend fun markTemplateCreationPosted(ledgerId: Long, templateType: Int, clientSessionId: String, serverId: Long, deleted: Boolean)
+
+    @Query("UPDATE template_creation_queue SET lastError = :message WHERE ledgerId = :ledgerId AND templateType = :templateType AND clientSessionId = :clientSessionId AND state = 'pending'")
+    suspend fun markTemplateCreationFailed(ledgerId: Long, templateType: Int, clientSessionId: String, message: String)
+
+    @Query("DELETE FROM template_creation_queue WHERE ledgerId = :ledgerId AND templateType = :templateType AND clientSessionId = :clientSessionId AND state = 'posted'")
+    suspend fun acknowledgeTemplateCreation(ledgerId: Long, templateType: Int, clientSessionId: String)
+
+    @Query("SELECT * FROM ledger_ai_review_cache WHERE ledgerId = :ledgerId AND status = :status AND deleted = 0 ORDER BY id DESC")
+    fun observeLedgerAIReview(ledgerId: Long, status: Int): Flow<List<LedgerAIReviewCacheEntity>>
+
+    @Query("SELECT * FROM ledger_ai_review_cache WHERE ledgerId = :ledgerId AND id = :id")
+    suspend fun findLedgerAIReview(ledgerId: Long, id: Long): LedgerAIReviewCacheEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertLedgerAIReview(items: List<LedgerAIReviewCacheEntity>)
+
+    @Query("DELETE FROM ledger_ai_review_cache WHERE ledgerId = :ledgerId AND status = :status AND id NOT IN (:ids)")
+    suspend fun deleteLedgerAIReviewNotIn(ledgerId: Long, status: Int, ids: List<Long>)
+
+    @Query("SELECT * FROM ai_review_drafts WHERE ledgerId = :ledgerId AND itemId = :itemId")
+    fun observeAIReviewDraft(ledgerId: Long, itemId: Long): Flow<AIReviewDraftEntity?>
+
+    @Query("SELECT * FROM ai_review_drafts WHERE ledgerId = :ledgerId AND itemId = :itemId")
+    suspend fun findAIReviewDraft(ledgerId: Long, itemId: Long): AIReviewDraftEntity?
+
+    @Query("SELECT * FROM ai_review_drafts WHERE ledgerId = :ledgerId ORDER BY itemId")
+    fun observeAIReviewDrafts(ledgerId: Long): Flow<List<AIReviewDraftEntity>>
+
+    // A deleted local tombstone does not prove an unknown old upload never committed.
+    @Query("SELECT EXISTS(SELECT 1 FROM transactions WHERE reviewItemId = :id)")
+    suspend fun hasLegacyAIReviewTransaction(id: Long): Boolean
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAIReviewDraft(draft: AIReviewDraftEntity)
+
+    @Query("DELETE FROM ai_review_drafts WHERE ledgerId = :ledgerId AND itemId = :itemId AND draftId = :draftId AND revision = :revision")
+    suspend fun deleteAIReviewDraft(ledgerId: Long, itemId: Long, draftId: String, revision: Long): Int
+
+    @Query("SELECT * FROM ai_review_images WHERE ledgerId = :ledgerId AND imageId = :imageId")
+    suspend fun findAIReviewImage(ledgerId: Long, imageId: String): AIReviewImageEntity?
+
+    @Query("SELECT * FROM ai_review_images WHERE ledgerId = :ledgerId")
+    suspend fun aiReviewImages(ledgerId: Long): List<AIReviewImageEntity>
+
+    @Query("SELECT * FROM ai_review_image_chunks WHERE ledgerId = :ledgerId AND imageId = :imageId ORDER BY chunkIndex")
+    suspend fun aiReviewImageChunks(ledgerId: Long, imageId: String): List<AIReviewImageChunkEntity>
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertAIReviewImage(image: AIReviewImageEntity)
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertAIReviewImageChunks(chunks: List<AIReviewImageChunkEntity>)
+
+    @Query("DELETE FROM ai_review_image_chunks WHERE ledgerId = :ledgerId AND imageId = :imageId")
+    suspend fun deleteAIReviewImageChunks(ledgerId: Long, imageId: String)
+
+    @Query("DELETE FROM ai_review_images WHERE ledgerId = :ledgerId AND imageId = :imageId")
+    suspend fun deleteAIReviewImage(ledgerId: Long, imageId: String)
+
+    @Query("SELECT * FROM ai_review_requests ORDER BY createdAt, requestId")
+    fun observeAIReviewRequests(): Flow<List<AIReviewRequestEntity>>
+
+    @Query("SELECT * FROM ai_review_requests ORDER BY createdAt, requestId")
+    suspend fun allAIReviewRequests(): List<AIReviewRequestEntity>
+
+    @Query("SELECT * FROM ai_review_requests WHERE ledgerId = :ledgerId AND itemId = :itemId")
+    suspend fun findAIReviewRequest(ledgerId: Long, itemId: Long): AIReviewRequestEntity?
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertAIReviewRequest(write: AIReviewRequestEntity)
+
+    @Query("UPDATE ai_review_requests SET state = 'posted', receiptJson = :receiptJson, lastErrorCode = '' WHERE ledgerId = :ledgerId AND itemId = :itemId AND requestId = :requestId AND state = 'pending'")
+    suspend fun markAIReviewRequestPosted(ledgerId: Long, itemId: Long, requestId: String, receiptJson: String): Int
+
+    @Query("UPDATE ai_review_requests SET lastErrorCode = :errorCode WHERE ledgerId = :ledgerId AND itemId = :itemId AND requestId = :requestId AND state = :state")
+    suspend fun markAIReviewRequestFailed(ledgerId: Long, itemId: Long, requestId: String, state: String, errorCode: String)
+
+    @Query("DELETE FROM ai_review_requests WHERE ledgerId = :ledgerId AND itemId = :itemId AND requestId = :requestId AND state = 'posted'")
+    suspend fun acknowledgeAIReviewRequest(ledgerId: Long, itemId: Long, requestId: String)
 }
 
-@Database(entities = [TransactionEntity::class, AccountEntity::class, CategoryEntity::class, CategoryMappingEntity::class, AccountMappingEntity::class, TagEntity::class, TemplateEntity::class, SyncConflictEntity::class, SyncStatusEntity::class, ScheduledOccurrenceEntity::class, AIReviewItemEntity::class, ProductAssetEntity::class, ExchangeRateEntity::class, LedgerEntity::class, SavingsGoalEntity::class, LedgerAccountCacheEntity::class, LedgerTransactionCacheEntity::class], version = 21, exportSchema = false)
+@Database(entities = [TransactionEntity::class, AccountEntity::class, CategoryEntity::class, CategoryMappingEntity::class, AccountMappingEntity::class, TagEntity::class, TemplateEntity::class, SyncConflictEntity::class, SyncStatusEntity::class, ScheduledOccurrenceEntity::class, AIReviewItemEntity::class, ProductAssetEntity::class, ExchangeRateEntity::class, LedgerEntity::class, SavingsGoalEntity::class, LedgerAccountCacheEntity::class, LedgerTransactionCacheEntity::class, LedgerWriteEntity::class, TemplateFormDraftEntity::class, TemplateCreationEntity::class, LedgerAIReviewCacheEntity::class, AIReviewDraftEntity::class, AIReviewRequestEntity::class, AIReviewImageEntity::class, AIReviewImageChunkEntity::class], version = 26, exportSchema = false)
 abstract class FinexyDatabase : androidx.room.RoomDatabase() {
     abstract fun dao(): FinexyDao
 
@@ -656,6 +826,11 @@ abstract class FinexyDatabase : androidx.room.RoomDatabase() {
                 .addMigrations(MIGRATION_18_19)
                 .addMigrations(MIGRATION_19_20)
                 .addMigrations(MIGRATION_20_21)
+                .addMigrations(MIGRATION_21_22)
+                .addMigrations(MIGRATION_22_23)
+                .addMigrations(MIGRATION_23_24)
+                .addMigrations(MIGRATION_24_25)
+                .addMigrations(MIGRATION_25_26)
                 .build() }
         }
 
@@ -1037,6 +1212,119 @@ abstract class FinexyDatabase : androidx.room.RoomDatabase() {
             override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL("DROP TABLE IF EXISTS family_members")
                 database.execSQL("DROP TABLE IF EXISTS family_groups")
+            }
+        }
+
+
+        val MIGRATION_22_23 = object : Migration(22, 23) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                migratePeriodicLedgerTable(database, "transaction_templates", listOf("ledgerId", "id"), """
+                    id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    type INTEGER NOT NULL,
+                    categoryId INTEGER NOT NULL,
+                    sourceAccountId INTEGER NOT NULL,
+                    sourceAmountMinor INTEGER NOT NULL,
+                    comment TEXT NOT NULL,
+                    tagIdsJson TEXT NOT NULL,
+                    hidden INTEGER NOT NULL,
+                    updatedAt INTEGER NOT NULL,
+                    templateType INTEGER NOT NULL,
+                    destinationAccountId INTEGER NOT NULL,
+                    destinationAmountMinor INTEGER NOT NULL,
+                    hideAmount INTEGER NOT NULL,
+                    scheduledFrequencyType INTEGER,
+                    scheduledFrequency TEXT,
+                    scheduledStartDate TEXT,
+                    scheduledEndDate TEXT,
+                    utcOffset INTEGER,
+                    scheduledAt INTEGER,
+                    nextScheduledTime INTEGER,
+                    displayOrder INTEGER NOT NULL,
+                    pausedFromFrequencyType INTEGER,
+                    pausedFromFrequency TEXT,
+                    ledgerId INTEGER NOT NULL DEFAULT 0
+                """.trimIndent())
+                migratePeriodicLedgerTable(database, "scheduled_occurrences", listOf("ledgerId", "templateId", "scheduledUnixTime"), """
+                    templateId INTEGER NOT NULL,
+                    scheduledUnixTime INTEGER NOT NULL,
+                    status INTEGER NOT NULL,
+                    transactionId INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    type INTEGER NOT NULL,
+                    categoryId INTEGER NOT NULL,
+                    sourceAccountId INTEGER NOT NULL,
+                    destinationAccountId INTEGER NOT NULL,
+                    sourceAmountMinor INTEGER NOT NULL,
+                    destinationAmountMinor INTEGER NOT NULL,
+                    utcOffset INTEGER NOT NULL,
+                    hideAmount INTEGER NOT NULL,
+                    tagIdsJson TEXT NOT NULL,
+                    comment TEXT NOT NULL,
+                    updatedAt INTEGER NOT NULL,
+                    ledgerId INTEGER NOT NULL DEFAULT 0,
+                    pendingAction INTEGER NOT NULL DEFAULT 0,
+                    pendingActionQueuedAt INTEGER NOT NULL DEFAULT 0
+                """.trimIndent())
+            }
+        }
+
+        // Rebuild only these caches to widen their primary keys. Copy all rows
+        // in the Room upgrade transaction; a failed copy never drops originals.
+        private fun migratePeriodicLedgerTable(database: SupportSQLiteDatabase, table: String, primaryKeys: List<String>, columnDefinition: String) {
+            val existingColumns = mutableSetOf<String>()
+            val existingKeys = sortedMapOf<Int, String>()
+            database.query("PRAGMA table_info($table)").use { cursor ->
+                val nameIndex = cursor.getColumnIndexOrThrow("name")
+                val keyIndex = cursor.getColumnIndexOrThrow("pk")
+                while (cursor.moveToNext()) {
+                    val name = cursor.getString(nameIndex)
+                    existingColumns += name
+                    val order = cursor.getInt(keyIndex)
+                    if (order > 0) existingKeys[order] = name
+                }
+            }
+            // Some isolated old-version fixtures were made by changing the
+            // version of a current-schema file; avoid losing any scoped rows.
+            if ("ledgerId" in existingColumns && existingKeys.values.toList() == primaryKeys && (table != "scheduled_occurrences" || setOf("pendingAction", "pendingActionQueuedAt").all { it in existingColumns })) return
+            val replacement = "${table}_ledger_scoped"
+            database.execSQL("CREATE TABLE `$replacement` ($columnDefinition, PRIMARY KEY(${primaryKeys.joinToString { "`$it`" }}))")
+            val columns = columnDefinition.lineSequence().map { it.trim().substringBefore(' ') }.filter { it.isNotEmpty() }.toList()
+            require(columns.filter { it !in setOf("ledgerId", "pendingAction", "pendingActionQueuedAt") }.all { it in existingColumns }) { "周期缓存数据库字段不完整" }
+            val names = columns.joinToString { "`$it`" }
+            val values = columns.joinToString { if (it in setOf("ledgerId", "pendingAction", "pendingActionQueuedAt") && it !in existingColumns) "0" else "`$it`" }
+            database.execSQL("INSERT INTO `$replacement` ($names) SELECT $values FROM `$table`")
+            database.execSQL("DROP TABLE `$table`")
+            database.execSQL("ALTER TABLE `$replacement` RENAME TO `$table`")
+        }
+
+        val MIGRATION_23_24 = object : Migration(23, 24) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("CREATE TABLE IF NOT EXISTS template_form_drafts (ledgerId INTEGER NOT NULL, templateType INTEGER NOT NULL, draftId TEXT NOT NULL, revision INTEGER NOT NULL, editingId INTEGER NOT NULL, formJson TEXT NOT NULL, updatedAt INTEGER NOT NULL, PRIMARY KEY(ledgerId, templateType))")
+                database.execSQL("CREATE TABLE IF NOT EXISTS template_creation_queue (ledgerId INTEGER NOT NULL, templateType INTEGER NOT NULL, clientSessionId TEXT NOT NULL, draftId TEXT NOT NULL, draftRevision INTEGER NOT NULL, payloadJson TEXT NOT NULL, state TEXT NOT NULL, serverId INTEGER, serverDeleted INTEGER NOT NULL, lastError TEXT NOT NULL, createdAt INTEGER NOT NULL, PRIMARY KEY(ledgerId, templateType))")
+            }
+        }
+
+        val MIGRATION_25_26 = object : Migration(25, 26) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE ai_review_requests ADD COLUMN sourceImageId TEXT NOT NULL DEFAULT ''")
+                database.execSQL("CREATE TABLE IF NOT EXISTS ai_review_images (ledgerId INTEGER NOT NULL, imageId TEXT NOT NULL, draftId TEXT NOT NULL, mimeType TEXT NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, byteCount INTEGER NOT NULL, sha256 TEXT NOT NULL, chunkCount INTEGER NOT NULL, PRIMARY KEY(ledgerId, imageId))")
+                database.execSQL("CREATE TABLE IF NOT EXISTS ai_review_image_chunks (ledgerId INTEGER NOT NULL, imageId TEXT NOT NULL, chunkIndex INTEGER NOT NULL, content TEXT NOT NULL, PRIMARY KEY(ledgerId, imageId, chunkIndex))")
+            }
+        }
+
+        val MIGRATION_24_25 = object : Migration(24, 25) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // Legacy default-account AI rows stay intact; never manufacture shared ownership or writes.
+                database.execSQL("CREATE TABLE IF NOT EXISTS ledger_ai_review_cache (ledgerId INTEGER NOT NULL, id INTEGER NOT NULL, status INTEGER NOT NULL, itemJson TEXT NOT NULL, deleted INTEGER NOT NULL, updatedAt INTEGER NOT NULL, PRIMARY KEY(ledgerId, id))")
+                database.execSQL("CREATE TABLE IF NOT EXISTS ai_review_drafts (ledgerId INTEGER NOT NULL, itemId INTEGER NOT NULL, draftId TEXT NOT NULL, revision INTEGER NOT NULL, formJson TEXT NOT NULL, updatedAt INTEGER NOT NULL, PRIMARY KEY(ledgerId, itemId))")
+                database.execSQL("CREATE TABLE IF NOT EXISTS ai_review_requests (ledgerId INTEGER NOT NULL, itemId INTEGER NOT NULL, requestId TEXT NOT NULL, draftId TEXT NOT NULL, draftRevision INTEGER NOT NULL, action TEXT NOT NULL, payloadJson TEXT NOT NULL, state TEXT NOT NULL, receiptJson TEXT NOT NULL, lastErrorCode TEXT NOT NULL, createdAt INTEGER NOT NULL, PRIMARY KEY(ledgerId, itemId))")
+            }
+        }
+
+        val MIGRATION_21_22 = object : Migration(21, 22) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("CREATE TABLE IF NOT EXISTS ledger_write_queue (ledgerId INTEGER NOT NULL, localId TEXT NOT NULL, payloadJson TEXT NOT NULL, state TEXT NOT NULL, serverId INTEGER, lastError TEXT NOT NULL, createdAt INTEGER NOT NULL, PRIMARY KEY(ledgerId))")
             }
         }
     }

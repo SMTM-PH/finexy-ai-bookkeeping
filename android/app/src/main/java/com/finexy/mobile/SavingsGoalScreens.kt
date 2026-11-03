@@ -460,7 +460,7 @@ internal fun LedgerManagementPage(store: SecureStore, repository: TransactionRep
                     Text(if (impact.canDelete) "可以删除此账本" else "暂时无法删除", fontWeight = FontWeight.SemiBold,
                         color = if (impact.canDelete) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error)
                     Text("${impact.activeMemberCount} 位有效成员 · ${impact.pendingInvitationCount} 个待接受邀请", color = Muted, fontSize = 13.sp)
-                    Text("账户 ${impact.accountCount} · 流水 ${impact.transactionCount} · 存钱目标 ${impact.savingsGoalCount} · 资金记录 ${impact.savingsGoalFundCount}", fontSize = 13.sp)
+                    Text("账户 ${impact.accountCount} · 流水 ${impact.transactionCount} · 存钱目标 ${impact.savingsGoalCount} · 资金记录 ${impact.savingsGoalFundCount} · 月度预算 ${impact.monthlyBudgetCount}", fontSize = 13.sp)
                     Text(if (impact.canDelete) "删除后所有成员将无法访问，待接受邀请会同时失效。" else "请先迁移或删除关联财务数据，再重新检查。", color = Muted, fontSize = 13.sp)
                     if (impact.canDelete) OutlinedTextField(value = confirmation, onValueChange = { confirmation = it }, label = { Text("输入「${ledger.name}」确认") }, singleLine = true)
                 }

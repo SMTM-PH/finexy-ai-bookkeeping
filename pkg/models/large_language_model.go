@@ -2,11 +2,13 @@ package models
 
 // TransactionTextRecognitionRequest represents the request of recognizing transaction from text
 type TransactionTextRecognitionRequest struct {
-	Text string `json:"text"`
+	LedgerId int64  `json:"ledgerId,string" binding:"min=0"`
+	Text     string `json:"text"`
 }
 
 // RecognizedTransactionResponse represents a view-object of recognized transaction response
 type RecognizedTransactionResponse struct {
+	LedgerId             int64           `json:"ledgerId,string,omitempty"`
 	Type                 TransactionType `json:"type"`
 	Time                 int64           `json:"time,omitempty"`
 	CategoryId           int64           `json:"categoryId,string,omitempty"`

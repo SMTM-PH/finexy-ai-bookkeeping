@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/invopop/jsonschema"
 	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/core"
 	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/errs"
 	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/llm/data"
@@ -15,6 +14,7 @@ import (
 	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/llm/provider/common"
 	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/log"
 	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/settings"
+	"github.com/invopop/jsonschema"
 )
 
 // OpenAIChatCompletionsAPIProvider defines the structure of OpenAI chat completions API provider
@@ -139,7 +139,7 @@ func (p *CommonOpenAIChatCompletionsAPILargeLanguageModelAdapter) ParseTextualRe
 	err := json.Unmarshal(body, &chatCompletionsResponse)
 
 	if err != nil {
-		log.Errorf(c, "[openai_common_compatible_large_language_model_adapter.ParseTextualResponse] failed to parse chat completions response for user \"uid:%d\", because %s", uid, err.Error())
+		log.Errorf(c, "[openai_common_compatible_large_language_model_adapter.ParseTextualResponse] failed to parse chat completions response for user \"uid:%d\", error type %T", uid, err)
 		return nil, errs.ErrFailedToRequestRemoteApi
 	}
 
@@ -228,11 +228,11 @@ func (p *CommonOpenAIChatCompletionsAPILargeLanguageModelAdapter) buildJsonReque
 	requestBodyBytes, err := json.Marshal(chatCompletionsRequest)
 
 	if err != nil {
-		log.Errorf(c, "[openai_common_compatible_large_language_model_adapter.buildJsonRequestBody] failed to marshal request body for user \"uid:%d\", because %s", uid, err.Error())
+		log.Errorf(c, "[openai_common_compatible_large_language_model_adapter.buildJsonRequestBody] failed to marshal request body for user \"uid:%d\", error type %T", uid, err)
 		return nil, errs.ErrOperationFailed
 	}
 
-	log.Debugf(c, "[openai_common_compatible_large_language_model_adapter.buildJsonRequestBody] request body is %s", requestBodyBytes)
+	log.Debugf(c, "[openai_common_compatible_large_language_model_adapter.buildJsonRequestBody] request prepared")
 	return requestBodyBytes, nil
 }
 

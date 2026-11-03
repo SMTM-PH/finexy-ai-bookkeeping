@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -25,6 +26,7 @@ class ScheduleQaActivity : PrivacyActivity() {
     }
     private val repository by lazy { TransactionRepository(applicationContext, database, importLegacy = false) }
     var reviewMode by mutableStateOf(true)
+    var role by mutableStateOf(com.finexy.mobile.data.RemoteLedgerMember.ROLE_OWNER)
 
     override fun privacyStore() = SecureStore(applicationContext, "schedule-ui-fixture")
 
@@ -35,8 +37,10 @@ class ScheduleQaActivity : PrivacyActivity() {
                 com.finexy.mobile.data.AccountEntity(10, "现金", "CNY"),
                 com.finexy.mobile.data.AccountEntity(11, "储蓄", "CNY")))
             repository.saveCategories(listOf(
+                com.finexy.mobile.data.CategoryEntity(200, "支出父分类", 0, 2),
+                com.finexy.mobile.data.CategoryEntity(300, "收入父分类", 0, 1),
                 com.finexy.mobile.data.CategoryEntity(201, "房租", 200, 2),
-                com.finexy.mobile.data.CategoryEntity(202, "工资", 200, 1)))
+                com.finexy.mobile.data.CategoryEntity(202, "工资", 300, 1)))
             repository.replaceOccurrences(listOf(
                 RemoteOccurrence(42, 1_788_700_000, 1, 0, "房租", 3, 201, 10, 0, 420000, 0, 480, false, "[]", "九月房租"),
                 RemoteOccurrence(43, 1_788_710_000, 3, 0, "订阅", 3, 201, 10, 0, 1500, 0, 480, false, "[]", "会员")))
@@ -44,7 +48,7 @@ class ScheduleQaActivity : PrivacyActivity() {
                 TemplateEntity(42, "房租计划", 3, 201, 10, 420000, "月租", templateType = 2, scheduledFrequencyType = 2,
                     scheduledFrequency = "1,15", utcOffset = 480, scheduledStartDate = "2026-09-01"),
                 TemplateEntity(43, "停用订阅", 3, 201, 10, 1500, "", templateType = 2, scheduledFrequencyType = 0,
-                    scheduledFrequency = "", pausedFromFrequencyType = 3, pausedFromFrequency = "")))
+                    scheduledFrequency = "", pausedFromFrequencyType = 3, pausedFromFrequency = "0")))
         }
         setContent {
             FinexyTheme(true) {
@@ -57,7 +61,10 @@ class ScheduleQaActivity : PrivacyActivity() {
 
     @Composable
     private fun ScheduleHost() {
-        if (reviewMode) OccurrenceReviewPage(privacyStore(), repository, localMode = false, onBack = {})
-        else SchedulePlanPage(privacyStore(), repository, localMode = false, onBack = {})
+        val accounts by repository.observeAccounts().collectAsState(initial = emptyList())
+        val categories by repository.observeCategories().collectAsState(initial = emptyList())
+        val resources = PeriodicResources(accounts, categories, role, loading = false)
+        if (reviewMode) OccurrenceReviewPage(privacyStore(), repository, localMode = false, fixtureResources = resources, onBack = {})
+        else SchedulePlanPage(privacyStore(), repository, localMode = false, fixtureResources = resources, onBack = {})
     }
 }

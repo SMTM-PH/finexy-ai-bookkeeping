@@ -6,6 +6,8 @@ on:
     branches: [main]
     paths:
       - .github/workflows/publish-main-image-temporary.yml
+      - .github/workflows/ci.yml
+      - .github/workflows/android.yml
       - .dockerignore
       - Dockerfile
       - go.mod
@@ -15,6 +17,13 @@ on:
       - vite.config.ts
       - .github/scripts/verify-release-web.mjs
       - .github/scripts/verify-agent-access.mjs
+      - .github/scripts/verify-mcp-management.mjs
+      - .github/scripts/verify-transaction-retries.mjs
+      - .github/scripts/verify-desktop-currency.mjs
+      - .github/scripts/verify-mobile-ledger-context.mjs
+      - .github/scripts/verify-mobile-ledger-write.mjs
+      - .github/scripts/verify-ledger-budget.mjs
+      - .github/scripts/verify-ledger-periodic.mjs
       - cmd/**
       - conf/**
       - docker/**
@@ -27,7 +36,11 @@ permissions:
   contents: read
 
 jobs:
+  quality:
+    uses: ./.github/workflows/ci.yml
+
   publish:
+    needs: quality
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -73,9 +86,40 @@ jobs:
       - name: Verify Agent permissions and ledger imports before publishing
         shell: bash
         run: |
-          docker run -d --rm --name finexy-agent-e2e -p 18110:8080 -e EBK_AUTH_ENABLE_REGISTER=true -e EBK_SECURITY_ENABLE_API_TOKEN=true -e EBK_MCP_ENABLE_MCP=true -e EBK_SERVER_ROOT_URL=http://127.0.0.1:18110/ ph97/finexy-bookkeeping:${{ steps.release.outputs.version }}-amd64
+          docker run -d --rm --name finexy-agent-e2e -p 18110:8080 -e EBK_UUID_SERVER_ID=231 -e EBK_AUTH_ENABLE_REGISTER=true -e EBK_SECURITY_ENABLE_API_TOKEN=true -e EBK_MCP_ENABLE_MCP=true -e EBK_SERVER_ROOT_URL=http://127.0.0.1:18110/ ph97/finexy-bookkeeping:${{ steps.release.outputs.version }}-amd64
           trap 'docker stop finexy-agent-e2e >/dev/null 2>&1 || true' EXIT
-          FINEXY_EXPECTED_VERSION="${{ steps.release.outputs.version }}" PLAYWRIGHT_MODULE="$RUNNER_TEMP/finexy-browser/node_modules/playwright/index.mjs" PYTHON=python3 node .github/scripts/verify-agent-access.mjs
+          export FINEXY_EXPECTED_VERSION="${{ steps.release.outputs.version }}"
+          export PLAYWRIGHT_MODULE="$RUNNER_TEMP/finexy-browser/node_modules/playwright/index.mjs"
+          PYTHON=python3 node .github/scripts/verify-agent-access.mjs
+          node .github/scripts/verify-mcp-management.mjs
+          node .github/scripts/verify-transaction-retries.mjs
+          FINEXY_E2E_CONTAINER=finexy-agent-e2e FINEXY_E2E_BASE=http://127.0.0.1:18110 PLAYWRIGHT_MODULE="$RUNNER_TEMP/finexy-browser/node_modules/playwright/index.mjs" node .github/scripts/verify-desktop-currency.mjs
+          node .github/scripts/verify-mobile-ledger-context.mjs
+          node .github/scripts/verify-mobile-ledger-write.mjs
+      - name: Verify ledger budgets and production desktop/mobile before publishing
+        shell: bash
+        run: |
+          docker run -d --rm --name finexy-budget-e2e -p 127.0.0.1:18111:8080 -e EBK_UUID_SERVER_ID=232 -e EBK_AUTH_ENABLE_REGISTER=true -e EBK_SECURITY_MAX_FAILURES_PER_IP_PER_MINUTE=0 -e EBK_SECURITY_MAX_FAILURES_PER_USER_PER_MINUTE=0 -e EBK_SERVER_ROOT_URL=http://127.0.0.1:18111/ ph97/finexy-bookkeeping:${{ steps.release.outputs.version }}-amd64
+          trap 'docker stop finexy-budget-e2e >/dev/null 2>&1 || true' EXIT
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/finexy-browser/node_modules/playwright/index.mjs" node .github/scripts/verify-ledger-budget.mjs
+      - name: Preserve isolated budget validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ledger-budget-validation
+          path: artifacts/ledger-budget-20261004/**
+      - name: Verify ledger templates and scheduled review before publishing
+        shell: bash
+        run: |
+          docker run -d --rm --name finexy-periodic-e2e -p 127.0.0.1:18112:8080 -e EBK_UUID_SERVER_ID=234 -e EBK_AUTH_ENABLE_REGISTER=true -e EBK_CRON_ENABLE_CRON=true -e EBK_CRON_ENABLE_CREATE_SCHEDULED_TRANSACTION=true -e EBK_SECURITY_MAX_FAILURES_PER_IP_PER_MINUTE=0 -e EBK_SECURITY_MAX_FAILURES_PER_USER_PER_MINUTE=0 -e EBK_SERVER_ROOT_URL=http://127.0.0.1:18112/ ph97/finexy-bookkeeping:${{ steps.release.outputs.version }}-amd64
+          trap 'docker stop finexy-periodic-e2e >/dev/null 2>&1 || true' EXIT
+          FINEXY_PERIODIC_IMAGE="ph97/finexy-bookkeeping:${{ steps.release.outputs.version }}-amd64" PLAYWRIGHT_MODULE="$RUNNER_TEMP/finexy-browser/node_modules/playwright/index.mjs" node .github/scripts/verify-ledger-periodic.mjs
+      - name: Preserve isolated periodic validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ledger-periodic-validation
+          path: artifacts/ledger-periodic-20261004/**
       - name: Publish latest AMD64 image
         shell: bash
         run: |

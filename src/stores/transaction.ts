@@ -19,13 +19,13 @@ import { TransactionType, TransactionTagFilterType } from '@/core/transaction.ts
 import { TRANSACTION_MIN_AMOUNT, TRANSACTION_MAX_AMOUNT } from '@/consts/transaction.ts';
 import {
     type TransactionDraft,
+    type PendingTransactionCreate,
     type TransactionCreateRequest,
     type TransactionInfoResponse,
     type TransactionPageWrapper,
     type TransactionReconciliationStatementResponse,
     Transaction,
-    TransactionTagFilter,
-    EMPTY_TRANSACTION_RESULT
+    TransactionTagFilter
 } from '@/models/transaction.ts';
 import type {
     TransactionPictureInfoBasicResponse
@@ -43,8 +43,16 @@ import type {
 
 import {
     getUserTransactionDraft,
+    inspectUserTransactionDraft,
     updateUserTransactionDraft,
-    clearUserTransactionDraft
+    clearUserTransactionDraft,
+    getUserPendingTransactionCreate,
+    updateUserPendingTransactionCreate,
+    clearUserPendingTransactionCreate,
+    getTransactionStateIdentity,
+    getCurrentUserInfo,
+    isUserLogined,
+    withTransactionCreateLock
 } from '@/lib/userstate.ts';
 import {
     isDefined,
@@ -59,7 +67,9 @@ import { parseDateTimeFromUnixTimeWithTimezoneOffset } from '@/lib/datetime.ts';
 import { getAmountWithDecimalNumberCount } from '@/lib/numeral.ts';
 import { getCurrencyFraction } from '@/lib/currency.ts';
 import { getFirstVisibleCategoryId } from '@/lib/category.ts';
-import services, { type ApiResponsePromise } from '@/lib/services.ts';
+import { assertPendingTransactionCreate, assertTransactionSubmissionResponse, assertTransactionSubmissionPictures } from '@/lib/transaction_submission.ts';
+import { ledgerPendingDraftRevision } from '@/lib/ledger_pending.ts';
+import services from '@/lib/services.ts';
 import logger from '@/lib/logger.ts';
 
 export interface TransactionListPartialFilter {
@@ -132,6 +142,8 @@ export const useTransactionsStore = defineStore('transactions', () => {
 
     const transactions = ref<TransactionMonthList[]>([]);
     const transactionsNextTimeId = ref<number>(0);
+    const transactionListLedgerId = ref<string>('0');
+    let transactionLoadGeneration = 0;
     const transactionListStateInvalid = ref<boolean>(true);
     const transactionReconciliationStatementStateInvalid = ref<boolean>(true);
 
@@ -465,9 +477,9 @@ export const useTransactionsStore = defineStore('transactions', () => {
         }
     }
 
-    function initTransactionDraft(): void {
+    function initTransactionDraft(ledgerId = '0'): void {
         if (settingsStore.appSettings.autoSaveTransactionDraft === 'enabled' || settingsStore.appSettings.autoSaveTransactionDraft === 'confirmation') {
-            transactionDraft.value = getUserTransactionDraft();
+            transactionDraft.value = getUserTransactionDraft(ledgerId);
         } else {
             transactionDraft.value = null;
         }
@@ -537,27 +549,54 @@ export const useTransactionsStore = defineStore('transactions', () => {
         return false;
     }
 
-    function saveTransactionDraft(transaction?: Transaction, initAmount?: number, initCategoryId?: string, initAccountId?: string, initTagIds?: string, firstVisibleAccountId?: string): void {
+    function saveTransactionDraft(transaction?: Transaction, initAmount?: number, initCategoryId?: string, initAccountId?: string, initTagIds?: string, firstVisibleAccountId?: string, ledgerId = '0', clientSessionId?: string): void {
         if (settingsStore.appSettings.autoSaveTransactionDraft !== 'enabled' && settingsStore.appSettings.autoSaveTransactionDraft !== 'confirmation') {
-            clearTransactionDraft();
+            clearTransactionDraft(ledgerId);
             return;
         }
 
         if (transaction) {
             if (!isTransactionDraftModified(transaction, initAmount, initCategoryId, initAccountId, initTagIds, firstVisibleAccountId)) {
-                clearTransactionDraft();
+                clearTransactionDraft(ledgerId);
                 return;
             }
 
-            transactionDraft.value = transaction.toTransactionDraft();
+            transactionDraft.value = { ...transaction.toTransactionDraft(), ledgerId, clientSessionId };
         }
 
-        updateUserTransactionDraft(transactionDraft.value);
+        if (transactionDraft.value?.ledgerId === ledgerId) updateUserTransactionDraft(transactionDraft.value, ledgerId);
     }
 
-    function clearTransactionDraft(): void {
-        transactionDraft.value = null;
-        clearUserTransactionDraft();
+    function clearTransactionDraft(ledgerId = '0'): void {
+        if ((transactionDraft.value?.ledgerId ?? '0') === ledgerId) transactionDraft.value = null;
+        clearUserTransactionDraft(ledgerId);
+    }
+
+    function getPendingTransactionCreate(ledgerId: string): PendingTransactionCreate | null {
+        const pending = getUserPendingTransactionCreate(ledgerId);
+        if (!pending) return null;
+        validatePendingTransactionCreate(pending, ledgerId);
+        return pending;
+    }
+
+    function validatePendingTransactionCreate(pending: PendingTransactionCreate, ledgerId: string): void {
+        assertPendingTransactionCreate(pending, ledgerId);
+    }
+
+    async function acknowledgePendingTransactionCreate(ledgerId: string, clientSessionId: string, expectedTransactionId?: string): Promise<void> {
+        const identity = getTransactionStateIdentity();
+        await withTransactionCreateLock(() => {
+            if (!identity || !isUserLogined() || identity !== getTransactionStateIdentity()) throw new Error('登录账号已变化，原回执已保留，请回原账号核对');
+            const pending = getPendingTransactionCreate(ledgerId);
+            if (pending?.clientSessionId !== clientSessionId) return;
+            if (!pending.receipt) throw new Error('原记账结果尚未确认，不能清理原请求');
+            if (expectedTransactionId !== undefined && pending.receipt.id !== expectedTransactionId) throw new Error('原记账回执已变化，请保留原记录后核对');
+            // Remove the optional draft first; if storage fails, retain the
+            // original receipt so recovery remains a read of the known ID.
+            const draft = inspectUserTransactionDraft(ledgerId);
+            if (draft?.clientSessionId === clientSessionId) clearTransactionDraft(ledgerId);
+            clearUserPendingTransactionCreate(ledgerId);
+        });
     }
 
     function setTransactionSuitableDestinationAmount(transaction: Transaction, oldSourceAmount: number, newSourceAmount: number, oldSourceAccountId?: string, oldDestinationAccountId?: string): void {
@@ -641,6 +680,8 @@ export const useTransactionsStore = defineStore('transactions', () => {
     }
 
     function resetTransactions(): void {
+        ++transactionLoadGeneration;
+        transactionListLedgerId.value = '0';
         transactionsFilter.value.dateType = DateRange.All.type;
         transactionsFilter.value.maxTime = 0;
         transactionsFilter.value.minTime = 0;
@@ -658,6 +699,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
     }
 
     function clearTransactions(): void {
+        ++transactionLoadGeneration;
         transactions.value = [];
         transactionsNextTimeId.value = 0;
         transactionListStateInvalid.value = true;
@@ -786,6 +828,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
             changed = true;
         }
 
+        if (changed) ++transactionLoadGeneration;
         return changed;
     }
 
@@ -845,7 +888,17 @@ export const useTransactionsStore = defineStore('transactions', () => {
         };
     }
 
-    function loadTransactions({ reload, count, page, mustHavePictures, withCount, withPictures, autoExpand, defaultCurrency, ledgerId }: { reload?: boolean, count?: number, page?: number, mustHavePictures?: boolean, withCount?: boolean, withPictures?: boolean, autoExpand: boolean, defaultCurrency: string, ledgerId?: string }): Promise<TransactionPageWrapper> {
+    function beginTransactionLoad(ledgerId: string, reload: boolean): number {
+        if (transactionListLedgerId.value !== ledgerId) {
+            clearTransactions();
+            transactionListLedgerId.value = ledgerId;
+        }
+        if (reload) ++transactionLoadGeneration;
+        return transactionLoadGeneration;
+    }
+
+    function loadTransactions({ reload, count, page, mustHavePictures, withCount, withPictures, autoExpand, defaultCurrency, ledgerId = '0' }: { reload?: boolean, count?: number, page?: number, mustHavePictures?: boolean, withCount?: boolean, withPictures?: boolean, autoExpand: boolean, defaultCurrency: string, ledgerId?: string }): Promise<TransactionPageWrapper> {
+        const generation = beginTransactionLoad(ledgerId, !!reload);
         let actualMaxTime = transactionsNextTimeId.value;
 
         if (reload && transactionsFilter.value.maxTime > 0) {
@@ -872,62 +925,36 @@ export const useTransactionsStore = defineStore('transactions', () => {
                 keyword: transactionsFilter.value.keyword,
                 matchMode: transactionsFilter.value.matchMode
             }).then(response => {
+                if (generation !== transactionLoadGeneration) {
+                    reject({ stale: true });
+                    return;
+                }
                 const data = response.data;
-
-                if (!data || !data.success || !data.result) {
-                    if (reload) {
-                        loadTransactionList({
-                            transactionPageWrapper: EMPTY_TRANSACTION_RESULT,
-                            reload: reload,
-                            autoExpand: autoExpand,
-                            defaultCurrency: defaultCurrency
-                        });
-
-                        if (!transactionListStateInvalid.value) {
-                            updateTransactionListInvalidState(true);
-                        }
-                    }
-
+                if (!data || !data.success || !data.result || !Array.isArray(data.result.items) || data.result.items.some(item => (item.ledgerId || '0') !== ledgerId)) {
+                    updateTransactionListInvalidState(true);
                     reject({ message: 'Unable to retrieve transaction list' });
                     return;
                 }
-
                 const transactionPageWrapper: TransactionPageWrapper = {
                     items: Transaction.ofMulti(data.result.items),
                     totalCount: data.result.totalCount
                 };
-
                 loadTransactionList({
-                    transactionPageWrapper: transactionPageWrapper,
+                    transactionPageWrapper,
                     reload: !!reload,
-                    autoExpand: autoExpand,
-                    defaultCurrency: defaultCurrency,
+                    autoExpand,
+                    defaultCurrency,
                     nextTimeSequenceId: data.result.nextTimeSequenceId
                 });
-
-                if (reload) {
-                    if (transactionListStateInvalid.value) {
-                        updateTransactionListInvalidState(false);
-                    }
-                }
-
+                if (reload) updateTransactionListInvalidState(false);
                 resolve(transactionPageWrapper);
             }).catch(error => {
-                logger.error('failed to load transaction list', error);
-
-                if (reload) {
-                    loadTransactionList({
-                        transactionPageWrapper: EMPTY_TRANSACTION_RESULT,
-                        reload: reload,
-                        autoExpand: autoExpand,
-                        defaultCurrency: defaultCurrency
-                    });
-
-                    if (!transactionListStateInvalid.value) {
-                        updateTransactionListInvalidState(true);
-                    }
+                if (generation !== transactionLoadGeneration) {
+                    reject({ stale: true });
+                    return;
                 }
-
+                logger.error('failed to load transaction list', error);
+                updateTransactionListInvalidState(true);
                 if (error.response && error.response.data && error.response.data.errorMessage) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
@@ -939,12 +966,13 @@ export const useTransactionsStore = defineStore('transactions', () => {
         });
     }
 
-    function loadMonthlyAllTransactions({ year, month, mustHavePictures, withPictures, autoExpand, defaultCurrency, ledgerId }: { year: number, month: number, mustHavePictures?: boolean, withPictures?: boolean, autoExpand: boolean, defaultCurrency: string, ledgerId?: string }): Promise<TransactionPageWrapper> {
+    function loadMonthlyAllTransactions({ year, month, mustHavePictures, withPictures, autoExpand, defaultCurrency, ledgerId = '0' }: { year: number, month: number, mustHavePictures?: boolean, withPictures?: boolean, autoExpand: boolean, defaultCurrency: string, ledgerId?: string }): Promise<TransactionPageWrapper> {
+        const generation = beginTransactionLoad(ledgerId, true);
         return new Promise((resolve, reject) => {
             services.getAllTransactionsByMonth({
                 ledgerId,
-                year: year,
-                month: month,
+                year,
+                month,
                 type: transactionsFilter.value.type,
                 categoryIds: transactionsFilter.value.categoryIds,
                 accountIds: transactionsFilter.value.accountIds,
@@ -955,55 +983,30 @@ export const useTransactionsStore = defineStore('transactions', () => {
                 mustHavePictures: !!mustHavePictures,
                 withPictures: !!withPictures
             }).then(response => {
+                if (generation !== transactionLoadGeneration) {
+                    reject({ stale: true });
+                    return;
+                }
                 const data = response.data;
-
-                if (!data || !data.success || !data.result) {
-                    loadTransactionList({
-                        transactionPageWrapper: EMPTY_TRANSACTION_RESULT,
-                        reload: true,
-                        autoExpand: autoExpand,
-                        defaultCurrency: defaultCurrency
-                    });
-
-                    if (!transactionListStateInvalid.value) {
-                        updateTransactionListInvalidState(true);
-                    }
-
+                if (!data || !data.success || !data.result || !Array.isArray(data.result.items) || data.result.items.some(item => (item.ledgerId || '0') !== ledgerId)) {
+                    updateTransactionListInvalidState(true);
                     reject({ message: 'Unable to retrieve transaction list' });
                     return;
                 }
-
                 const transactionPageWrapper: TransactionPageWrapper = {
                     items: Transaction.ofMulti(data.result.items),
                     totalCount: data.result.totalCount
                 };
-
-                loadTransactionList({
-                    transactionPageWrapper: transactionPageWrapper,
-                    reload: true,
-                    autoExpand: autoExpand,
-                    defaultCurrency: defaultCurrency
-                });
-
-                if (transactionListStateInvalid.value) {
-                    updateTransactionListInvalidState(false);
-                }
-
+                loadTransactionList({ transactionPageWrapper, reload: true, autoExpand, defaultCurrency });
+                updateTransactionListInvalidState(false);
                 resolve(transactionPageWrapper);
             }).catch(error => {
-                logger.error('failed to load monthly all transaction list', error);
-
-                loadTransactionList({
-                    transactionPageWrapper: EMPTY_TRANSACTION_RESULT,
-                    reload: true,
-                    autoExpand: autoExpand,
-                    defaultCurrency: defaultCurrency
-                });
-
-                if (!transactionListStateInvalid.value) {
-                    updateTransactionListInvalidState(true);
+                if (generation !== transactionLoadGeneration) {
+                    reject({ stale: true });
+                    return;
                 }
-
+                logger.error('failed to load monthly all transaction list', error);
+                updateTransactionListInvalidState(true);
                 if (error.response && error.response.data && error.response.data.errorMessage) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
@@ -1056,7 +1059,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
         });
     }
 
-    function getTransaction({ transactionId, withPictures, ledgerId }: { transactionId: string, withPictures?: boolean, ledgerId?: string }): Promise<Transaction> {
+    function getTransaction({ transactionId, withPictures, ledgerId = '0' }: { transactionId: string, withPictures?: boolean, ledgerId?: string }): Promise<Transaction> {
         return new Promise((resolve, reject) => {
             if (!isDefined(withPictures)) {
                 withPictures = true;
@@ -1076,6 +1079,11 @@ export const useTransactionsStore = defineStore('transactions', () => {
 
                 const transaction = Transaction.of(data.result);
 
+                if ((data.result.ledgerId || '0') !== ledgerId || data.result.id !== transactionId) {
+                    reject({ message: '流水响应的账本归属不匹配，请重试' });
+                    return;
+                }
+
                 resolve(transaction);
             }).catch(error => {
                 logger.error('failed to load transaction info', error);
@@ -1091,76 +1099,141 @@ export const useTransactionsStore = defineStore('transactions', () => {
         });
     }
 
-    function saveTransaction({ transaction, defaultCurrency, isEdit, clientSessionId, ledgerId }: { transaction: Transaction, defaultCurrency: string, isEdit: boolean, clientSessionId: string, ledgerId?: string }): Promise<Transaction> {
-        return new Promise((resolve, reject) => {
-            let promise: ApiResponsePromise<TransactionInfoResponse>;
-
+    async function saveTransaction({ transaction, defaultCurrency, isEdit, clientSessionId, ledgerId = '0', persistCreate = false, retrySubmission, expectedDraftRevision, isActionCurrent }: { transaction: Transaction, defaultCurrency: string, isEdit: boolean, clientSessionId: string, ledgerId?: string, persistCreate?: boolean, retrySubmission?: PendingTransactionCreate, expectedDraftRevision?: string, isActionCurrent?: () => boolean }): Promise<Transaction> {
+        const identity = persistCreate ? getTransactionStateIdentity() : null;
+        const expectedUsername = persistCreate ? getCurrentUserInfo()?.username : undefined;
+        let preparedSubmission: PendingTransactionCreate | null = null;
+        const assertIdentity = () => {
+            if (persistCreate && (!identity || !isUserLogined() || !expectedUsername || identity !== getTransactionStateIdentity() || expectedUsername !== getCurrentUserInfo()?.username)) {
+                throw new Error('登录账号已变化，原记录已保留，请回原账号核对');
+            }
+        };
+        const assertActionCurrent = () => {
+            if (isActionCurrent && !isActionCurrent()) throw Object.assign(new Error('原页面已离开，请返回原账本重新核对；原请求仍保留'), { stale: true });
+        };
+        const bindOriginalDraft = (pending: PendingTransactionCreate, bind = true) => {
+            if (expectedDraftRevision === undefined || pending.receipt) return;
+            const draft = inspectUserTransactionDraft(ledgerId);
+            if (!draft || (draft.clientSessionId && draft.clientSessionId !== pending.clientSessionId) ||
+                (ledgerPendingDraftRevision(draft) !== expectedDraftRevision && !(draft.clientSessionId === pending.clientSessionId && ledgerPendingDraftRevision({ ...draft, clientSessionId: undefined }) === expectedDraftRevision))) {
+                throw new Error('原草稿已变化，请保留原请求并重新核验，不能提交替代内容');
+            }
+            if (bind && !draft.clientSessionId) updateUserTransactionDraft({ ...draft, clientSessionId: pending.clientSessionId }, ledgerId);
+        };
+        assertIdentity(); assertActionCurrent();
+        if (persistCreate && !isEdit) {
+            preparedSubmission = await withTransactionCreateLock(() => {
+                assertIdentity(); assertActionCurrent();
+                const existing = getPendingTransactionCreate(ledgerId);
+                if (existing) {
+                    if (!retrySubmission || existing.clientSessionId !== retrySubmission.clientSessionId) throw new Error('本账本已有原请求，请先核对原内容并明确重试；不会提交替代请求');
+                    validatePendingTransactionCreate(retrySubmission, ledgerId);
+                    if (JSON.stringify(retrySubmission.request) !== JSON.stringify(existing.request)) throw new Error('原请求内容已变化，请保留原记录后核对；不会提交替代请求');
+                    // A validated in-flight reply may precede a failed receipt
+                    // disk write. Preserve it rather than replaying its POST.
+                    if (retrySubmission?.receipt && retrySubmission.clientSessionId === existing.clientSessionId) {
+                        validatePendingTransactionCreate(retrySubmission, ledgerId);
+                        if (JSON.stringify(retrySubmission.request) !== JSON.stringify(existing.request) || (existing.receipt && existing.receipt.id !== retrySubmission.receipt.id)) throw new Error('原请求或创建回执不一致，请保留原记录后核对');
+                        const confirmed = { ...existing, receipt: retrySubmission.receipt };
+                        updateUserPendingTransactionCreate(confirmed, ledgerId);
+                        return confirmed;
+                    }
+                    bindOriginalDraft(existing);
+                    return JSON.parse(JSON.stringify(existing)) as PendingTransactionCreate;
+                }
+                const pending: PendingTransactionCreate = JSON.parse(JSON.stringify(retrySubmission ?? {
+                    clientSessionId,
+                    request: transaction.toCreateRequest(clientSessionId, ledgerId),
+                    pictures: transaction.pictures
+                }));
+                validatePendingTransactionCreate(pending, ledgerId);
+                bindOriginalDraft(pending, false);
+                updateUserPendingTransactionCreate(pending, ledgerId);
+                bindOriginalDraft(pending);
+                return getPendingTransactionCreate(ledgerId)!;
+            });
+        }
+        try {
+            assertIdentity(); assertActionCurrent();
             if (transaction.type !== TransactionType.Expense &&
                 transaction.type !== TransactionType.Income &&
                 transaction.type !== TransactionType.Transfer &&
                 transaction.type !== TransactionType.ModifyBalance) {
-                reject({ message: 'An error occurred' });
-                return;
+                throw new Error('An error occurred');
             } else if (!isEdit && transaction.type === TransactionType.ModifyBalance) {
-                reject({ message: 'An error occurred' });
-                return;
+                throw new Error('An error occurred');
             }
-
-            if (!isEdit) {
-                promise = services.addTransaction(transaction.toCreateRequest(clientSessionId, ledgerId));
+            let response;
+            const knownReceipt = preparedSubmission?.receipt;
+            if (knownReceipt) {
+                // A known write is never replayed. A deleted/inaccessible row or
+                // incomplete attachment response leaves the receipt recoverable.
+                response = await services.getTransaction({ id: knownReceipt.id, ledgerId, withPictures: true, expectedUsername, ignoreError: true });
+            } else if (!isEdit) {
+                response = await services.addTransaction(preparedSubmission?.request ?? transaction.toCreateRequest(clientSessionId, ledgerId), expectedUsername);
             } else {
-                promise = services.modifyTransaction(transaction.toModifyRequest(ledgerId));
+                response = await services.modifyTransaction(transaction.toModifyRequest(ledgerId), expectedUsername);
             }
-
-            promise.then(response => {
-                const data = response.data;
-
-                if (!data || !data.success || !data.result) {
-                    if (!isEdit) {
-                        reject({ message: 'Unable to add transaction' });
-                    } else {
-                        reject({ message: 'Unable to save transaction' });
-                    }
-                }
-
-                const transaction = Transaction.of(data.result);
-
-                if (!isEdit) {
-                    if (!transactionListStateInvalid.value) {
-                        updateTransactionListInvalidState(true);
-                    }
-                } else {
-                    updateTransactionInTransactionList({
-                        currentTransaction: transaction,
-                        defaultCurrency: defaultCurrency
+            assertIdentity();
+            const data = response.data;
+            if (!data?.success || !data.result) throw new Error(knownReceipt ? '原流水尚未完整读取；创建回执已保留，不会再次新增' : !isEdit ? 'Unable to add transaction' : 'Unable to save transaction');
+            if (preparedSubmission) {
+                assertTransactionSubmissionResponse(data.result, ledgerId, knownReceipt?.id, knownReceipt ? undefined : preparedSubmission.request);
+                if (!knownReceipt) {
+                    const receipt = { id: data.result.id };
+                    await withTransactionCreateLock(() => {
+                        assertIdentity();
+                        const current = getPendingTransactionCreate(ledgerId);
+                        if (current && current.clientSessionId !== preparedSubmission!.clientSessionId) throw new Error('另一页面已开始其他原请求，请保留当前回执后重新读取');
+                        if (current?.receipt && current.receipt.id !== receipt.id) throw new Error('原创建回执不一致，请保留原记录后核对');
+                        // Keep the in-flight receipt even if cleanup in another
+                        // tab removed the journal before this response arrived.
+                        preparedSubmission = { ...preparedSubmission!, receipt };
+                        updateUserPendingTransactionCreate({ ...(current ?? preparedSubmission!), receipt }, ledgerId);
                     });
                 }
-
-                updateStoreInvalidState({
-                    reconciliationStatement: true,
-                    accountList: true,
-                    overview: true,
-                    statistics: true,
-                    explorer: true
-                });
-
-                resolve(transaction);
-            }).catch(error => {
-                logger.error('failed to save transaction', error);
-
-                if (error.response && error.response.data && error.response.data.errorMessage) {
-                    reject({ error: error.response.data });
-                } else if (!error.processed) {
-                    if (!isEdit) {
-                        reject({ message: 'Unable to add transaction' });
-                    } else {
-                        reject({ message: 'Unable to save transaction' });
-                    }
-                } else {
-                    reject(error);
+                assertIdentity();
+                assertTransactionSubmissionPictures(data.result, preparedSubmission.request);
+            } else {
+                if (typeof data.result.id !== 'string' || !/^[1-9]\d*$/.test(data.result.id) ||
+                    (data.result.ledgerId ?? '0') !== ledgerId || !Number.isSafeInteger(data.result.time) ||
+                    !Number.isSafeInteger(data.result.sourceAmount) || !Number.isSafeInteger(data.result.destinationAmount ?? 0) ||
+                    typeof data.result.sourceAccountId !== 'string' || (data.result.destinationAccountId !== undefined && typeof data.result.destinationAccountId !== 'string') ||
+                    !Array.isArray(data.result.tagIds)) {
+                    throw new Error('保存结果的账本不匹配，原记录已保留，请重试核对');
                 }
+            }
+            const saved = Transaction.of(data.result);
+            saved.submissionClientSessionId = preparedSubmission?.clientSessionId;
+
+            if (!isEdit) {
+                if (!transactionListStateInvalid.value) {
+                    updateTransactionListInvalidState(true);
+                }
+            } else if (transactionListLedgerId.value === ledgerId) {
+                updateTransactionInTransactionList({
+                    currentTransaction: saved,
+                    defaultCurrency: defaultCurrency
+                });
+            }
+
+            updateStoreInvalidState({
+                reconciliationStatement: true,
+                accountList: true,
+                overview: true,
+                statistics: true,
+                explorer: true
             });
-        });
+
+            return saved;
+        } catch (error) {
+            if (persistCreate) logger.warn('transaction write failed; original request retained');
+            else logger.error('failed to save transaction', error);
+            const failure = error as { response?: { data?: { errorMessage?: string; errorCode?: number } }; processed?: boolean; message?: string; stale?: boolean };
+            const safe = failure.response?.data?.errorMessage ? { error: { errorMessage: failure.response.data.errorMessage, errorCode: failure.response.data.errorCode } }
+                : { message: error instanceof Error ? error.message : !isEdit ? 'Unable to add transaction' : 'Unable to save transaction', processed: failure.processed, stale: failure.stale };
+            throw preparedSubmission ? { ...safe, submission: preparedSubmission } : safe;
+        }
     }
 
     function batchUpdateTransactionCategories({ transactionIds, categoryId }: { transactionIds: string[], categoryId: string }): Promise<boolean> {
@@ -1357,31 +1430,34 @@ export const useTransactionsStore = defineStore('transactions', () => {
         });
     }
 
-    function deleteTransaction({ transaction, defaultCurrency, beforeResolve, ledgerId }: { transaction: TransactionInfoResponse, defaultCurrency: string, beforeResolve?: BeforeResolveFunction, ledgerId?: string }): Promise<boolean> {
+    function deleteTransaction({ transaction, defaultCurrency, beforeResolve, ledgerId, expectedUsername }: { transaction: TransactionInfoResponse, defaultCurrency: string, beforeResolve?: BeforeResolveFunction, ledgerId?: string, expectedUsername?: string }): Promise<boolean> {
         return new Promise((resolve, reject) => {
             services.deleteTransaction({
                 id: transaction.id,
                 ledgerId
-            }).then(response => {
+            }, expectedUsername).then(response => {
                 const data = response.data;
+
+                if (expectedUsername && getCurrentUserInfo()?.username !== expectedUsername) {
+                    reject({ stale: true, message: '账号已变化，请返回原账号核对删除结果' });
+                    return;
+                }
 
                 if (!data || !data.success || !data.result) {
                     reject({ message: 'Unable to delete this transaction' });
                     return;
                 }
 
+                const removeFromCurrentList = () => {
+                    if (transactionListLedgerId.value !== (ledgerId || '0')) return;
+                    removeTransactionFromTransactionList({ currentTransaction: transaction, defaultCurrency });
+                };
                 if (beforeResolve) {
                     beforeResolve(() => {
-                        removeTransactionFromTransactionList({
-                            currentTransaction: transaction,
-                            defaultCurrency: defaultCurrency
-                        });
+                        removeFromCurrentList();
                     });
                 } else {
-                    removeTransactionFromTransactionList({
-                        currentTransaction: transaction,
-                        defaultCurrency: defaultCurrency
-                    });
+                    removeFromCurrentList();
                 }
 
                 updateStoreInvalidState({
@@ -1694,6 +1770,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
         transactionsFilter,
         transactions,
         transactionsNextTimeId,
+        transactionListLedgerId,
         transactionListStateInvalid,
         transactionReconciliationStatementStateInvalid,
         // computed states
@@ -1710,6 +1787,8 @@ export const useTransactionsStore = defineStore('transactions', () => {
         isTransactionDraftModified,
         saveTransactionDraft,
         clearTransactionDraft,
+        getPendingTransactionCreate,
+        acknowledgePendingTransactionCreate,
         setTransactionSuitableDestinationAmount,
         updateTransactionListInvalidState,
         updateTransactionReconciliationStatementInvalidState,

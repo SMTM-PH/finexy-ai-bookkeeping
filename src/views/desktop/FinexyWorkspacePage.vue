@@ -1,5 +1,5 @@
 <template>
-    <div class="workspace">
+    <div class="workspace" :class="{ 'activity-workspace': pageKey === 'activity', 'accounts-workspace': pageKey === 'manage', 'periodic-workspace': pageKey === 'program' || pageKey === 'templates' }">
         <div class="shell">
             <header class="topbar">
                 <router-link class="brand" to="/"
@@ -16,11 +16,13 @@
                 </nav>
                 <div class="top-actions">
                     <GlobalLedgerSwitcher
+                        v-if="!routeOpeningBusy && (!routeOpeningError || routeSelectionVerified)"
                         :ledgers="ledgersStore.allLedgers"
                         :selected-id="selectedLedgerId"
-                        :disabled="busy || ledgersStore.featureDisabled"
+                        :disabled="busy || ledgersStore.featureDisabled || !!routeOpeningError"
                         @select="changeSelectedLedger"
                     />
+                    <span v-else class="scope-notice" role="status">账本待核验</span>
                     <button
                         class="icon-btn"
                         aria-label="搜索"
@@ -31,9 +33,11 @@
                     <button
                         class="icon-btn"
                         aria-label="通知"
-                        @click="showToast('目前没有需要立即处理的通知')"
+                        :aria-expanded="pendingDialogOpen"
+                        :disabled="routeOpeningBusy || !!routeOpeningError"
+                        @click="pendingDialogOpen = true"
                     >
-                        <v-icon :icon="mdiBellOutline" size="17" /><i></i>
+                        <v-icon :icon="mdiBellOutline" size="17" />
                     </button>
                     <router-link class="icon-btn" to="/about" aria-label="帮助"
                         ><v-icon :icon="mdiHelpCircleOutline" size="17"
@@ -146,15 +150,14 @@
                             <h1>{{ config.title }}</h1>
                             <span>{{ config.description }}</span>
                         </div>
-                        <div>
+                        <div v-if="pageKey !== 'reports'">
                             <template v-if="pageKey === 'activity' && selectedLedgerCanWrite && isDataImportingEnabled()">
-                                <button class="secondary" :disabled="busy" @click="importStatement('alipay_app_csv')">导入支付宝</button>
-                                <button class="secondary" :disabled="busy" @click="importStatement('wechat_pay_app')">导入微信</button>
+                                <button class="secondary" :disabled="busy || routeOpeningBusy || !!routeOpeningError" @click="importStatement()">导入账单</button>
                             </template>
                             <button
                                 v-if="pageKey !== 'rates'"
                                 class="secondary"
-                                :disabled="busy"
+                                :disabled="busy || routeOpeningBusy || !!routeOpeningError"
                                 @click="refresh"
                             >
                                 <v-icon
@@ -164,7 +167,7 @@
                                 />刷新</button
                             ><button
                                 class="primary"
-                                :disabled="busy"
+                                :disabled="busy || routeOpeningBusy || !!routeOpeningError || (!selectedLedgerCanManage && ['program', 'templates'].includes(pageKey))"
                                 @click="primaryAction"
                             >
                                 <v-icon :icon="primaryActionIcon" size="16" />{{
@@ -174,7 +177,19 @@
                         </div>
                     </header>
 
-                    <section class="metrics">
+                    <p v-if="routeOpeningBusy" class="scope-notice" role="status">正在核验原入口与当前账本…</p>
+                    <section v-if="routeOpeningError" class="pending-route-error page-data-error" role="alert" data-testid="ledger-route-error">
+                        <p>{{ routeOpeningError }}</p>
+                        <div><button class="secondary" type="button" @click="initializePageFromRoute(false)">重试打开原入口</button><router-link class="secondary" to="/">返回总览</router-link></div>
+                    </section>
+                    <template v-if="!routeOpeningBusy && !routeOpeningError">
+                    <p v-if="pageDataError" class="page-data-error" role="alert">{{ pageDataError }} <button class="secondary" type="button" @click="refresh">重试读取</button></p>
+                    <p v-if="serverInfoError && ['about', 'settings', 'account'].includes(pageKey)" class="page-data-error" role="alert">{{ serverInfoError }} <button class="secondary" type="button" @click="refresh">重试读取版本</button></p>
+                    <p v-if="['program', 'templates'].includes(pageKey)" class="scope-notice" role="status">正在查看「{{ selectedLedgerName }}」。所有者和管理员可管理模板；可记账成员可确认、忽略和恢复到期记录，只读成员可查看。到期不会自动改变余额。</p>
+                    <label v-if="pageKey === 'activity'" class="summary-currency">收支小计币种<select v-model="summaryCurrency" aria-label="收支小计币种"><option v-for="code in summaryCurrencies" :key="code" :value="code">{{ code }}</option></select><span>同币种小计，其他币种不折算；列表保留原币种。</span></label>
+                    <p v-if="pageKey === 'activity' && currentLedgerMonthSummary.unresolvedCount" class="scope-notice" role="status">{{ currentLedgerMonthSummary.unresolvedCount }} 笔本月收支缺少有效账户币种或金额，当前小计未完整计算。</p>
+
+                    <section v-if="pageKey !== 'reports'" class="metrics">
                         <article
                             v-for="(metric, index) in config.metrics"
                             :key="metric.label"
@@ -196,14 +211,16 @@
                     <section v-if="pageKey === 'activity'" class="panel">
                         <PanelHead eyebrow="TRANSACTIONS" title="全部流水"
                             ><div class="head-actions">
+                                <button v-if="selectedLedgerCanWrite" type="button" @click="openAISource">AI 文字 / 票据</button>
                                 <button
                                     class="pending-filter"
                                     :class="{ active: query === '待确认' }"
-                                    :disabled="!aiReviewItemsStore.items.length"
+                                    :disabled="aiReviewItemsStore.loading"
                                     @click="togglePendingFilter"
                                 >
-                                    待确认 {{ aiReviewItemsStore.items.length }}
+                                    账本待复核 {{ aiQueueStatus === 1 && aiReviewItemsStore.loaded ? aiReviewItemsStore.items.length : '—' }}
                                 </button>
+                                <button class="pending-filter" :class="{ active: aiQueueStatus === 3 }" :disabled="aiReviewItemsStore.loading" @click="showIgnoredAIReviews">已忽略的 AI 条目</button>
                                 <button
                                     :class="{ active: filterOpen }"
                                     @click="filterOpen = !filterOpen"
@@ -233,21 +250,46 @@
                                 >账户<select v-model="accountFilter">
                                     <option value="all">全部账户</option>
                                     <option
-                                        v-for="name in transactionAccounts"
-                                        :key="name"
-                                        :value="name"
+                                        v-for="account in transactionAccounts"
+                                        :key="account.id"
+                                        :value="account.id"
                                     >
-                                        {{ name }}
+                                        {{ account.name }} · {{ account.currency }}
                                     </option>
                                 </select></label
                             ><label
-                                >月份<input
+                                >日期范围<select v-model.number="dateFilter" aria-label="日期范围" @change="updateDateFilterRoute">
+                                    <option :value="0">全部日期</option>
+                                    <option :value="7">本月</option>
+                                    <option :value="8">上月</option>
+                                    <option :value="9">本年</option>
+                                    <option :value="4">近 30 天</option>
+                                    <option v-if="![0,7,8,9,4].includes(dateFilter)" :value="dateFilter">{{ tt(DateRange.valueOf(dateFilter)?.name || 'Custom Date') }}</option>
+                                </select></label
+                            ><label
+                                >指定月份<input
                                     v-model="monthFilter"
-                                    type="month" /></label
+                                    type="month" @change="selectTransactionMonth" /></label
                             ><button @click="resetFilters">清除筛选</button>
                         </div>
-                        <div class="table-wrap">
-                            <table>
+                        <p class="transaction-range" role="status">{{ monthFilter || tt(DateRange.valueOf(dateFilter)?.name || 'All') }} · {{ filteredTransactions.length }} 笔<button v-if="dateFilter !== 0 || monthFilter" type="button" @click="showAllTransactionDates">查看全部日期</button></p>
+                        <p v-if="aiReviewItemsStore.errorMessage" class="transaction-range" role="alert">{{ aiReviewItemsStore.errorMessage }}<button type="button" @click="reloadAIQueue">重试读取 AI 队列</button></p>
+                        <p v-if="aiRecoveryError" class="transaction-range" role="alert">{{ aiRecoveryError }}<button type="button" @click="refreshAIRecovery">重新核验本机状态</button></p>
+                        <p v-if="aiRecoveryId" class="transaction-range" role="status">{{ aiRecoveryIsPending ? '原账本有入账结果待核对' : '原账本有已保存 AI 草稿' }}<button type="button" @click="openAIReview(aiRecoveryId)">恢复原条目</button></p>
+                        <p v-if="aiSourceRecovery" class="transaction-range" role="status">本账本有 AI 来源草稿或待核对保存结果<button type="button" @click="openAISource">恢复 AI 来源</button></p>
+                        <p v-if="transactionLoadError" role="alert" class="transaction-range">{{ transactionLoadError }}<button type="button" @click="refresh">重试</button></p>
+                        <div class="table-wrap transaction-table-wrap">
+                            <table class="transaction-table">
+                                <colgroup>
+                                    <col class="transaction-check-col" />
+                                    <col class="transaction-name-col" />
+                                    <col class="transaction-amount-col" />
+                                    <col class="transaction-date-col" />
+                                    <col class="transaction-kind-col" />
+                                    <col class="transaction-category-col" />
+                                    <col class="transaction-account-col" />
+                                    <col class="transaction-status-col" />
+                                </colgroup>
                                 <thead>
                                     <tr>
                                         <th>
@@ -259,35 +301,38 @@
                                             />
                                         </th>
                                         <th>交易</th>
+                                        <th class="right">金额</th>
+                                        <th>日期</th>
                                         <th>类型</th>
                                         <th>分类</th>
                                         <th>账户</th>
-                                        <th>日期</th>
                                         <th>状态</th>
-                                        <th class="right">金额</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     <tr
                                         v-for="item in pagedTransactions"
-                                        :key="`${item.title}-${item.date}`"
+                                        :key="item.id || `${item.title}-${item.date}`"
                                         :class="{ compact }"
+                                        tabindex="0"
                                         @click="openDetail(item)"
+                                        @keydown.enter.self="openDetail(item)"
                                     >
                                         <td @click.stop>
                                             <input
                                                 v-model="item.selected"
                                                 type="checkbox"
+                                                :aria-label="`选择交易：${item.title}`"
                                             />
                                         </td>
-                                        <td><ItemName :item="item" /></td>
-                                        <td>{{ item.kind }}</td>
-                                        <td>{{ item.category }}</td>
-                                        <td>{{ item.account }}</td>
-                                        <td>{{ item.date }}</td>
-                                        <td><StatusPill :item="item" /></td>
+                                        <td class="transaction-name-cell">
+                                            <span class="transaction-name">
+                                                <i aria-hidden="true" :style="{ background: item.color }">{{ item.icon }}</i>
+                                                <span><b :title="item.title">{{ item.title }}</b><small :title="item.meta">{{ item.meta }}</small></span>
+                                            </span>
+                                        </td>
                                         <td
-                                            class="right amount"
+                                            class="right amount transaction-amount-cell"
                                             :class="{
                                                 income: item.amount.startsWith(
                                                     '+',
@@ -296,10 +341,16 @@
                                         >
                                             {{ item.amount }}
                                         </td>
+                                        <td class="transaction-date-cell">{{ item.date }}</td>
+                                        <td>{{ item.kind }}</td>
+                                        <td><span class="transaction-cell-label" :title="String(item.category || '')">{{ item.category }}</span></td>
+                                        <td><span class="transaction-cell-label" :title="item.account">{{ item.account }}</span></td>
+                                        <td><StatusPill :item="item" /></td>
                                     </tr>
                                     <tr v-if="!pagedTransactions.length">
                                         <td class="empty-row" colspan="8">
-                                            没有符合当前条件的流水
+                                            {{ busy ? '正在读取当前账本流水…' : transactionLoadError ? '流水尚未成功读取' : '没有符合当前条件的流水' }}
+                                            <button v-if="!busy && (dateFilter !== 0 || monthFilter)" type="button" @click="showAllTransactionDates">查看全部日期</button>
                                         </td>
                                     </tr>
                                 </tbody>
@@ -329,29 +380,49 @@
 
                     <section
                         v-else-if="pageKey === 'manage'"
-                        class="account-layout"
+                        class="account-layout account-browser"
                     >
                         <div class="account-cards">
-                            <article
-                                v-for="(item, index) in accounts"
-                                :key="item.title"
-                                :class="[
-                                    `tone-${index}`,
-                                    {
-                                        selected:
-                                            selectedAccount?.title === item.title,
-                                    },
-                                ]"
-                                tabindex="0"
-                                @click="selectedAccount = item"
-                                @keyup.enter="selectedAccount = item"
-                            >
-                                <i>{{ item.icon }}</i
-                                ><b>{{ item.title }}</b
-                                ><small>{{ item.meta }}</small
-                                ><strong>{{ item.amount }}</strong
-                                ><em>{{ item.status }}</em>
-                            </article>
+                            <header class="account-browser-head">
+                                <div><h2>全部账户</h2><p role="status">显示 {{ filteredAccounts.length }} / {{ accounts.length }} 个账户</p></div>
+                                <button v-if="accountSearch || accountCategoryFilter || accountVisibilityFilter || accountCurrencyFilter" type="button" class="text-btn" @click="resetAccountFilters">清除筛选</button>
+                            </header>
+                            <div class="account-search-row">
+                                <label class="account-search"><span>搜索账户</span><div><v-icon :icon="mdiMagnify" size="20" /><input v-model="accountSearch" type="search" placeholder="账户名称或备注" /></div></label>
+                                <label><span>账户类型</span><select v-model="accountCategoryFilter" aria-label="账户类型"><option value="">全部类型</option><option v-for="category in accountCategoryOptions" :key="category.type" :value="String(category.type)">{{ category.name }}</option></select></label>
+                                <label><span>币种</span><select v-model="accountCurrencyFilter" aria-label="币种"><option value="">全部币种</option><option v-for="currency in accountCurrencies" :key="currency" :value="currency">{{ currency }}</option></select></label>
+                                <label><span>状态</span><select v-model="accountVisibilityFilter" aria-label="状态"><option value="">全部状态</option><option value="visible">可见账户</option><option value="hidden">已隐藏</option></select></label>
+                            </div>
+                            <div v-if="selectedAccount" class="account-card-navigation">
+                                <label><span>选择账户</span><select v-model="selectedAccountPickerId" aria-label="选择账户"><optgroup v-for="group in accountGroups" :key="group.category" :label="group.name"><option v-for="item in group.items" :key="item.id" :value="item.id">{{ item.title }} · {{ item.raw.currency }}{{ item.hidden ? ' · 已隐藏' : '' }}</option></optgroup></select></label>
+                                <div class="account-card-pager">
+                                    <button type="button" aria-label="上一张账户卡片" :disabled="selectedAccountIndex <= 0" @click="navigateAccount(-1)"><v-icon :icon="mdiChevronLeft" size="20" /></button>
+                                    <span role="status" aria-live="polite">{{ selectedAccountIndex + 1 }} / {{ filteredAccounts.length }}</span>
+                                    <button type="button" aria-label="下一张账户卡片" :disabled="selectedAccountIndex >= filteredAccounts.length - 1" @click="navigateAccount(1)"><v-icon :icon="mdiChevronRight" size="20" /></button>
+                                </div>
+                            </div>
+                            <div v-if="selectedAccount" class="account-wallet-showcase">
+                                <AccountWalletStack :accounts="filteredAccounts.map(item => item.raw)" :selected-id="selectedAccount.id" @select="id => selectedAccountPickerId = id" />
+                                <AccountCardDesigner :account="selectedAccount.raw" :ledger-id="selectedLedgerId" :category-name="selectedAccount.categoryName" :balance-label="selectedAccount.balanceLabel" :display-amount="selectedAccount.displayAmount" :hidden="selectedAccount.hidden" :parent-name="selectedAccount.parentName" @navigate="navigateAccount" />
+                            </div>
+                            <details v-if="accountBalanceSummaries.length" class="account-balance-disclosure">
+                                <summary>账本余额汇总 <span>{{ accountBalanceSummaries.length }} 种币种</span></summary>
+                            <div class="account-balance-overview">
+                                <p>当前账本余额 · 仅可见账户，按币种分别统计</p>
+                                <div v-for="summary in accountBalanceSummaries" :key="summary.currency" class="account-summary-row" :data-currency="summary.currency">
+                                    <b>{{ summary.currency }}</b>
+                                    <div><small>资产余额</small><strong>{{ formatAmountToLocalizedNumeralsWithCurrency(summary.assets, summary.currency) }}</strong></div>
+                                    <div><small>净负债</small><strong>{{ formatAmountToLocalizedNumeralsWithCurrency(summary.liabilities, summary.currency) }}</strong></div>
+                                    <div><small>净余额</small><strong>{{ formatAmountToLocalizedNumeralsWithCurrency(summary.net, summary.currency) }}</strong></div>
+                                </div>
+                                <small class="account-summary-note">净负债已抵减溢缴款；账户列表筛选不影响账本汇总。</small>
+                            </div>
+                            </details>
+                            <div v-if="!filteredAccounts.length" class="account-list-empty">
+                                <h3>{{ busy ? '正在读取账户' : accounts.length ? '没有符合筛选的账户' : '还没有账户' }}</h3>
+                                <p>{{ accounts.length ? '试试其他名称、类型或状态。' : '添加账户后，在这里统一查看余额与待还款。' }}</p>
+                                <button v-if="accounts.length" type="button" @click="resetAccountFilters">清除筛选</button>
+                            </div>
                         </div>
                         <aside v-if="selectedAccount" class="panel account-detail">
                             <PanelHead
@@ -359,13 +430,15 @@
                                 title="账户详情"
                             />
                             <h2>{{ selectedAccount.title }}</h2>
-                            <p>{{ selectedAccount.meta }}</p>
+                            <p>{{ selectedAccount.categoryName }} · {{ selectedAccount.raw.currency }}</p>
                             <div class="balance">
-                                <small>可用余额</small
-                                ><strong>{{ selectedAccount.amount }}</strong>
+                                <small>{{ selectedAccount.balanceLabel }}</small
+                                ><strong>{{ selectedAccount.displayAmount }}</strong>
                             </div>
+                            <dl class="account-detail-facts"><div><dt>状态</dt><dd>{{ selectedAccount.status }}</dd></div><div v-if="selectedAccount.parentName"><dt>所属账户</dt><dd>{{ selectedAccount.parentName }}</dd></div></dl>
+                            <div class="account-detail-note"><h3>账户备注</h3><p>{{ selectedAccount.raw.comment || '未填写备注' }}</p></div>
                             <div class="split-buttons">
-                                <router-link to="/transaction/list"
+                                <router-link :to="{ path: '/transaction/list', query: { accountIds: selectedAccount.id } }"
                                     >查看流水</router-link
                                 ><button @click="editAccount">编辑账户</button>
                                 <button @click="openAccountLedgerEditor">迁移到账本</button>
@@ -373,9 +446,9 @@
                         </aside>
                         <aside v-else class="panel account-detail empty-state">
                             <PanelHead eyebrow="CURRENT ACCOUNT" title="账户详情" />
-                            <h2>还没有账户</h2>
-                            <p>添加第一个真实账户后，余额和账户详情会显示在这里。</p>
-                            <button class="primary" type="button" @click="primaryAction">添加账户</button>
+                            <h2>{{ busy ? '正在读取账户' : accounts.length ? '选择账户查看详情' : '还没有账户' }}</h2>
+                            <p>{{ busy ? '账户加载完成后，余额和详情会显示在这里。' : accounts.length ? '调整筛选后，点击账户查看余额、备注和流水。' : '添加第一个账户后，余额和账户详情会显示在这里。' }}</p>
+                            <button v-if="!busy && !accounts.length" class="primary" type="button" @click="primaryAction">添加账户</button>
                         </aside>
                     </section>
 
@@ -384,7 +457,10 @@
                         class="two-col program"
                     >
                         <div class="panel">
-                            <PanelHead eyebrow="AUTOMATION" title="周期计划"
+                            <monthly-budget-panel :ledger-id="selectedLedgerId" :ledger-name="selectedLedgerName" />
+                            <p v-if="busy" class="empty-copy" role="status">正在读取当前账本周期计划…</p>
+                            <template v-if="pageDataReady && !pageDataError">
+                            <PanelHead eyebrow="AUTOMATION" title="账本周期计划"
                                 ><button
                                     class="text-btn"
                                     @click="toggleScheduleSort"
@@ -396,29 +472,6 @@
                                     }}
                                 </button></PanelHead
                             >
-                            <section class="budget-editor" aria-labelledby="monthly-budget-title">
-                                <header>
-                                    <div><small>MONTHLY BUDGET</small><b id="monthly-budget-title">每月支出限额</b></div>
-                                    <span>{{ budgetMonthLabel }}</span>
-                                </header>
-                                <label>本月支出总额度
-                                    <span class="money-input"><b>{{ userStore.currentUserDefaultCurrency || "CNY" }}</b><input v-model.trim="budgetTotalInput" inputmode="decimal" placeholder="例如 5000" /></span>
-                                </label>
-                                <details>
-                                    <summary>按支出分类设置额度（可选）</summary>
-                                    <p>分类额度用于单独提醒，不会自动加总或替代本月总额度。</p>
-                                    <div class="category-budget-list">
-                                        <label v-for="category in budgetCategories" :key="category.id">
-                                            <span>{{ category.name }}<small>{{ category.parentName }}</small></span>
-                                            <span class="money-input compact"><b>{{ userStore.currentUserDefaultCurrency || "CNY" }}</b><input :value="budgetCategoryInputs[category.id] || ''" inputmode="decimal" placeholder="不限制" @input="setBudgetCategoryInput(category.id, $event)" /></span>
-                                        </label>
-                                    </div>
-                                </details>
-                                <footer>
-                                    <button v-if="currentBudget" class="text-btn danger" type="button" :disabled="budgetSaving" @click="removeBudget">清除本月限额</button>
-                                    <button class="primary" type="button" :disabled="budgetSaving || !validBudgetTotal" @click="saveBudget">{{ budgetSaving ? "保存中" : "保存额度" }}</button>
-                                </footer>
-                            </section>
                             <div
                                 v-if="pendingOccurrences.length || dismissedOccurrences.length"
                                 class="review-block"
@@ -433,6 +486,8 @@
                                     v-for="item in pendingOccurrences"
                                     :key="`${item.templateId}-${item.scheduledUnixTime}`"
                                     class="schedule-row occurrence-row"
+                                    :data-pending-occurrence="`${item.templateId}:${item.scheduledUnixTime}`"
+                                    tabindex="-1"
                                 >
                                     <time
                                         ><b>{{ occurrenceDayLabel(item) }}</b
@@ -449,10 +504,11 @@
                                     ><strong>{{
                                         occurrenceAmountLabel(item)
                                     }}</strong>
-                                    <div class="row-actions">
+                                    <div v-if="selectedLedgerCanWrite" class="row-actions">
                                         <button
                                             class="text-btn"
                                             :aria-label="`确认入账：${item.name || '周期计划'}`"
+                                            :disabled="busy"
                                             @click="confirmOccurrence(item)"
                                         >
                                             确认入账
@@ -460,6 +516,7 @@
                                         <button
                                             class="text-btn danger"
                                             :aria-label="`忽略：${item.name || '周期计划'}`"
+                                            :disabled="busy"
                                             @click="dismissOccurrence(item)"
                                         >
                                             忽略
@@ -488,10 +545,11 @@
                                     ><strong>{{
                                         occurrenceAmountLabel(item)
                                     }}</strong>
-                                    <div class="row-actions">
+                                    <div v-if="selectedLedgerCanWrite" class="row-actions">
                                         <button
                                             class="text-btn"
                                             :aria-label="`恢复：${item.name || '周期计划'}`"
+                                            :disabled="busy"
                                             @click="restoreOccurrence(item)"
                                         >
                                             恢复
@@ -517,28 +575,31 @@
                                     ><b>{{ item.title }}</b
                                     ><small>{{ item.frequency }} · {{ item.meta }}</small></span
                                 ><strong>{{ item.amount }}</strong
-                                ><div class="schedule-controls">
+                                ><div v-if="selectedLedgerCanManage && item.raw.editable" class="schedule-controls">
                                     <button
                                         class="text-btn"
                                         type="button"
                                         :aria-label="`编辑计划：${item.title}`"
+                                        :disabled="busy"
                                         @click="editSchedule(item)"
                                     >编辑</button>
                                     <SwitchControl
                                         :model-value="item.enabled"
                                         :label="`启用${item.title}`"
+                                        :disabled="busy"
                                         @update:model-value="toggleSchedule(item, $event)"
                                     />
                                 </div>
                             </article>
                             <p v-if="!sortedSchedules.length" class="empty-copy">
-                                还没有周期计划。创建计划后，执行日期会显示在日历中。
+                                还没有周期计划。创建计划后，到期日期会显示在日历中。
                             </p>
+                            </template>
                         </div>
-                        <div class="panel calendar">
+                        <div v-if="pageDataReady && !pageDataError" class="panel calendar">
                             <PanelHead
                                 :eyebrow="calendarEyebrow"
-                                title="执行日历"
+                                title="到期日历"
                                 ><div class="month-buttons">
                                     <button
                                         aria-label="上个月"
@@ -595,7 +656,7 @@
                                     >{{
                                         scheduleDays.length
                                     }}
-                                    项计划待执行</span
+                                    天有计划</span
                                 ><b>{{ scheduleTotal }}</b>
                             </div>
                             <section
@@ -640,65 +701,9 @@
                         </div>
                     </section>
 
-                    <section
-                        v-else-if="pageKey === 'reports'"
-                        class="report-layout"
-                    >
-                        <div class="panel">
-                            <PanelHead
-                                eyebrow="INCOME & EXPENSE"
-                                title="收支趋势"
-                                ><select v-model="reportPeriod" class="period" aria-label="选择报表日期范围">
-                                    <option>近 6 个月</option>
-                                    <option>今年</option>
-                                    <option>近 12 个月</option>
-                                </select></PanelHead
-                            >
-                            <div class="legend">
-                                <span><i></i>收入</span><span><i></i>支出</span>
-                            </div>
-                            <div v-if="reportBars.length" class="chart" role="img" :aria-label="`${reportPeriod}收入与支出趋势`">
-                                <div
-                                    v-for="line in 5"
-                                    :key="line"
-                                    class="gridline"
-                                    :style="{ bottom: `${line * 17}%` }"
-                                ></div>
-                                <div
-                                    v-for="bars in reportBars"
-                                    :key="bars.label"
-                                    class="bar"
-                                >
-                                    <i
-                                        :style="{ height: `${bars.income}%` }"
-                                    ></i
-                                    ><i
-                                        :style="{ height: `${bars.expense}%` }"
-                                    ></i
-                                    ><span>{{ bars.label }}</span>
-                                </div>
-                            </div>
-                            <p v-else class="empty-copy">暂无收支数据，记录流水后会自动生成趋势。</p>
-                        </div>
-                        <aside class="panel breakdown">
-                            <PanelHead eyebrow="BREAKDOWN" title="支出构成" />
-                            <div class="donut">
-                                <span><b>{{ formatBookkeepingMoney(reportExpenseTotal) }}</b><small>本月总支出</small></span>
-                            </div>
-                            <ul>
-                                <li
-                                    v-for="item in expenseBreakdown"
-                                    :key="item.title"
-                                >
-                                    <i :style="{ background: item.color }"></i
-                                    ><span>{{ item.title }}</span
-                                    ><b>{{ item.percent }}%</b>
-                                </li>
-                                <li v-if="!expenseBreakdown.length" class="breakdown-empty">
-                                    暂无支出分类数据
-                                </li>
-                            </ul>
-                        </aside>
+                    <section v-else-if="pageKey === 'reports'" class="ledger-report-workspace">
+                        <LedgerReportPanel v-if="pageDataReady && !pageDataError" />
+                        <p v-else-if="busy" class="scope-notice" role="status">正在核验当前账本与访问权限…</p>
                     </section>
 
                     <section
@@ -716,7 +721,7 @@
                                     active: selectedSetting === item.title,
                                 }"
                                 :aria-current="selectedSetting === item.title ? 'page' : undefined"
-                                @click="selectedSetting = item.title"
+                                @click="selectSetting(item.title)"
                             >
                                 <i :style="{ background: item.color }">{{
                                     item.icon
@@ -825,7 +830,8 @@
                                     >
                                         退出登录
                                     </button>
-                                </div><AgentAccessPanel /></template
+                                </div></template
+                            ><template v-else-if="selectedSetting === 'AI 设置'"><AISettingsPanel ref="aiSettingsPanel" /></template
                             ><template
                                 v-else-if="selectedSetting === '基础设置'"
                                 ><div class="form-grid">
@@ -914,7 +920,7 @@
                                     <span><b>模型支持图片（多模态）</b><small>开启后，收据或账单图片会直接发送给上述视觉模型识别；请确认所填模型支持图片输入</small></span>
                                     <SwitchControl v-model="aiImageEnabled" label="启用 AI 图片识别" :disabled="!aiConfigurationEditable" />
                                 </div>
-                                <p class="ai-owner-note">使用方式：进入“交易”页面，点击“新增”右侧菜单，选择“AI 图片识别”，再上传或拖入收据图片。批量图片可从“导入”选择“AI 图片”。</p>
+                                <p class="ai-owner-note">进入“交易”页面，选择“AI 文字 / 票据”。先核对本机来源及裁剪，再明确发送给模型；保存到当前账本待复核后逐项确认入账。</p>
                                 <dl class="service-status ai-status">
                                     <div><dt>文本识别</dt><dd :class="{ income: aiTextRecognitionReady }">{{ aiTextRecognitionReady ? "可用" : "未配置" }}</dd></div>
                                     <div><dt>图片识别</dt><dd :class="{ income: aiImageRecognitionReady }">{{ aiImageRecognitionReady ? "可用" : "未配置" }}</dd></div>
@@ -946,6 +952,7 @@
                                         '数据管理',
                                         '本地服务',
                                         'AI 配置',
+                                        'AI 设置',
                                     ].includes(selectedSetting)
                                 "
                                 class="primary save"
@@ -1027,10 +1034,10 @@
                     </section>
 
                     <section
-                        v-else-if="pageKey === 'templates'"
+                        v-else-if="pageKey === 'templates' && pageDataReady && !pageDataError"
                         class="template-grid"
                     >
-                        <article v-for="item in templates" :key="item.title">
+                        <article v-for="item in templates" :key="item.raw.id" :data-template-id="item.raw.id">
                             <i :style="{ background: item.color }">{{
                                 item.icon
                             }}</i
@@ -1038,6 +1045,7 @@
                             ><button
                                 class="template-edit"
                                 type="button"
+                                v-if="selectedLedgerCanManage && item.raw.editable"
                                 @click.stop="editTemplate(item)"
                             >
                                 编辑
@@ -1054,7 +1062,7 @@
                                     <dd>{{ item.uses }} 次</dd>
                                 </div>
                             </dl>
-                            <button type="button" @click="useTemplate(item)">
+                            <button v-if="selectedLedgerCanWrite" type="button" @click="useTemplate(item)">
                                 <v-icon
                                     :icon="mdiPlayOutline"
                                     size="17"
@@ -1065,7 +1073,7 @@
                             <v-icon :icon="mdiFileDocumentOutline" size="28" />
                             <b>常用模板推荐</b>
                             <span>推荐项不包含虚构金额或账户；选择后请绑定自己的真实账户并保存。</span>
-                            <div class="recommended-template-list">
+                            <div v-if="selectedLedgerCanManage" class="recommended-template-list">
                                 <button v-for="item in recommendedTemplates" :key="item.title" type="button" @click="createRecommendedTemplate(item)">
                                     <b>{{ item.title }}</b><small>{{ item.description }}</small>
                                 </button>
@@ -1079,7 +1087,7 @@
                     >
                         <PanelHead eyebrow="EXCHANGE RATES" title="常用汇率"
                             ><span class="sync"
-                                ><i></i>数据已同步</span
+                                ><i></i>{{ pageDataError ? '读取失败' : busy ? '正在读取' : '服务器汇率' }}</span
                             ></PanelHead
                         >
                         <div class="base-rate">
@@ -1275,13 +1283,13 @@
                         <div class="panel status">
                             <PanelHead eyebrow="SYSTEM STATUS" title="运行状态"
                                 ><span class="sync"
-                                    ><i></i>当前页面已连接</span
+                                    >{{ serverInfoError ? '未能读取' : serverVersion ? '版本已读取' : '状态待核验' }}</span
                                 ></PanelHead
                             >
                             <dl>
                                 <div>
-                                    <dt>应用服务</dt>
-                                    <dd>已连接</dd>
+                                    <dt>服务端版本</dt>
+                                    <dd>{{ serverVersion || '未能读取' }}</dd>
                                 </div>
                                 <div>
                                     <dt>客户端版本</dt>
@@ -1293,7 +1301,7 @@
                                 </div>
                                 <div>
                                     <dt>构建时间</dt>
-                                    <dd>{{ clientBuildTime || "正式发行版" }}</dd>
+                                    <dd>{{ clientBuildTime || "构建未提供" }}</dd>
                                 </div>
                             </dl>
                             <footer>
@@ -1518,6 +1526,7 @@
                             </footer>
                         </template>
                     </section>
+                    </template>
                 </main>
             </div>
         </div>
@@ -1540,6 +1549,9 @@
                                 <div><dt>流水记录</dt><dd>{{ ledgerDeletePreview.transactionCount }}</dd></div>
                                 <div><dt>存钱目标</dt><dd>{{ ledgerDeletePreview.savingsGoalCount }}</dd></div>
                                 <div><dt>目标资金记录</dt><dd>{{ ledgerDeletePreview.savingsGoalFundCount }}</dd></div>
+                                <div><dt>月度预算</dt><dd>{{ ledgerDeletePreview.monthlyBudgetCount }}</dd></div>
+                                <div><dt>交易模板及周期计划</dt><dd>{{ ledgerDeletePreview.transactionTemplateCount }}</dd></div>
+                                <div><dt>待确认及已忽略周期记录</dt><dd>{{ ledgerDeletePreview.scheduledOccurrenceCount }}</dd></div>
                             </dl>
                             <p v-if="ledgerDeletePreview.canDelete">删除后所有成员将无法访问，待接受邀请会同时失效。</p>
                             <p v-else>请先迁移或删除上述关联财务数据，再重新检查。</p>
@@ -1596,7 +1608,7 @@
                 ><aside
                     v-if="detail"
                     class="drawer"
-                    :class="{ 'asset-drawer': selectedAssetDetail }"
+                    :class="{ 'asset-drawer': selectedAssetDetail, 'transaction-detail': pageKey === 'activity' }"
                     role="dialog"
                     aria-modal="true"
                     :aria-label="selectedAssetDetail ? '资产详情' : '详情'"
@@ -1784,10 +1796,14 @@
                         <section v-if="selectedCategory" class="category-children">
                             <small>子分类</small>
                             <div v-if="selectedCategory.subCategories?.length">
-                                <span
+                                <button
                                     v-for="child in selectedCategory.subCategories"
                                     :key="child.id"
-                                >{{ child.name }}</span>
+                                    type="button"
+                                    class="category-child-edit"
+                                    :title="`编辑子分类「${child.name}」`"
+                                    @click="editSubCategory(child)"
+                                >{{ child.name }}</button>
                             </div>
                             <p v-else>该一级分类还没有子分类。</p>
                         </section>
@@ -1815,17 +1831,21 @@
                         <div v-if="selectedAIReviewItem" class="review-actions">
                             <button
                                 class="secondary"
-                                :disabled="busy"
+                                :disabled="busy || !selectedAIReviewItem.editable"
+                                v-if="selectedAIReviewItem.status === 1 && selectedAIReviewItem.editable"
                                 @click="dismissReviewItem"
                             >
                                 忽略</button
                             ><button
                                 class="primary"
-                                :disabled="busy"
+                                :disabled="busy || !selectedAIReviewItem.editable"
+                                v-if="selectedAIReviewItem.status === 1 && selectedAIReviewItem.editable"
                                 @click="postReviewItem"
                             >
                                 编辑并入账
                             </button>
+                            <button v-if="selectedAIReviewItem.status === 3 && selectedAIReviewItem.editable" class="secondary" :disabled="busy" @click="restoreReviewItem">恢复到待复核</button>
+                            <p v-if="!selectedAIReviewItem.editable">当前条目仅可查看，请核对成员权限和条目状态。</p>
                         </div>
                         <button v-else class="primary" @click="editDetail">
                             编辑详情
@@ -2316,10 +2336,11 @@
             </div></transition
         >
         <transition name="toast"
-            ><div v-if="toast" class="toast" role="status">
-                <v-icon :icon="mdiCheckCircleOutline" size="17" />{{ toast }}
+            ><div v-if="toast" class="toast" :class="{ 'toast-error': toastIsError }" :role="toastIsError ? 'alert' : 'status'">
+                <v-icon :icon="toastIsError ? mdiAlertCircleOutline : mdiCheckCircleOutline" size="17" />{{ toast }}
             </div></transition
         >
+        <LedgerPendingDialog v-if="pendingDialogOpen" @close="pendingDialogOpen = false" @open="openPendingTarget" />
         <TransactionEditDialog
             ref="transactionEditDialog"
             :type="TransactionEditPageType.Transaction"
@@ -2328,10 +2349,12 @@
         <TransactionEditDialog
             ref="templateEditDialog"
             :type="TransactionEditPageType.Template"
+            :ledger-id="selectedLedgerId === DefaultLedgerId ? undefined : selectedLedgerId"
         />
         <AccountEditDialog ref="accountEditDialog" />
         <CategoryEditDialog ref="categoryEditDialog" />
         <ConfirmDialog ref="confirmDialog" />
+        <AIReviewSourceDialog ref="aiSourceDialog" @complete="sourceCompleted" @closed="refreshAIRecovery" />
         <ImportDialog ref="statementImportDialog" :persistent="true" />
     </div>
 </template>
@@ -2343,19 +2366,28 @@ import {
     h,
     nextTick,
     onMounted,
+    onUnmounted,
     ref,
     useTemplateRef,
     watch,
 } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import AIReviewSourceDialog from '@/views/desktop/transactions/list/dialogs/AIReviewSourceDialog.vue';
+import LedgerPendingDialog from '@/components/common/LedgerPendingDialog.vue';
+import { useLedgerPendingStore } from '@/stores/ledgerPending.ts';
+import { desktopLedgerPendingLocation, parseLedgerPendingTarget } from '@/lib/ledger_pending_navigation.ts';
+import { buildCategoryCatalog, categoryEditPayload, filterCatalogItems, flattenTransactionCategories } from '@/lib/category_catalog.ts';
+import type { LedgerPendingTarget } from '@/models/ledger_pending.ts';
 import { VIcon } from "vuetify/components";
 import TransactionEditDialog from "@/views/desktop/transactions/list/dialogs/EditDialog.vue";
 import { TransactionEditPageType } from "@/views/base/transactions/TransactionEditPageBase.ts";
 import AccountEditDialog from "@/views/desktop/accounts/list/dialogs/EditDialog.vue";
+import AccountCardDesigner from "@/components/desktop/AccountCardDesigner.vue";
+import AccountWalletStack from "@/components/desktop/AccountWalletStack.vue";
 import CategoryEditDialog from "@/views/desktop/categories/list/dialogs/EditDialog.vue";
 import ConfirmDialog from "@/components/desktop/ConfirmDialog.vue";
 import ImportDialog from "@/views/desktop/transactions/import/ImportDialog.vue";
-import AgentAccessPanel from "@/components/AgentAccessPanel.vue";
+import AISettingsPanel from "@/components/AISettingsPanel.vue";
 import ReleaseUpdateNotice from "@/components/ReleaseUpdateNotice.vue";
 import GlobalLedgerSwitcher from "@/components/desktop/GlobalLedgerSwitcher.vue";
 import { useAccountsStore } from "@/stores/account.ts";
@@ -2365,12 +2397,12 @@ import { useTransactionTemplatesStore } from "@/stores/transactionTemplate.ts";
 import { useExchangeRatesStore } from "@/stores/exchangeRates.ts";
 import { useProductAssetsStore } from "@/stores/productAsset.ts";
 import { useSettingsStore } from "@/stores/setting.ts";
-import { useTransactionsStore } from "@/stores/transaction.ts";
-import { useAIReviewItemsStore } from "@/stores/aiReviewItem.ts";
+import { useAIReviewLedgerStore } from "@/stores/aiReviewLedger.ts";
 import { useScheduledOccurrencesStore } from "@/stores/scheduledOccurrence.ts";
 import { useLedgersStore } from "@/stores/ledger.ts";
 import { useSavingsGoalsStore } from "@/stores/savingsGoal.ts";
-import { useMonthlyBudgetStore } from "@/stores/monthlyBudget.ts";
+import MonthlyBudgetPanel from "@/components/MonthlyBudgetPanel.vue";
+import LedgerReportPanel from "@/components/common/LedgerReportPanel.vue";
 import { useUserStore } from "@/stores/user.ts";
 import { useRootStore } from "@/stores/index.ts";
 import { TransactionTag } from "@/models/transaction_tag.ts";
@@ -2378,23 +2410,31 @@ import { TransactionCategory } from "@/models/transaction_category.ts";
 import { TransactionTemplate } from "@/models/transaction_template.ts";
 import { Transaction } from "@/models/transaction.ts";
 import { Account } from "@/models/account.ts";
-import type { AIReviewItemInfoResponse } from "@/models/ai_review_item.ts";
+import type { AIReviewLedgerItem } from "@/models/ai_review_ledger.ts";
 import {
     ProductAssetCategory,
     ProductAssetStatus,
     type ProductAssetInfoResponse,
 } from "@/models/product_asset.ts";
 import { CategoryType } from "@/core/category.ts";
+import { AccountCategory } from "@/core/account.ts";
+import { getAccountBalanceDisplay, summarizeVisibleAccountBalances } from "@/lib/account_presentation.ts";
 import { ScheduledTemplateFrequencyType, TemplateType } from "@/core/template.ts";
 import { TransactionType } from "@/core/transaction.ts";
 import { ScheduledOccurrence } from "@/models/scheduled_occurrence.ts";
 import { DefaultLedgerId, type LedgerDeletePreview, type LedgerInvitationPreview, type LedgerOverview } from "@/models/ledger.ts";
 import { SavingsGoal } from "@/models/savings_goal.ts";
 import { generateRandomUUID } from "@/lib/misc.ts";
+import { getTransactionStateIdentity, getCurrentUserInfo, isUserLogined } from "@/lib/userstate.ts";
+import { ledgerReportStorageInvalidatesSession } from '@/lib/ledger_report_session.ts';
 import { scheduleDaysInMonth } from "@/lib/schedule.ts";
+import { formatPeriodicAmounts } from "@/lib/periodic.ts";
 import { getCnyValueForCurrency } from "@/lib/exchange_rate.ts";
 import { AMOUNT_FACTOR } from "@/consts/numeral.ts";
-import { getCurrentUnixTime } from "@/lib/datetime.ts";
+import { getCurrentUnixTime, getDateRangeByDateType } from "@/lib/datetime.ts";
+import { DateRange } from "@/core/datetime.ts";
+import { loadWorkspaceTransactions } from "@/lib/workspace_transactions.ts";
+import { accountCurrency, summarizeCurrencyAmounts } from "@/lib/currency_totals.ts";
 import services from "@/lib/services.ts";
 import logger from "@/lib/logger.ts";
 import { getClientDisplayVersion, getClientBuildTime } from "@/lib/version.ts";
@@ -2407,6 +2447,7 @@ import {
 } from "@/lib/server_settings.ts";
 import { useI18n } from "@/locales/helpers.ts";
 import {
+    mdiAlertCircleOutline,
     mdiBellOutline,
     mdiCameraOutline,
     mdiCashMultiple,
@@ -2464,6 +2505,9 @@ type PageKey =
     | "about";
 type Tone = "success" | "warning" | "neutral";
 interface Item {
+    id?: string;
+    sourceAccountId?: string;
+    destinationAccountId?: string;
     title: string;
     meta: string;
     amount: string;
@@ -2488,6 +2532,15 @@ interface AssetItem extends Item {
     heldDays: number;
     dailyCost: string;
     raw: ProductAssetInfoResponse;
+}
+interface AccountItem extends Item {
+    id: string;
+    raw: Account;
+    hidden: boolean;
+    categoryName: string;
+    parentName: string;
+    balanceLabel: string;
+    displayAmount: string;
 }
 interface Metric {
     label: string;
@@ -2524,23 +2577,6 @@ const PanelHead = defineComponent({
                     h("h2", { class: "panel-title" }, props.title),
                 ]),
                 slots["default"]?.(),
-            ]);
-    },
-});
-const ItemName = defineComponent({
-    props: { item: { type: Object as () => Item, required: true } },
-    setup(props) {
-        return () =>
-            h("span", { class: "item-name" }, [
-                h(
-                    "i",
-                    { style: { background: props.item.color } },
-                    props.item.icon,
-                ),
-                h("span", [
-                    h("b", props.item.title),
-                    h("small", props.item.meta),
-                ]),
             ]);
     },
 });
@@ -2593,6 +2629,7 @@ const categoryEditDialog =
 type ConfirmDialogType = InstanceType<typeof ConfirmDialog>;
 const confirmDialog = useTemplateRef<ConfirmDialogType>("confirmDialog");
 const statementImportDialog = useTemplateRef<InstanceType<typeof ImportDialog>>("statementImportDialog");
+const aiSourceDialog = useTemplateRef<InstanceType<typeof AIReviewSourceDialog>>('aiSourceDialog');
 const accountsStore = useAccountsStore();
 const categoriesStore = useTransactionCategoriesStore();
 const tagsStore = useTransactionTagsStore();
@@ -2600,21 +2637,63 @@ const templatesStore = useTransactionTemplatesStore();
 const exchangeRatesStore = useExchangeRatesStore();
 const productAssetsStore = useProductAssetsStore();
 const settingsStore = useSettingsStore();
-const transactionsStore = useTransactionsStore();
-const aiReviewItemsStore = useAIReviewItemsStore();
+const aiReviewItemsStore = useAIReviewLedgerStore();
+const aiQueueStatus = ref(1), aiRecoveryId = ref(''), aiRecoveryIsPending = ref(false), aiRecoveryError = ref('');
+const aiSourceRecovery = ref(false);
+function refreshAIRecovery() {
+    aiRecoveryId.value = ''; aiRecoveryError.value = ''; aiRecoveryIsPending.value = false;
+    aiSourceRecovery.value = false;
+    try {
+        const pending = aiReviewItemsStore.readPendingConfirm(ledgersStore.selectedLedgerId);
+        const draft = pending ? null : aiReviewItemsStore.readDraft(ledgersStore.selectedLedgerId);
+        aiRecoveryId.value = pending?.request.id || draft?.input.id || '';
+        aiRecoveryIsPending.value = !!pending;
+        aiSourceRecovery.value = !!(aiReviewItemsStore.readPendingCreate(ledgersStore.selectedLedgerId) || aiReviewItemsStore.readSourceDraft(ledgersStore.selectedLedgerId));
+    } catch { aiRecoveryError.value = '无法核验本机 AI 记录，请先解锁或恢复原记录；不会替代入账。'; }
+}
+function openAISource() { void aiSourceDialog.value?.open(ledgersStore.selectedLedgerId); }
+async function sourceCompleted(value: { ledgerId: string; id: string; deleted: boolean }) {
+    if (value.ledgerId !== ledgersStore.selectedLedgerId) return;
+    aiQueueStatus.value = 1; await reloadAIQueue();
+    if (!value.deleted) await openAIReview(value.id);
+}
+async function reloadAIQueue() {
+    try { await aiReviewItemsStore.load(ledgersStore.selectedLedgerId, aiQueueStatus.value); }
+    catch (error) { if (!(error as { stale?: boolean }).stale) showError(error); }
+    refreshAIRecovery();
+}
+async function showIgnoredAIReviews() { aiQueueStatus.value = 3; query.value = ''; currentPage.value = 1; await reloadAIQueue(); }
 const occurrencesStore = useScheduledOccurrencesStore();
 const ledgersStore = useLedgersStore();
+const ledgerPendingStore = useLedgerPendingStore();
+const pendingDialogOpen = ref(false);
+let pendingRouteSerial = 0;
+const pendingRoutingSuspended = ref(false);
+const routeOpeningBusy = ref(route.query['pendingTarget'] !== undefined || route.query['action'] === 'income' || route.query['action'] === 'expense');
+const routeOpeningError = ref('');
+const routeSelectionVerified = ref(false);
+let routeOpeningSerial = 0;
+const pendingOpeningSession = { identity: getTransactionStateIdentity(), username: getCurrentUserInfo()?.username ?? null, hasToken: isUserLogined() };
 const savingsGoalsStore = useSavingsGoalsStore();
-const monthlyBudgetStore = useMonthlyBudgetStore();
 const userStore = useUserStore();
 const rootStore = useRootStore();
-const { formatAmountToLocalizedNumeralsWithCurrency } = useI18n();
+const { tt, formatAmountToLocalizedNumeralsWithCurrency } = useI18n();
 const selectedLedgerId = computed(() => ledgersStore.selectedLedgerId);
-const selectedLedgerName = computed(() => ledgersStore.selectedLedger.name);
+watch(selectedLedgerId, refreshAIRecovery, { flush: 'sync' });
+const selectedLedgerName = computed(() => routeOpeningBusy.value || routeOpeningError.value && !routeSelectionVerified.value ? '账本待核验' : ledgersStore.selectedLedger.name);
+const pageDataError = ref("");
+const pageDataReady = ref(false);
+const serverVersion = ref("");
+const serverInfoError = ref("");
 const selectedLedgerCanWrite = computed(() => {
     if (selectedLedgerId.value === DefaultLedgerId) return true;
-    const me = ledgersStore.members.find(member => member.isCurrentUser && member.status === 1);
+    const me = ledgersStore.members.find(member => member.ledgerId === selectedLedgerId.value && member.isCurrentUser && member.status === 1);
     return me?.role === 1 || me?.role === 2 || me?.role === 3;
+});
+const selectedLedgerCanManage = computed(() => {
+    if (selectedLedgerId.value === DefaultLedgerId) return true;
+    const me = ledgersStore.members.find(member => member.ledgerId === selectedLedgerId.value && member.isCurrentUser && member.status === 1);
+    return me?.role === 1 || me?.role === 2;
 });
 const topTabs = [
     { label: "总览", path: "/", key: "home" },
@@ -2701,15 +2780,15 @@ const configs: Record<PageKey, RawConfig> = {
     },
     program: {
         eyebrow: "PROGRAM / 计划",
-        title: "让固定支出自动发生。",
-        description: "管理周期交易、预算和未来账单。",
+        title: "让固定收支按期提醒。",
+        description: "管理周期计划、预算和到期确认。",
         action: "新建计划",
         actionIcon: mdiPlus,
         values: [
             ["计划数量", "—", "正在读取周期计划", "neutral"],
             ["已启用", "—", "正在读取周期计划", "neutral"],
             ["已暂停", "—", "正在读取周期计划", "neutral"],
-            ["最近执行日", "—", "正在读取周期计划", "neutral"],
+            ["下次到期", "—", "正在读取周期计划", "neutral"],
         ],
     },
     account: {
@@ -2719,24 +2798,19 @@ const configs: Record<PageKey, RawConfig> = {
         action: "保存设置",
         actionIcon: mdiCheck,
         values: [
-            ["账户状态", "正常", "全部服务可用", "up"],
-            ["数据同步", "已完成", "今天 12:30", "up"],
-            ["安全等级", "良好", "建议定期备份", "neutral"],
-            ["登录设备", "2 台", "均为可信设备", "neutral"],
+            ["设置范围", "当前账号", "个人资料与登录设置", "neutral"],
+            ["数据同步", "未检测", "未提供实时同步状态", "neutral"],
+            ["安全状态", "未检测", "在安全设置核对登录保护", "neutral"],
+            ["登录设备", "未读取", "当前页没有设备列表数据", "neutral"],
         ],
     },
     reports: {
         eyebrow: "REPORTS / 报表",
         title: "从数字里看见趋势。",
-        description: "对比收支、分类和资产变化。",
+        description: "按当前账本、日期和筛选查看原币种收支、分类与流水明细。",
         action: "导出报表",
         actionIcon: mdiDownloadOutline,
-        values: [
-            ["本月净收入", "—", "正在读取账本", "neutral"],
-            ["本月收入", "—", "正在读取账本", "neutral"],
-            ["本月支出", "—", "正在读取账本", "neutral"],
-            ["交易笔数", "—", "正在读取流水", "neutral"],
-        ],
+        values: [],
     },
     categories: {
         eyebrow: "STRUCTURE / 分类",
@@ -2838,10 +2912,10 @@ const configs: Record<PageKey, RawConfig> = {
         action: "保存设置",
         actionIcon: mdiCheck,
         values: [
-            ["运行状态", "正常", "全部服务可用", "up"],
-            ["存储占用", "486 MB", "剩余空间充足", "neutral"],
-            ["最近备份", "今天", "03:00 完成", "up"],
-            ["应用版本", "1.6.1", "当前为最新版", "up"],
+            ["设置范围", "当前设备", "设备显示与本地行为", "neutral"],
+            ["存储占用", "未读取", "当前页未提供服务器存储统计", "neutral"],
+            ["最近备份", "未读取", "请在备份目标核验实际结果", "neutral"],
+            ["客户端版本", getClientDisplayVersion(), "来自当前页面构建", "neutral"],
         ],
     },
     about: {
@@ -2851,10 +2925,10 @@ const configs: Record<PageKey, RawConfig> = {
         action: "检查更新",
         actionIcon: mdiRefresh,
         values: [
-            ["应用版本", "1.6.1", "当前为最新版", "up"],
-            ["运行时间", "99.9%", "过去 30 天", "up"],
-            ["数据位置", "本地", "完全自托管", "neutral"],
-            ["开源许可", "已公开", "可随时查看", "up"],
+            ["客户端版本", getClientDisplayVersion(), "来自当前页面构建", "neutral"],
+            ["服务端状态", "待读取", "不代表全部功能健康", "neutral"],
+            ["数据位置", "自托管", "由当前服务器保存", "neutral"],
+            ["构建时间", getClientBuildTime() || "构建未提供", "来自当前页面构建", "neutral"],
         ],
     },
 };
@@ -2866,35 +2940,29 @@ const config = computed<Config>(() => {
         values = [
             ["本月收入", formatBookkeepingMoney(income), "来自当前账本", "up"],
             ["本月支出", formatBookkeepingMoney(expense), "来自当前账本", "down"],
-            ["待确认", `${aiReviewItemsStore.items.length} 笔`, aiReviewItemsStore.items.length ? "完成入账或忽略后自动更新" : "当前没有待处理记录", "neutral"],
+            [aiQueueStatus.value === 3 ? "已忽略 AI 条目" : "账本待复核", aiReviewItemsStore.errorMessage ? "读取失败" : !aiReviewItemsStore.loaded ? "待读取" : `${aiReviewItemsStore.items.length} 笔`, "来自当前账本", "neutral"],
             ["净收入", formatBookkeepingMoney(income - expense), "收入减去支出", income >= expense ? "up" : "down"],
         ];
     } else if (pageKey.value === "manage") {
-        const list = accountsStore.allVisiblePlainAccounts;
-        const currencies = new Set(list.map(item => item.currency));
+        const list = accounts.value.filter(item => !item.hidden);
+        const currencies = new Set(list.map(item => item.raw.currency));
         values = [
-            ["账户数量", `${accountsStore.allPlainAccounts.length} 个`, "来自当前账本", "neutral"],
+            ["账户数量", `${accounts.value.length} 个`, "来自当前账本", "neutral"],
             ["可见账户", `${list.length} 个`, "可用于记账", "neutral"],
-            ["已隐藏", `${accountsStore.allPlainAccounts.filter(item => item.hidden).length} 个`, "可在账户管理中恢复", "neutral"],
+            ["已隐藏", `${accounts.value.length - list.length} 个`, "可在账户管理中恢复", "neutral"],
             ["账户币种", `${currencies.size} 种`, "不直接混合不同币种余额", "neutral"],
         ];
     } else if (pageKey.value === "program") {
         const list = schedules.value;
         const enabled = list.filter(item => item.enabled);
+        const next = enabled.filter(item => item.raw.nextScheduledTime)
+            .sort((a, b) => a.raw.nextScheduledTime! - b.raw.nextScheduledTime!)[0]?.raw.nextScheduledTime;
+        const nextDate = next ? new Date(next * 1000) : undefined;
         values = [
             ["计划数量", `${list.length} 项`, "来自周期交易模板", "neutral"],
-            ["已启用", `${enabled.length} 项`, "将在设定日期执行", "up"],
-            ["已暂停", `${list.length - enabled.length} 项`, "不会自动执行", "neutral"],
-            ["最近执行日", enabled.length ? `${Math.min(...enabled.map(item => Number(item.day)))} 日` : "暂无", "本月计划", "neutral"],
-        ];
-    } else if (pageKey.value === "reports") {
-        const { income, expense } = currentLedgerMonthTotals.value;
-        const transactionCount = transactions.value.length;
-        values = [
-            ["本月净收入", formatBookkeepingMoney(income - expense), "收入减去支出", income >= expense ? "up" : "down"],
-            ["本月收入", formatBookkeepingMoney(income), "来自当前账本", "up"],
-            ["本月支出", formatBookkeepingMoney(expense), "来自当前账本", "down"],
-            ["交易笔数", `${transactionCount} 笔`, "本月已入账流水", "neutral"],
+            ["已启用", `${enabled.length} 项`, "到期生成待确认记录", "up"],
+            ["已暂停", `${list.length - enabled.length} 项`, "不生成待确认记录", "neutral"],
+            ["下次到期", nextDate ? `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, "0")}-${String(nextDate.getDate()).padStart(2, "0")}` : "暂无", "按设备时区显示", "neutral"],
         ];
     } else if (pageKey.value === "assets" && productAssetsStore.loaded) {
         const list = productAssetsStore.assets;
@@ -3014,7 +3082,7 @@ const config = computed<Config>(() => {
             ["模板数量", `${list.length} 个`, "来自当前账本", "neutral"],
             ["可直接使用", `${list.length} 个`, "点击卡片底部即可记账", "up"],
             ["编辑入口", list.length ? "可用" : "待创建", "只对真实模板显示", "neutral"],
-            ["数据状态", "已同步", "编辑后自动刷新", "up"],
+            ["数据状态", pageDataError.value ? "读取失败" : busy.value ? "正在读取" : "已读取", "这是服务器读取状态", "neutral"],
         ];
     } else if (pageKey.value === "rates") {
         const count = exchangeRatesStore.latestExchangeRateMap
@@ -3029,9 +3097,9 @@ const config = computed<Config>(() => {
     } else if (pageKey.value === "about") {
         values = [
             ["客户端版本", clientDisplayVersion, "来自当前构建", "neutral"],
-            ["服务状态", "已连接", "当前页面可访问服务端", "up"],
+            ["服务端版本", serverVersion.value || "未能读取", "版本读取不代替功能健康检查", "neutral"],
             ["数据位置", "自托管", "由当前服务器保存", "neutral"],
-            ["构建时间", clientBuildTime || "正式发行版", "不再显示模拟运行数据", "neutral"],
+            ["构建时间", clientBuildTime || "构建未提供", "来自当前页面构建", "neutral"],
         ];
     }
     return {
@@ -3047,41 +3115,84 @@ const config = computed<Config>(() => {
 });
 
 const transactions = ref<Item[]>([]);
-const ledgerReportTrends = ref<Array<{
-    year: number;
-    month: number;
-    items: Array<{ categoryId: string; amount: number }>;
-}>>([]);
-const currentLedgerMonthTotals = computed(() => {
-    let income = 0;
-    let expense = 0;
-    for (const item of transactions.value) {
-        if (!(item.raw instanceof Transaction)) continue;
-        if (item.raw.type === TransactionType.Income) income += item.raw.sourceAmount;
-        else if (item.raw.type === TransactionType.Expense) expense += item.raw.sourceAmount;
-    }
-    return { income, expense };
+const summaryCurrency = ref(userStore.currentUserDefaultCurrency || "CNY");
+const summaryAccounts = computed(() => accountsStore.accountListLedgerId === selectedLedgerId.value ? accountsStore.allAccountsMap : {});
+const summaryCurrencies = computed(() => [...new Set([userStore.currentUserDefaultCurrency || "CNY", ...Object.values(summaryAccounts.value).map(account => account.currency).filter(code => /^[A-Z]{3}$/.test(code))])].sort());
+const currentLedgerMonthSummary = computed(() => {
+    const now = new Date();
+    const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    return summarizeCurrencyAmounts(transactions.value.filter(item => item.raw instanceof Transaction && item.month === currentMonth).map(item => {
+        const transaction = item.raw as Transaction;
+        return { type: transaction.type, accountId: transaction.sourceAccountId, amount: transaction.sourceAmount };
+    }), summaryAccounts.value);
 });
-const accounts = computed<Item[]>(() => {
-    const colors = ["#12141A", "#F05537", "#4F46E5"];
-    const live = accountsStore.allVisiblePlainAccounts
-        .slice(0, 3)
-        .map((account, index) => ({
-            title: account.name,
-            meta: `${account.currency} · ${account.comment || "资金账户"}`,
-            amount: formatAmountToLocalizedNumeralsWithCurrency(
-                account.balance,
-                account.currency,
-            ),
-            status: account.hidden ? "已隐藏" : "正常",
-            tone: (account.hidden ? "warning" : "success") as Tone,
-            icon: account.name.slice(0, 1),
-            color: colors[index]!,
-            raw: account,
-        }));
-    return live;
+const currentLedgerMonthTotals = computed(() => currentLedgerMonthSummary.value.totals.find(item => item.currency === summaryCurrency.value) ?? { income: 0, expense: 0 });
+const accounts = computed<AccountItem[]>(() => {
+    if (accountsStore.accountListLedgerId !== selectedLedgerId.value) return [];
+    return accountsStore.allPlainAccounts.map((account) => {
+            const parent = accountsStore.allAccountsMap[account.parentId];
+            const hidden = account.hidden || !!parent?.hidden;
+            const display = getAccountBalanceDisplay(account.balance, !!account.isLiability);
+            return {
+                id: account.id,
+                title: account.name,
+                meta: `${account.currency} · ${account.comment || "资金账户"}`,
+                amount: formatAmountToLocalizedNumeralsWithCurrency(account.balance, account.currency),
+                status: hidden ? "已隐藏" : "正常",
+                tone: (hidden ? "warning" : "success") as Tone,
+                icon: account.name.slice(0, 1),
+                color: account.color,
+                raw: account,
+                hidden,
+                parentName: parent?.name || "",
+                categoryName: tt(AccountCategory.valueOf(account.category)?.name || "Account"),
+                balanceLabel: display.label,
+                displayAmount: formatAmountToLocalizedNumeralsWithCurrency(display.amount, account.currency),
+            };
+        });
 });
-const selectedAccount = ref<Item | null>(null);
+const accountSearch = ref("");
+const accountCategoryFilter = ref("");
+const accountVisibilityFilter = ref("");
+const accountCurrencyFilter = ref("");
+function resetAccountFilters() {
+    accountSearch.value = "";
+    accountCategoryFilter.value = "";
+    accountVisibilityFilter.value = "";
+    accountCurrencyFilter.value = "";
+}
+watch(selectedLedgerId, resetAccountFilters);
+const accountCategoryOptions = computed(() => AccountCategory.values(settingsStore.appSettings.accountCategoryOrders)
+    .filter(category => accounts.value.some(item => item.raw.category === category.type))
+    .map(category => ({ type: category.type, name: tt(category.name) })));
+const accountCurrencies = computed(() => [...new Set(accounts.value.map(item => item.raw.currency))].sort());
+const filteredAccounts = computed(() => {
+    const search = accountSearch.value.trim().toLocaleLowerCase();
+    return accounts.value.filter(item => (!search || `${item.title} ${item.raw.comment} ${item.parentName}`.toLocaleLowerCase().includes(search))
+        && (!accountCategoryFilter.value || String(item.raw.category) === accountCategoryFilter.value)
+        && (!accountCurrencyFilter.value || item.raw.currency === accountCurrencyFilter.value)
+        && (!accountVisibilityFilter.value || item.hidden === (accountVisibilityFilter.value === "hidden")));
+});
+const accountGroups = computed(() => accountCategoryOptions.value.map(category => ({
+    category: category.type, name: category.name,
+    items: filteredAccounts.value.filter(item => item.raw.category === category.type),
+})).filter(group => group.items.length));
+const accountBalanceSummaries = computed(() => summarizeVisibleAccountBalances(accounts.value.map(item => ({
+    currency: item.raw.currency, balance: item.raw.balance, hidden: item.hidden, isLiability: !!item.raw.isLiability,
+}))));
+const selectedAccountId = ref("");
+const selectedAccount = computed<AccountItem | null>(() =>
+    filteredAccounts.value.find(item => item.id === selectedAccountId.value) || filteredAccounts.value[0] || null,
+);
+const selectedAccountIndex = computed(() => filteredAccounts.value.findIndex(item => item.id === selectedAccount.value?.id));
+const selectedAccountPickerId = computed({
+    get: () => selectedAccount.value?.id || "",
+    set: (id: string) => { selectedAccountId.value = id; },
+});
+function navigateAccount(direction: number) {
+    const item = filteredAccounts.value[selectedAccountIndex.value + direction];
+    if (item) selectedAccountId.value = item.id;
+}
 const accountLedgerEditorOpen = ref(false);
 const accountLedgerEditorAccount = ref<Account | null>(null);
 const accountLedgerTargetId = ref("");
@@ -3091,6 +3202,7 @@ const availableAccountTargetLedgers = computed(() =>
     ledgersStore.allLedgers.filter((ledger) => ledger.id !== selectedLedgerId.value),
 );
 const schedules = computed(() => {
+    if (templatesStore.loadedLedgerId !== selectedLedgerId.value) return [];
     const live = (
         templatesStore.allTransactionTemplates[TemplateType.Schedule.type] || []
     )
@@ -3104,37 +3216,21 @@ const schedules = computed(() => {
             title: item.name,
             meta: item.comment || "周期交易",
             frequency: scheduleFrequencyLabel(item),
-            amount: formatAmountToLocalizedNumeralsWithCurrency(
-                item.sourceAmount,
-                item.sourceAccount?.currency || userStore.currentUserDefaultCurrency,
-            ),
-            enabled: !item.hidden && item.scheduledFrequencyType !== ScheduledTemplateFrequencyType.Disabled.type,
+            amount: formatPeriodicAmounts(item, summaryAccounts.value, formatAmountToLocalizedNumeralsWithCurrency, settingsStore.appSettings.showAmountInHomePage),
+            enabled: item.scheduledFrequencyType !== ScheduledTemplateFrequencyType.Disabled.type,
             raw: item,
         }));
     return live;
 });
-const categories = computed<Item[]>(() => {
-    const flat = Object.values(
-        categoriesStore.allTransactionCategories,
-    ).flat();
-    const live = flat
-        .slice(0, 8)
-        .map((item) => ({
-            title: item.name,
-            meta: item.comment || `${item.subCategories?.length || 0} 个子分类`,
-            amount: item.visible ? "使用中" : "已隐藏",
-            status: item.visible ? "正常" : "已隐藏",
-            tone: (item.visible ? "success" : "warning") as Tone,
-            icon: item.name.slice(0, 1),
-            color: String(item.color),
-            raw: item,
-        }));
-    return live;
-});
+// 分类结构页展示全部一级分类；搜索也基于完整目录，避免新增分类被静默隐藏或搜不到。
+const categories = computed<Item[]>(() =>
+    buildCategoryCatalog(
+        flattenTransactionCategories(categoriesStore.allTransactionCategories),
+    ),
+);
 const tags = computed<Item[]>(() => {
     const colors = ["#F05537", "#4F46E5", "#12141A", "#2E9BFF", "#149C63"];
     const live = Object.values(tagsStore.allTransactionTagsMap)
-        .slice(0, 10)
         .map((item, index) => ({
             title: item.name,
             meta: item.groupId === "0" ? "未分组" : "标签组",
@@ -3148,18 +3244,15 @@ const tags = computed<Item[]>(() => {
     return live;
 });
 const templates = computed(() => {
+    if (templatesStore.loadedLedgerId !== selectedLedgerId.value) return [];
     const colors = ["#F05537", "#2E9BFF", "#149C63", "#4F46E5"];
     const live = (
         templatesStore.allVisibleTemplates[TemplateType.Normal.type] || []
     )
-        .slice(0, 8)
         .map((item, index) => ({
             title: item.name,
             meta: item.comment || "交易模板",
-            amount: formatAmountToLocalizedNumeralsWithCurrency(
-                item.sourceAmount,
-                item.sourceAccount?.currency || userStore.currentUserDefaultCurrency,
-            ),
+            amount: formatPeriodicAmounts(item, summaryAccounts.value, formatAmountToLocalizedNumeralsWithCurrency, settingsStore.appSettings.showAmountInHomePage),
             uses: 0,
             icon: item.name.slice(0, 1),
             color: colors[index % colors.length]!,
@@ -3238,6 +3331,7 @@ const accountMenu = [
     },
     { title: "通知设置", meta: "提醒和消息渠道", icon: "通", color: "#F05537" },
     { title: "安全设置", meta: "密码与应用锁", icon: "安", color: "#149C63" },
+    { title: "AI 设置", meta: "模型用量与 Agent 接入", icon: "AI", color: "#12141A" },
 ];
 const appMenu = [
     {
@@ -3273,14 +3367,35 @@ const accountActionBusy = ref(false);
 const filterOpen = ref(false);
 const compact = ref(false);
 const typeFilter = ref("all");
-const accountFilter = ref("all");
+const accountFilter = ref(typeof route.query["accountIds"] === "string" ? route.query["accountIds"] : "all");
 const monthFilter = ref("");
+const transactionLoadError = ref("");
+const dateFilter = ref(Number(route.query["dateType"]) || DateRange.All.type);
+const transactionDateRange = computed(() => {
+    if (monthFilter.value) return null;
+    if (dateFilter.value === DateRange.Custom.type) {
+        return { minTime: Number(route.query["minTime"]) || 0, maxTime: Number(route.query["maxTime"]) || 0 };
+    }
+    return getDateRangeByDateType(dateFilter.value, userStore.currentUserFirstDayOfWeek, userStore.currentUserFiscalYearStart);
+});
 const currentPage = ref(1);
 const pageSize = 10;
 const allSelected = ref(false);
-const reportPeriod = ref("近 6 个月");
-const selectedSetting = ref(route.query["tab"] === "securitySetting" ? "安全设置" : "个人资料");
-watch(() => route.query["tab"], tab => { if (tab === "securitySetting") selectedSetting.value = "安全设置"; });
+function settingFromRoute(): string {
+    if (pageKey.value === "account") {
+        return ({ securitySetting: "安全设置", aiSetting: "AI 设置", displaySetting: "显示偏好", notificationSetting: "通知设置" } as Record<string,string>)[String(route.query["tab"])] || "个人资料";
+    }
+    return route.query["tab"] === "aiSetting" ? "AI 配置" : "基础设置";
+}
+const selectedSetting = ref(settingFromRoute());
+function selectSetting(title: string): void {
+    selectedSetting.value = title;
+    if (pageKey.value === "account") {
+        const tab = ({ "安全设置": "securitySetting", "AI 设置": "aiSetting", "显示偏好": "displaySetting", "通知设置": "notificationSetting" } as Record<string,string>)[title] || "basicSetting";
+        void router.replace({ query: { ...route.query, tab } });
+    }
+}
+watch(() => route.query["tab"], () => { selectedSetting.value = settingFromRoute(); });
 const profileName = ref(userStore.currentUserNickname || "当前用户");
 const profileEmail = ref(userStore.currentUserBasicInfo?.email || "");
 const currency = ref(userStore.currentUserDefaultCurrency || "CNY");
@@ -3320,11 +3435,9 @@ const newNote = ref("");
 const scheduleAscending = ref(true);
 const calendarDate = ref(new Date());
 const selectedCalendarDay = ref(new Date().getDate());
-const budgetTotalInput = ref("");
-const budgetCategoryInputs = ref<Record<string, string>>({});
-const budgetSaving = ref(false);
 const aboutInfo = ref<{ title: string; paragraphs: string[] } | null>(null);
 const toast = ref("");
+const toastIsError = ref(false);
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 const assetQuery = ref("");
 const assetDetail = ref<ProductAssetInfoResponse | null>(null);
@@ -3417,7 +3530,11 @@ const currentUserInitial = computed(
 );
 const clientDisplayVersion = getClientDisplayVersion();
 const clientBuildTime = getClientBuildTime();
+const aiSettingsPanel = ref<InstanceType<typeof AISettingsPanel>>();
 const primaryActionLabel = computed(() =>
+    selectedSetting.value === "AI 设置"
+        ? "刷新用量"
+        :
     selectedSetting.value === "安全设置"
         ? "切换账号"
         : selectedSetting.value === "数据管理"
@@ -3429,6 +3546,9 @@ const primaryActionLabel = computed(() =>
               : config.value.action,
 );
 const primaryActionIcon = computed(() =>
+    selectedSetting.value === "AI 设置"
+        ? mdiRefresh
+        :
     selectedSetting.value === "安全设置"
         ? mdiSwapHorizontal
         : selectedSetting.value === "数据管理"
@@ -3439,32 +3559,25 @@ const primaryActionIcon = computed(() =>
               ? mdiRobotOutline
               : config.value.actionIcon,
 );
-const pendingTransactions = computed<Item[]>(() =>
-    selectedLedgerId.value === DefaultLedgerId
-        ? aiReviewItemsStore.items.map(reviewItemToItem)
-        : [],
-);
+const pendingTransactions = computed<Item[]>(() => aiReviewItemsStore.items.map(reviewItemToItem));
 const activityTransactions = computed(() => [
     ...pendingTransactions.value,
-    ...transactions.value,
+    ...(aiQueueStatus.value === 3 ? [] : transactions.value),
 ]);
 const settingsMenu = computed(() =>
     pageKey.value === "account" ? accountMenu : appMenu,
 );
-const transactionAccounts = computed(() => [
-    ...new Set(
-        activityTransactions.value
-            .map((item) => item.account)
-            .filter((name): name is string => !!name),
-    ),
-]);
+const transactionAccounts = computed(() => accountsStore.allPlainAccounts);
 const filteredTransactions = computed(() =>
     activityTransactions.value.filter(
         (i) =>
             (typeFilter.value === "all" || i.kind === typeFilter.value) &&
             (accountFilter.value === "all" ||
-                i.account === accountFilter.value) &&
+                i.sourceAccountId === accountFilter.value || i.destinationAccountId === accountFilter.value) &&
             (!monthFilter.value || i.month === monthFilter.value) &&
+            (!(i.raw instanceof Transaction) || !transactionDateRange.value ||
+                ((!transactionDateRange.value.minTime || i.raw.time >= transactionDateRange.value.minTime) &&
+                 (!transactionDateRange.value.maxTime || i.raw.time <= transactionDateRange.value.maxTime))) &&
             (!query.value ||
                 `${i.title}${i.meta}${i.category}${i.account}`
                     .toLowerCase()
@@ -3484,8 +3597,9 @@ const selectedCount = computed(
     () => activityTransactions.value.filter((i) => i.selected).length,
 );
 const catalogItems = computed(() =>
-    (pageKey.value === "tags" ? tags.value : categories.value).filter(
-        (i) => !query.value || `${i.title}${i.meta}`.includes(query.value),
+    filterCatalogItems(
+        pageKey.value === "tags" ? tags.value : categories.value,
+        query.value,
     ),
 );
 const sortedSchedules = computed(() =>
@@ -3495,22 +3609,6 @@ const sortedSchedules = computed(() =>
             const bTime = b.raw.nextScheduledTime || Number.MAX_SAFE_INTEGER;
             return (aTime - bTime) * (scheduleAscending.value ? 1 : -1);
         },
-    ),
-);
-const budgetYearMonth = computed(() => {
-    const now = new Date();
-    return now.getFullYear() * 100 + now.getMonth() + 1;
-});
-const budgetMonthLabel = computed(() => `${new Date().getFullYear()}年${new Date().getMonth() + 1}月`);
-const currentBudget = computed(() => monthlyBudgetStore.budgets[budgetYearMonth.value] || null);
-const validBudgetTotal = computed(() => parseBudgetAmount(budgetTotalInput.value) > 0);
-const budgetCategories = computed(() =>
-    (categoriesStore.allTransactionCategories[CategoryType.Expense] || []).flatMap(parent =>
-        (parent.subCategories || []).filter(category => category.visible).map(category => ({
-            id: category.id,
-            name: category.name,
-            parentName: parent.name,
-        })),
     ),
 );
 const calendarScheduleEntries = computed(() =>
@@ -3528,7 +3626,7 @@ const selectedCalendarLabel = computed(
         `${calendarDate.value.getMonth() + 1}月${selectedCalendarDay.value}日`,
 );
 const scheduleTotal = computed(
-    () => `本月 ${calendarScheduleEntries.value.length} 次执行`,
+    () => `本月 ${calendarScheduleEntries.value.length} 次到期`,
 );
 const calendarDays = computed(() =>
     new Date(
@@ -3550,79 +3648,9 @@ const calendarEyebrow = computed(() =>
         .toLocaleDateString("zh-CN", { year: "numeric", month: "long" })
         .toUpperCase(),
 );
-const reportMonthKeys = [
-    "monthBeforeLast10Months",
-    "monthBeforeLast9Months",
-    "monthBeforeLast8Months",
-    "monthBeforeLast7Months",
-    "monthBeforeLast6Months",
-    "monthBeforeLast5Months",
-    "monthBeforeLast4Months",
-    "monthBeforeLast3Months",
-    "monthBeforeLast2Months",
-    "monthBeforeLastMonth",
-    "lastMonth",
-    "thisMonth",
-] as const;
-const reportDataset = computed(() => {
-    const trendByMonth = new Map(
-        ledgerReportTrends.value.map(row => [`${row.year}-${row.month}`, row]),
-    );
-    const items = reportMonthKeys.map((_, index) => {
-        const date = new Date();
-        date.setMonth(date.getMonth() - (reportMonthKeys.length - 1 - index));
-        const row = trendByMonth.get(`${date.getFullYear()}-${date.getMonth() + 1}`);
-        let incomeAmount = 0;
-        let expenseAmount = 0;
-        for (const item of row?.items || []) {
-            const category = categoriesStore.allTransactionCategoriesMap[item.categoryId];
-            if (category?.type === CategoryType.Income) incomeAmount += item.amount;
-            else if (category?.type === CategoryType.Expense) expenseAmount += item.amount;
-        }
-        return {
-            label: `${date.getMonth() + 1}月`,
-            incomeAmount,
-            expenseAmount,
-        };
-    });
-    const maximum = Math.max(0, ...items.flatMap(item => [item.incomeAmount, item.expenseAmount]));
-    return items.map(item => ({
-        ...item,
-        income: maximum ? Math.max(2, item.incomeAmount * 100 / maximum) : 0,
-        expense: maximum ? Math.max(2, item.expenseAmount * 100 / maximum) : 0,
-    }));
-});
-const reportBars = computed(() => {
-    const all = reportDataset.value;
-    const selected = reportPeriod.value === "近 6 个月"
-        ? all.slice(-6)
-        : reportPeriod.value === "今年"
-          ? all.filter((_, index) => {
-                const date = new Date();
-                date.setMonth(date.getMonth() - (all.length - 1 - index));
-                return date.getFullYear() === new Date().getFullYear();
-            })
-          : all;
-    return selected.some(item => item.incomeAmount || item.expenseAmount) ? selected : [];
-});
-const expenseBreakdown = computed(() => {
-    const totals = new Map<string, { title: string; color: string; amount: number }>();
-    for (const item of transactions.value) {
-        if (!(item.raw instanceof Transaction) || item.raw.type !== TransactionType.Expense) continue;
-        const title = item.raw.category?.name || "未分类";
-        const current = totals.get(title) || { title, color: String(item.raw.category?.color || "#9AA1AD"), amount: 0 };
-        current.amount += item.raw.sourceAmount;
-        totals.set(title, current);
-    }
-    const sum = [...totals.values()].reduce((total, item) => total + item.amount, 0);
-    return [...totals.values()]
-        .sort((a, b) => b.amount - a.amount)
-        .slice(0, 4)
-        .map(item => ({ ...item, percent: sum ? Math.round(item.amount * 100 / sum) : 0 }));
-});
-const reportExpenseTotal = computed(() => currentLedgerMonthTotals.value.expense);
 const settingsDescription = computed(() => {
-    if (pageKey.value === "account") return "更改会保存到当前个人账本。";
+    if (selectedSetting.value === "AI 设置") return "查看模型用量，管理当前账号的 Agent 授权与 MCP 接入。";
+    if (pageKey.value === "account") return "个人资料保存到当前账号，不改变正在使用的账本。";
     if (selectedSetting.value === "AI 配置")
         return "在页面中维护服务端 OpenAI 兼容接口，保存后立即生效且重启后保留。";
     return "更改会保存在当前设备并立即生效。";
@@ -3630,7 +3658,8 @@ const settingsDescription = computed(() => {
 const selectedAIReviewItem = computed(() =>
     isAIReviewItem(detail.value?.raw) ? detail.value.raw : null,
 );
-function showToast(message: string) {
+function showToast(message: string, isError = false) {
+    toastIsError.value = isError;
     toast.value = message;
     if (toastTimer) clearTimeout(toastTimer);
     toastTimer = setTimeout(() => (toast.value = ""), 2600);
@@ -3641,7 +3670,7 @@ function showError(error: unknown) {
         error?: { errorMessage?: string };
     };
     showToast(
-        value?.error?.errorMessage || value?.message || "操作失败，请稍后重试",
+        value?.error?.errorMessage || value?.message || "操作失败，请稍后重试", true,
     );
 }
 function formatAssetMoney(value: number) {
@@ -3651,9 +3680,12 @@ function formatAssetMoney(value: number) {
     );
 }
 function formatBookkeepingMoney(value: number) {
+    if (pageDataError.value) return "未能读取";
+    if (!pageDataReady.value || busy.value) return "—";
+    if (!Number.isSafeInteger(value)) return "未完整计算";
     return formatAmountToLocalizedNumeralsWithCurrency(
-        Math.trunc(Number.isFinite(value) ? value : 0),
-        userStore.currentUserDefaultCurrency || "CNY",
+        value,
+        summaryCurrency.value,
     );
 }
 function formatAssetDate(unixTime: number) {
@@ -3663,7 +3695,7 @@ function formatAssetDate(unixTime: number) {
         day: "2-digit",
     });
 }
-function isAIReviewItem(value: unknown): value is AIReviewItemInfoResponse {
+function isAIReviewItem(value: unknown): value is AIReviewLedgerItem {
     return (
         !!value &&
         typeof value === "object" &&
@@ -3672,7 +3704,7 @@ function isAIReviewItem(value: unknown): value is AIReviewItemInfoResponse {
         "id" in value
     );
 }
-function reviewItemToItem(item: AIReviewItemInfoResponse): Item {
+function reviewItemToItem(item: AIReviewLedgerItem): Item {
     const recognized = item.recognizedData;
     const kind =
         recognized?.type === TransactionType.Income
@@ -3680,26 +3712,29 @@ function reviewItemToItem(item: AIReviewItemInfoResponse): Item {
             : recognized?.type === TransactionType.Transfer
               ? "转账"
               : "支出";
-    const amount = recognized?.sourceAmount
-        ? formatAmountToLocalizedNumeralsWithCurrency(
-              recognized.sourceAmount,
-              userStore.currentUserDefaultCurrency,
-          )
-        : "待补充";
+    const source = recognized?.sourceAccountId ? accountsStore.allAccountsMap[recognized.sourceAccountId] : undefined;
+    const destination = recognized?.destinationAccountId ? accountsStore.allAccountsMap[recognized.destinationAccountId] : undefined;
+    const primary = source || (recognized?.type === TransactionType.Transfer ? destination : undefined);
+    const primaryAmount = source ? recognized?.sourceAmount : recognized?.destinationAmount;
+    const amount = primary && primaryAmount !== undefined
+        ? formatAmountToLocalizedNumeralsWithCurrency(primaryAmount, primary.currency) : "账户或金额待核对";
     const date = new Date(item.createdUnixTime * 1000);
     return {
         title:
             recognized?.comment || item.sourceText.slice(0, 24) || "待确认记录",
+        id: item.id,
+        sourceAccountId: recognized?.sourceAccountId,
+        destinationAccountId: recognized?.destinationAccountId,
         meta: item.failureReason || "AI 识别结果需要人工核对",
-        amount: recognized?.sourceAmount
-            ? `${kind === "收入" ? "+" : "-"}${amount}`
-            : amount,
-        status: "待确认",
+        amount: !settingsStore.appSettings.showAmountInHomePage ? '金额已隐藏' : kind === '转账' ? (source && destination && recognized?.destinationAmount !== undefined
+            ? `↔ ${amount} → ${formatAmountToLocalizedNumeralsWithCurrency(recognized.destinationAmount, destination.currency)}` : `↔ ${amount}`)
+            : primary && primaryAmount !== undefined ? (primaryAmount < 0 ? `退款 ${amount}` : `${kind === '收入' ? '+' : '-'}${amount}`) : amount,
+        status: item.status === 3 ? "已忽略" : "待复核",
         tone: "warning",
         icon: "待",
         color: "#B54708",
         kind,
-        category: "待确认",
+        category: item.status === 3 ? "已忽略" : "待确认",
         account: "待处理队列",
         date: date.toLocaleString("zh-CN", {
             month: "numeric",
@@ -3785,7 +3820,61 @@ function assetVisual(category: number) {
     };
     return icons[category] || mdiPackageVariantClosed;
 }
-function openQuickTransactionFromRoute() {
+async function openPendingTarget(target: LedgerPendingTarget): Promise<void> {
+    const identity = getTransactionStateIdentity(), ledgerId = selectedLedgerId.value, originalPath = route.path, ticket = pendingRouteSerial;
+    try {
+        if (pendingRoutingSuspended.value) throw new Error('账号状态已变化，请重新载入页面后核对原账本');
+        if (target.ledgerId !== ledgerId) throw new Error('请返回原账本刷新待处理，不会自动切换账本');
+        await ledgerPendingStore.verifyTarget(target);
+        if (ticket !== pendingRouteSerial || pendingRoutingSuspended.value || ledgerId !== selectedLedgerId.value || identity !== getTransactionStateIdentity() || originalPath !== route.path) return;
+        pendingDialogOpen.value = false;
+        if (target.kind === 'periodic-review') {
+            if (pageKey.value !== 'program') { await router.push(desktopLedgerPendingLocation(target)); return; }
+            await loadPageData(true, false, ledgerId);
+            if (ticket !== pendingRouteSerial || pendingRoutingSuspended.value || ledgerId !== selectedLedgerId.value || identity !== getTransactionStateIdentity() || originalPath !== route.path) return;
+            const original = pendingOccurrences.value.find(row => row.templateId === target.templateId && row.scheduledUnixTime === target.scheduledUnixTime);
+            if (!original) throw new Error('原到期记录已变化，请刷新待处理后核对');
+            await nextTick();
+            const row = document.querySelector<HTMLElement>(`[data-pending-occurrence="${target.templateId}:${target.scheduledUnixTime}"]`);
+            row?.focus(); row?.scrollIntoView({ block: 'center', behavior: 'instant' });
+            showToast('已定位原到期记录，核对后再确认入账');
+        } else if (target.kind === 'ai-review') {
+            await openAIReview(target.id, originalPath, ticket);
+        } else if (target.kind === 'ai-source') {
+            await aiSourceDialog.value?.open(ledgerId, '', 1, target);
+        } else if (target.kind === 'template-create') {
+            await templateEditDialog.value?.open({ templateType: target.templateType, expectedRecoveryTarget: target });
+        } else {
+            await transactionEditDialog.value?.open({ recoverPendingTransaction: target.recovery === 'pending', recoverTransactionDraft: target.recovery === 'draft',
+                expectedRecoveryClientSessionId: target.clientSessionId, expectedRecoveryDraftRevision: target.recovery === 'draft' ? target.draftRevision : undefined });
+        }
+    } catch (error) {
+        if (ticket === pendingRouteSerial && !pendingRoutingSuspended.value && ledgerId === selectedLedgerId.value && identity === getTransactionStateIdentity() && originalPath === route.path && !(error as { canceled?: boolean })?.canceled) {
+            if (route.query['pendingTarget'] !== undefined) routeOpeningError.value = '无法打开原待处理，请核对原账本和权限后重试；原入口已保留，不会另建请求。';
+            else showError(error);
+        }
+    }
+}
+async function openPendingFromRoute(): Promise<void> {
+    const value = route.query['pendingTarget'];
+    if (value === undefined) return;
+    const serial = ++pendingRouteSerial, identity = getTransactionStateIdentity(), ledgerId = selectedLedgerId.value, originalPath = route.path;
+    try {
+        if (pendingRoutingSuspended.value) throw new Error('账号状态已变化，请重新载入页面');
+        const target = parseLedgerPendingTarget(value);
+        if (target.ledgerId !== ledgerId) throw new Error('原待处理属于其他账本，请手动返回原账本后刷新');
+        await ledgerPendingStore.refresh(ledgerId);
+        await ledgerPendingStore.verifyTarget(target);
+        if (serial !== pendingRouteSerial || ledgerId !== selectedLedgerId.value || identity !== getTransactionStateIdentity() || originalPath !== route.path || route.query['pendingTarget'] !== value) return;
+        await loadPageData(false, false, ledgerId);
+        if (serial !== pendingRouteSerial || ledgerId !== selectedLedgerId.value || identity !== getTransactionStateIdentity() || originalPath !== route.path) return;
+        if (!pageDataReady.value || pageDataError.value) throw new Error('未能完整读取原账本');
+        // Keep the original metadata locator in the URL. Reload and explicit
+        // retry must reverify this same target even if opening its editor fails.
+        await openPendingTarget(target);
+    } catch { if (serial === pendingRouteSerial && ledgerId === selectedLedgerId.value && identity === getTransactionStateIdentity() && originalPath === route.path) routeOpeningError.value = '无法打开原待处理，请核对原账本和权限后重试；原入口已保留，不会另建请求。'; }
+}
+async function openQuickTransactionFromRoute(isActionCurrent: () => boolean): Promise<void> {
     if (pageKey.value !== "activity") return;
     const action = route.query["action"];
     const type =
@@ -3795,19 +3884,60 @@ function openQuickTransactionFromRoute() {
               ? TransactionType.Expense
               : undefined;
     if (type === undefined) return;
+    if (!isActionCurrent()) return;
     if (!selectedLedgerCanWrite.value) {
-        showToast("你在此账本中是只读成员，不能新增流水");
+        routeOpeningError.value = '你在此账本中没有新增流水权限。原入口已保留，请核对权限后重试。';
         return;
     }
     const nextQuery = { ...route.query };
     delete nextQuery["action"];
-    void router.replace({ path: route.path, query: nextQuery });
+    await router.replace({ path: route.path, query: nextQuery });
+    await nextTick();
+    if (!isActionCurrent() || route.query['action'] !== undefined) return;
     transactionEditDialog.value
         ?.open({ type, noTransactionDraft: true })
         .then(() => loadPageData(true, false))
         .catch((error) => {
             if (error) showError(error);
         });
+}
+
+async function initializePageFromRoute(force: boolean): Promise<void> {
+    const pendingTarget = route.query['pendingTarget'], action = route.query['action'];
+    if (pendingTarget === undefined && action !== 'income' && action !== 'expense') {
+        routeOpeningBusy.value = false; routeOpeningError.value = ''; routeSelectionVerified.value = false;
+        void loadPageData(force, false);
+        return;
+    }
+    const serial = ++routeOpeningSerial, identity = getTransactionStateIdentity(), originalPath = route.path;
+    const isCurrent = () => serial === routeOpeningSerial && !pendingRoutingSuspended.value
+        && identity === getTransactionStateIdentity() && originalPath === route.path;
+    const isOriginalQuery = () => route.query['pendingTarget'] === pendingTarget && route.query['action'] === action;
+    routeOpeningBusy.value = true; routeOpeningError.value = ''; routeSelectionVerified.value = false;
+    try {
+        if (!isCurrent()) throw new Error('账号状态已变化，请重新载入页面后核对原账本');
+        const ledgerId = await ledgersStore.ensureStrictSelection(() => isCurrent() && isOriginalQuery());
+        if (!isCurrent() || !isOriginalQuery() || selectedLedgerId.value !== ledgerId) return;
+        routeSelectionVerified.value = true;
+        if (pendingTarget !== undefined) {
+            routeOpeningBusy.value = false;
+            // Its own target ticket begins after restoring the existing choice,
+            // so the legitimate initial 0 -> original-ledger change cannot cancel it.
+            void openPendingFromRoute();
+        } else {
+            await loadPageData(force, false, ledgerId);
+            if (!isCurrent() || !isOriginalQuery() || selectedLedgerId.value !== ledgerId) return;
+            if (!pageDataReady.value || pageDataError.value) throw new Error('未能完整读取原账本，请核对连接与权限后重试');
+            routeOpeningBusy.value = false;
+            await openQuickTransactionFromRoute(() => isCurrent() && selectedLedgerId.value === ledgerId);
+        }
+    } catch {
+        if (serial === routeOpeningSerial && identity === getTransactionStateIdentity() && originalPath === route.path) {
+            routeOpeningError.value = '无法核验原入口，请检查连接、原账本和访问权限后重试；原入口已保留，不会改用默认账本。';
+        }
+    } finally {
+        if (serial === routeOpeningSerial) routeOpeningBusy.value = false;
+    }
 }
 function switchAccount() {
     accountMenuOpen.value = false;
@@ -3827,54 +3957,95 @@ async function logoutAccount() {
 }
 async function changeSelectedLedger(ledgerId: string) {
     if (ledgerId === selectedLedgerId.value) return;
+    routeOpeningSerial++;
     try {
         ledgersStore.select(ledgerId);
+        aiQueueStatus.value = 1; aiRecoveryId.value = ''; aiRecoveryError.value = ''; aiSourceRecovery.value = false;
         detail.value = null;
-        selectedAccount.value = null;
+        selectedAccountId.value = "";
         accountFilter.value = "all";
         currentPage.value = 1;
-        ledgerReportTrends.value = [];
+        transactions.value = [];
+        summaryCurrency.value = userStore.currentUserDefaultCurrency || "CNY";
         await loadPageData(true, false);
-        showToast(`已切换到「${selectedLedgerName.value}」`);
+        if (!pageDataError.value) showToast(`已切换到「${selectedLedgerName.value}」`);
     } catch (error) {
         showError(error);
     }
 }
-async function loadPageData(force = false, showRefreshMessage = force) {
+let pageLoadSerial = 0;
+function onAIStorageChanged(event: StorageEvent) {
+    if (ledgerReportStorageInvalidatesSession(event.key, event.newValue, pendingOpeningSession,
+        { identity: getTransactionStateIdentity(), username: getCurrentUserInfo()?.username ?? null, hasToken: isUserLogined() }, userStore.currentUserBasicInfo?.username ?? null)) {
+        pendingRouteSerial++; pendingRoutingSuspended.value = true; pendingDialogOpen.value = false;
+        routeOpeningSerial++;
+        if (routeOpeningBusy.value || route.query['pendingTarget'] !== undefined || route.query['action'] !== undefined) {
+            routeOpeningBusy.value = false; routeOpeningError.value = '账号状态已变化，请重新载入页面后核对原账本。';
+        }
+    }
+    if (event.key === null || event.key.includes('ai-review-')) refreshAIRecovery();
+}
+onUnmounted(() => { pageLoadSerial++; pendingRouteSerial++; routeOpeningSerial++; window.removeEventListener('storage', onAIStorageChanged); });
+async function loadWorkspaceAccounts(force: boolean, ledgerId: string) {
+    try { await accountsStore.loadAllAccounts({ force, ledgerId }); }
+    catch (error) {
+        if ((error as { isUpToDate?: boolean } | null)?.isUpToDate === true && selectedLedgerId.value === ledgerId && accountsStore.accountListLedgerId === ledgerId && !accountsStore.accountListStateInvalid) return;
+        throw error;
+    }
+}
+async function loadWorkspaceCategories(force: boolean, ledgerId: string) {
+    try { await categoriesStore.loadAllCategories({ force, ledgerId }); }
+    catch (error) {
+        if ((error as { isUpToDate?: boolean } | null)?.isUpToDate === true && selectedLedgerId.value === ledgerId && categoriesStore.loadedLedgerId === ledgerId && !categoriesStore.transactionCategoryListStateInvalid) return;
+        throw error;
+    }
+}
+async function loadWorkspaceTemplates(templateType: number, force: boolean, ledgerId: string) {
+    try { await templatesStore.loadAllTemplates({ templateType, force, ledgerId }); }
+    catch (error) {
+        if ((error as { isUpToDate?: boolean } | null)?.isUpToDate === true && selectedLedgerId.value === ledgerId && templatesStore.loadedLedgerId === ledgerId && transactionTemplateCacheValid(templateType)) return;
+        throw error;
+    }
+}
+function transactionTemplateCacheValid(templateType: number): boolean {
+    return templatesStore.transactionTemplateListStatesInvalid[templateType] === false;
+}
+async function loadPageData(force = false, showRefreshMessage = force, strictLedgerId?: string) {
+    const loadSerial = ++pageLoadSerial;
+    const requestedPage = pageKey.value;
     busy.value = true;
+    pageDataError.value = "";
+    pageDataReady.value = false;
+    if (pageKey.value === "activity") {
+        transactions.value = [];
+        transactionLoadError.value = "";
+    }
+    if (pageKey.value === "reports") {
+        transactions.value = [];
+    }
     try {
-        await ledgersStore.load();
+        if (strictLedgerId === undefined) await ledgersStore.load();
+        else if (selectedLedgerId.value !== strictLedgerId) throw new Error('原账本已变化，请重新打开待处理');
         const ledgerId = selectedLedgerId.value;
         const explicitLedgerId = ledgerId === DefaultLedgerId ? undefined : ledgerId;
+        const isCurrent = () => loadSerial === pageLoadSerial && ledgerId === selectedLedgerId.value && requestedPage === pageKey.value;
         if (explicitLedgerId) await ledgersStore.loadAccess(ledgerId);
         if (pageKey.value === "manage")
-            await accountsStore.loadAllAccounts({ force, ledgerId });
+            await loadWorkspaceAccounts(force, ledgerId);
         else if (pageKey.value === "categories")
-            await categoriesStore.loadAllCategories({ force });
+            await loadWorkspaceCategories(force, ledgerId);
         else if (pageKey.value === "tags")
             await Promise.all([
                 tagsStore.loadAllTagGroups({ force }),
                 tagsStore.loadAllTags({ force }),
             ]);
         else if (pageKey.value === "templates")
-            await templatesStore.loadAllTemplates({
-                templateType: TemplateType.Normal.type,
-                force,
-            });
+            await Promise.all([loadWorkspaceAccounts(force, ledgerId), loadWorkspaceTemplates(TemplateType.Normal.type, force, ledgerId)]);
         else if (pageKey.value === "program")
             await Promise.all([
-                templatesStore.loadAllTemplates({
-                    templateType: TemplateType.Schedule.type,
-                    force,
-                }),
-                occurrencesStore.load(),
-                categoriesStore.loadAllCategories({ force: false }),
-                monthlyBudgetStore.load(budgetYearMonth.value, force).then(budget => {
-                    budgetTotalInput.value = budget ? String(budget.amount / AMOUNT_FACTOR) : "";
-                    budgetCategoryInputs.value = Object.fromEntries(
-                        Object.entries(budget?.categoryAmounts || {}).map(([id, amount]) => [id, String(amount / AMOUNT_FACTOR)]),
-                    );
-                }),
+                loadWorkspaceAccounts(force, ledgerId),
+                loadWorkspaceTemplates(TemplateType.Schedule.type, force, ledgerId),
+                occurrencesStore.load(ledgerId),
             ]);
         else if (pageKey.value === "rates")
             await exchangeRatesStore.getLatestExchangeRates({
@@ -3886,70 +4057,58 @@ async function loadPageData(force = false, showRefreshMessage = force) {
         else if (pageKey.value === "goals")
             await Promise.all([
                 savingsGoalsStore.load(selectedGoalLedgerId.value),
-                accountsStore.loadAllAccounts({ force, ledgerId }),
+                loadWorkspaceAccounts(force, ledgerId),
             ]);
         else if (pageKey.value === "family") {
             await ledgersStore.load();
             await selectManagedLedger(managedLedgerId.value);
         }
-        else if (pageKey.value === "reports") {
-            await Promise.all([
-                accountsStore.loadAllAccounts({ force: false, ledgerId }),
-                categoriesStore.loadAllCategories({ force }),
-            ]);
-            const now = new Date();
-            const start = new Date(now.getFullYear(), now.getMonth() - 11, 1);
-            const yearMonth = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-            const trendResponse = await services.getTransactionStatisticsTrends({
-                ledgerId: explicitLedgerId,
-                startYearMonth: yearMonth(start),
-                endYearMonth: yearMonth(now),
-                tagFilter: "",
-                keyword: "",
-                matchMode: 0,
-                useTransactionTimezone: false,
-            });
-            if (!trendResponse.data?.success || !trendResponse.data.result) {
-                throw new Error("无法读取当前账本报表");
-            }
-            ledgerReportTrends.value = trendResponse.data.result;
-            const result = await transactionsStore.loadMonthlyAllTransactions({
-                ledgerId: explicitLedgerId,
-                year: now.getFullYear(),
-                month: now.getMonth() + 1,
-                autoExpand: true,
-                defaultCurrency: userStore.currentUserDefaultCurrency,
-            });
-            transactions.value = result.items.map(transactionToItem);
-        }
         else if (pageKey.value === "activity") {
             await Promise.all([
-                accountsStore.loadAllAccounts({ force: false, ledgerId }),
-                categoriesStore.loadAllCategories({ force: false }),
+                loadWorkspaceAccounts(false, ledgerId),
+                loadWorkspaceCategories(false, ledgerId),
                 ...(ledgerId === DefaultLedgerId ? [
                     tagsStore.loadAllTags({ force: false }),
                     templatesStore.loadAllTemplates({
                         templateType: TemplateType.Normal.type,
                         force: false,
                     }),
-                    aiReviewItemsStore.load(),
                 ] : []),
             ]);
-            const now = new Date();
-            const result = await transactionsStore.loadMonthlyAllTransactions({
-                ledgerId: explicitLedgerId,
-                year: now.getFullYear(),
-                month: now.getMonth() + 1,
-                autoExpand: true,
-                defaultCurrency: userStore.currentUserDefaultCurrency,
-            });
-            transactions.value = result.items.map(transactionToItem);
+            await aiReviewItemsStore.load(ledgerId, aiQueueStatus.value).catch(() => {});
+            if (!isCurrent()) return;
+            refreshAIRecovery();
+            const result = await loadWorkspaceTransactions(explicitLedgerId, () => loadSerial === pageLoadSerial && pageKey.value === "activity" && ledgerId === selectedLedgerId.value);
+            if (!result) return;
+            for (const transaction of result) {
+                const source = accountsStore.allAccountsMap[transaction.sourceAccountId];
+                const destination = accountsStore.allAccountsMap[transaction.destinationAccountId];
+                const category = categoriesStore.allTransactionCategoriesMap[transaction.categoryId];
+                if (source) transaction.setSourceAccount(source);
+                if (destination) transaction.setDestinationAccount(destination);
+                if (category) transaction.setCategory(category);
+            }
+            transactions.value = result.map(transactionToItem);
         }
-        if (showRefreshMessage) showToast(`${config.value.title}已刷新`);
+        else if (["about", "settings", "account"].includes(pageKey.value)) {
+            serverVersion.value = ""; serverInfoError.value = "";
+            try {
+                const response = await services.getServerVersion();
+                if (!response.data?.success || !response.data.result?.version) throw new Error("服务端版本不可用");
+                if (isCurrent()) serverVersion.value = response.data.result.version;
+            } catch {
+                if (isCurrent()) serverInfoError.value = "未能读取服务端版本，请刷新重试。";
+            }
+        }
+        if (!isCurrent()) return;
+        pageDataReady.value = true;
+        if (showRefreshMessage && !serverInfoError.value) showToast(`${config.value.title}已刷新`);
     } catch (error) {
-        showError(error);
+        if (loadSerial === pageLoadSerial) pageDataError.value = "未能完整读取当前页面，请检查连接或权限后重试。";
+        if (loadSerial === pageLoadSerial && pageKey.value === "activity") transactionLoadError.value = "读取流水失败，请重试。";
+        if (loadSerial === pageLoadSerial) showError(error);
     } finally {
-        busy.value = false;
+        if (loadSerial === pageLoadSerial) busy.value = false;
     }
 }
 function transactionToItem(transaction: Transaction): Item {
@@ -3962,13 +4121,11 @@ function transactionToItem(transaction: Transaction): Item {
             : transaction.type === TransactionType.Transfer
               ? "转账"
               : "支出";
-    const currency =
-        transaction.sourceAccount?.currency ||
-        userStore.currentUserDefaultCurrency;
-    const amount = formatAmountToLocalizedNumeralsWithCurrency(
+    const currency = accountCurrency(summaryAccounts.value, transaction.sourceAccountId);
+    const amount = currency ? formatAmountToLocalizedNumeralsWithCurrency(
         isModifyBalance ? Math.abs(transaction.sourceAmount) : transaction.sourceAmount,
         currency,
-    );
+    ) : "币种未读取";
     const prefix = isModifyBalance
         ? transaction.sourceAmount >= 0
             ? "+"
@@ -3979,7 +4136,7 @@ function transactionToItem(transaction: Transaction): Item {
             ? "↔ "
             : "-";
     const date = new Date(transaction.time * 1000);
-    // The list renders title and meta side by side; when the comment repeats
+    // The list renders title and meta on separate lines; when the comment repeats
     // the category name, fall back to the account so the same text never
     // appears in both lines.
     const title = transaction.comment || transaction.category?.name || kind;
@@ -3987,7 +4144,10 @@ function transactionToItem(transaction: Transaction): Item {
         ? transaction.category?.name || kind
         : transaction.sourceAccount?.name || "无备注";
     return {
+        id: transaction.id,
         title,
+        sourceAccountId: transaction.sourceAccountId,
+        destinationAccountId: transaction.destinationAccountId,
         meta:
             meta === title
                 ? transaction.sourceAccount?.name || kind
@@ -4015,7 +4175,7 @@ function transactionToItem(transaction: Transaction): Item {
 function refresh() {
     void loadPageData(true);
 }
-function importStatement(fileType: string): void {
+function importStatement(fileType?: string): void {
     if (busy.value || !selectedLedgerCanWrite.value || !isDataImportingEnabled()) return;
     statementImportDialog.value?.open(fileType).then(() => {
         void loadPageData(false, false);
@@ -4024,15 +4184,29 @@ function importStatement(fileType: string): void {
     });
 }
 function resetFilters() {
+    void router.replace({ query: { ...route.query, accountIds: undefined, dateType: '0', minTime: undefined, maxTime: undefined } });
     typeFilter.value = "all";
     accountFilter.value = "all";
     monthFilter.value = "";
+    dateFilter.value = DateRange.All.type;
     query.value = "";
     currentPage.value = 1;
     showToast("筛选条件已清除");
 }
+function updateDateFilterRoute() {
+    monthFilter.value = "";
+    void router.replace({ query: { ...route.query, dateType: String(dateFilter.value), minTime: undefined, maxTime: undefined } });
+}
+function showAllTransactionDates() {
+    dateFilter.value = DateRange.All.type;
+    updateDateFilterRoute();
+}
+function selectTransactionMonth() {
+    dateFilter.value = DateRange.All.type;
+    void router.replace({ query: { ...route.query, dateType: '0', minTime: undefined, maxTime: undefined } });
+}
 function togglePendingFilter() {
-    if (!aiReviewItemsStore.items.length) return;
+    if (aiQueueStatus.value !== 1) { aiQueueStatus.value = 1; void reloadAIQueue(); }
     query.value = query.value === "待确认" ? "" : "待确认";
     currentPage.value = 1;
 }
@@ -4049,52 +4223,6 @@ function openDetail(item: Item) {
             : null;
     detail.value = item;
 }
-function parseBudgetAmount(value: string): number {
-    const normalized = value.trim().replace(/,/g, "");
-    if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) return 0;
-    const amount = Math.round(Number(normalized) * AMOUNT_FACTOR);
-    return Number.isSafeInteger(amount) ? amount : 0;
-}
-function setBudgetCategoryInput(categoryId: string, event: Event) {
-    budgetCategoryInputs.value[categoryId] = (event.target as HTMLInputElement).value;
-}
-async function saveBudget() {
-    const amount = parseBudgetAmount(budgetTotalInput.value);
-    if (!amount || budgetSaving.value) return;
-    const categoryAmounts: Record<string, number> = {};
-    for (const [categoryId, input] of Object.entries(budgetCategoryInputs.value)) {
-        if (!input.trim()) continue;
-        const categoryAmount = parseBudgetAmount(input);
-        if (!categoryAmount) {
-            showToast("分类额度必须是大于 0、最多两位小数的金额");
-            return;
-        }
-        categoryAmounts[categoryId] = categoryAmount;
-    }
-    budgetSaving.value = true;
-    try {
-        await monthlyBudgetStore.save(budgetYearMonth.value, amount, categoryAmounts);
-        showToast("本月支出限额已保存");
-    } catch (error) {
-        showError(error);
-    } finally {
-        budgetSaving.value = false;
-    }
-}
-async function removeBudget() {
-    if (budgetSaving.value) return;
-    budgetSaving.value = true;
-    try {
-        await monthlyBudgetStore.remove(budgetYearMonth.value);
-        budgetTotalInput.value = "";
-        budgetCategoryInputs.value = {};
-        showToast("本月支出限额已清除");
-    } catch (error) {
-        showError(error);
-    } finally {
-        budgetSaving.value = false;
-    }
-}
 function scheduleFrequencyLabel(template: TransactionTemplate): string {
     const values = (template.scheduledFrequency || "").split(",").filter(Boolean);
     if (template.scheduledFrequencyType === ScheduledTemplateFrequencyType.Disabled.type) return "已暂停";
@@ -4106,7 +4234,9 @@ function scheduleFrequencyLabel(template: TransactionTemplate): string {
     return "周期未设置";
 }
 function editSchedule(item: { raw?: unknown; title: string }) {
+    if (!selectedLedgerCanManage.value) return;
     if (!(item.raw instanceof TransactionTemplate)) return;
+    if (!item.raw.editable || item.raw.ledgerId !== selectedLedgerId.value) return;
     templateEditDialog.value
         ?.open({ id: item.raw.id, currentTemplate: item.raw })
         .then(async () => {
@@ -4150,11 +4280,9 @@ function isToday(day: number) {
     );
 }
 function useTemplate(item: { title: string; uses: number; raw?: unknown }) {
-    const template =
-        (
-            templatesStore.allVisibleTemplates[TemplateType.Normal.type] || []
-        ).find((value) => value === item.raw || value.name === item.title) ||
-        (templatesStore.allVisibleTemplates[TemplateType.Normal.type] || [])[0];
+    if (!selectedLedgerCanWrite.value) return;
+    const template = item.raw instanceof TransactionTemplate ? item.raw : undefined;
+    if (!template || template.ledgerId !== selectedLedgerId.value) return;
     transactionEditDialog.value
         ?.open({ template })
         .then(() => {
@@ -4166,6 +4294,7 @@ function useTemplate(item: { title: string; uses: number; raw?: unknown }) {
         });
 }
 function createRecommendedTemplate(item: RecommendedTemplate) {
+    if (!selectedLedgerCanManage.value) return;
     if (!accountsStore.allVisiblePlainAccounts.length) {
         showToast("请先添加账户，再创建可用模板");
         void router.push("/account/list");
@@ -4186,6 +4315,7 @@ function createRecommendedTemplate(item: RecommendedTemplate) {
         });
 }
 function editTemplate(item: { title: string; raw?: unknown }) {
+    if (!selectedLedgerCanManage.value) return;
     const template =
         item.raw instanceof TransactionTemplate
             ? item.raw
@@ -4194,7 +4324,7 @@ function editTemplate(item: { title: string; raw?: unknown }) {
                       TemplateType.Normal.type
                   ] || []
               ).find((value) => value.name === item.title);
-    if (!template) {
+    if (!template || !template.editable || template.ledgerId !== selectedLedgerId.value) {
         showToast("请先创建模板");
         return;
     }
@@ -4209,16 +4339,19 @@ function toggleSchedule(
     item: { title: string; enabled: boolean; raw?: unknown },
     enabled: boolean,
 ) {
+    if (!selectedLedgerCanManage.value || busy.value) return;
     if (item.raw instanceof TransactionTemplate) {
-        const template = item.raw;
+        const template = TransactionTemplate.ofTemplate(item.raw);
+        if (!template.editable || template.ledgerId !== selectedLedgerId.value) return;
         busy.value = true;
+        const backupKey = JSON.stringify([getTransactionStateIdentity(), template.ledgerId, template.id]);
 
         let action: Promise<unknown>;
         if (!enabled && template.scheduledFrequencyType !== 0) {
             // Real pause: blank the execution rule on the server and stash the
             // previous frequency locally so resuming can restore it. Hiding
             // must never be presented as pausing.
-            pausedScheduleBackups.value[template.id] = {
+            pausedScheduleBackups.value[backupKey] = {
                 frequencyType: template.scheduledFrequencyType as number,
                 frequency: template.scheduledFrequency as string,
             };
@@ -4230,7 +4363,7 @@ function toggleSchedule(
                 clientSessionId: newOccurrenceClientSessionId(),
             });
         } else if (enabled && template.scheduledFrequencyType === 0) {
-            const backup = pausedScheduleBackups.value[template.id];
+            const backup = pausedScheduleBackups.value[backupKey];
             if (!backup) {
                 busy.value = false;
                 showError({
@@ -4246,12 +4379,7 @@ function toggleSchedule(
                 isEdit: true,
                 clientSessionId: newOccurrenceClientSessionId(),
             });
-        } else {
-            action = templatesStore.hideTemplate({
-                template,
-                hidden: !enabled,
-            });
-        }
+        } else { busy.value = false; return; }
 
         action
             .then(() => {
@@ -4279,9 +4407,9 @@ function newOccurrenceClientSessionId(): string {
     return generateRandomUUID();
 }
 
-const pendingOccurrences = computed(() => occurrencesStore.pendingOccurrences);
+const pendingOccurrences = computed(() => occurrencesStore.loadedLedgerId === selectedLedgerId.value ? occurrencesStore.pendingOccurrences : []);
 const dismissedOccurrences = computed(
-    () => occurrencesStore.dismissedOccurrences,
+    () => occurrencesStore.loadedLedgerId === selectedLedgerId.value ? occurrencesStore.dismissedOccurrences : [],
 );
 const occurrencesFeatureDisabled = computed(
     () => occurrencesStore.featureDisabled,
@@ -4320,24 +4448,11 @@ function occurrenceMetaLabel(item: ScheduledOccurrence): string {
 }
 
 function occurrenceAmountLabel(item: ScheduledOccurrence): string {
-    if (item.hideAmount) return "¥ ····";
-    const currency =
-        accountsStore.allAccounts.find(
-            (account) => account.id === item.sourceAccountId,
-        )?.currency || userStore.currentUserDefaultCurrency;
-    const source = formatAmountToLocalizedNumeralsWithCurrency(
-        item.sourceAmount,
-        currency,
-    );
-    if (item.type !== TransactionType.Transfer) return source;
-    const destination = formatAmountToLocalizedNumeralsWithCurrency(
-        item.destinationAmount,
-        currency,
-    );
-    return `${source} → ${destination}`;
+    return formatPeriodicAmounts(item, summaryAccounts.value, formatAmountToLocalizedNumeralsWithCurrency, settingsStore.appSettings.showAmountInHomePage);
 }
 
 function confirmOccurrence(item: ScheduledOccurrence) {
+    if (!selectedLedgerCanWrite.value || busy.value || item.ledgerId !== selectedLedgerId.value) return;
     busy.value = true;
     occurrencesStore
         .confirm(item)
@@ -4350,6 +4465,7 @@ function confirmOccurrence(item: ScheduledOccurrence) {
 }
 
 function dismissOccurrence(item: ScheduledOccurrence) {
+    if (!selectedLedgerCanWrite.value || busy.value || item.ledgerId !== selectedLedgerId.value) return;
     busy.value = true;
     occurrencesStore
         .dismiss(item)
@@ -4359,6 +4475,7 @@ function dismissOccurrence(item: ScheduledOccurrence) {
 }
 
 function restoreOccurrence(item: ScheduledOccurrence) {
+    if (!selectedLedgerCanWrite.value || busy.value || item.ledgerId !== selectedLedgerId.value) return;
     busy.value = true;
     occurrencesStore
         .restore(item)
@@ -4708,6 +4825,10 @@ function submitLedgerEditor(): void {
 }
 
 function primaryAction() {
+    if (!selectedLedgerCanManage.value && (pageKey.value === "program" || pageKey.value === "templates")) {
+        showToast("只有当前账本所有者和管理员可以管理模板。", true);
+        return;
+    }
     if (pageKey.value === "goals") {
         openGoalEditor();
         return;
@@ -4723,7 +4844,7 @@ function primaryAction() {
         }
         transactionEditDialog.value
             ?.open({})
-            .then(() => loadPageData(true, false))
+            .then(async response => { await loadPageData(true, false); if (response?.aiReviewItemId) await openAIReview(response.aiReviewItemId); })
             .catch((error) => {
                 if (error) showError(error);
             });
@@ -4780,10 +4901,6 @@ function primaryAction() {
         editingRaw.value = null;
         resetAssetEditor();
         createOpen.value = true;
-        return;
-    }
-    if (pageKey.value === "reports") {
-        downloadReport();
         return;
     }
     if (pageKey.value === "rates") {
@@ -4887,12 +5004,8 @@ function editAccount() {
         primaryAction();
         return;
     }
-    const selectedAccountName = selectedAccount.value.title;
-    const account =
-        accountsStore.allVisiblePlainAccounts.find(
-            (item) => item.name === selectedAccountName,
-        ) || accountsStore.allVisiblePlainAccounts[0];
-    if (!account) {
+    const account = selectedAccount.value.raw;
+    if (!(account instanceof Account)) {
         primaryAction();
         return;
     }
@@ -4936,7 +5049,7 @@ async function submitAccountLedgerEditor() {
         accountLedgerEditorBusy.value = false;
         accountLedgerEditorOpen.value = false;
         accountLedgerEditorAccount.value = null;
-        selectedAccount.value = null;
+        selectedAccountId.value = "";
         ledgersStore.select(targetLedgerId);
         showToast(`账户已迁移到「${ledgersStore.selectedLedger.name}」`);
         try {
@@ -4951,6 +5064,17 @@ async function submitAccountLedgerEditor() {
     } finally {
         accountLedgerEditorBusy.value = false;
     }
+}
+function editSubCategory(category: TransactionCategory) {
+    detail.value = null;
+    void nextTick().then(() => categoryEditDialog.value
+        ?.open(categoryEditPayload(category))
+        .then(() => {
+            return loadPageData(false);
+        })
+        .catch((error) => {
+            if (error) showError(error);
+        }));
 }
 function editDetail() {
     if (!detail.value) return;
@@ -5075,53 +5199,60 @@ async function saveAIConfiguration() {
         saving.value = false;
     }
 }
-async function dismissReviewItem() {
-    const item = selectedAIReviewItem.value;
-    if (!item || busy.value) return;
+async function changeAIReview(action: 'dismiss' | 'restore') {
+    const item = selectedAIReviewItem.value, ledgerId = selectedLedgerId.value, identity = getTransactionStateIdentity();
+    if (!item || !item.editable || busy.value || item.ledgerId !== ledgerId || !confirmDialog.value) return;
+    try { await confirmDialog.value.open(action === 'dismiss' ? '忽略这条 AI 记录？' : '恢复这条 AI 记录？', action === 'dismiss' ? '条目将移至已忽略列表，可以恢复；不会生成流水或改变余额。' : '条目将回到待复核，仍需明确确认后才能入账。'); }
+    catch { return; }
+    if (ledgerId !== selectedLedgerId.value || identity !== getTransactionStateIdentity()) return;
     busy.value = true;
     try {
-        await aiReviewItemsStore.dismiss(item.id);
-        detail.value = null;
-        showToast("已忽略，该记录已移出待确认队列");
+        await aiReviewItemsStore.change(action, ledgerId, item.id);
+        if (ledgerId !== selectedLedgerId.value || identity !== getTransactionStateIdentity()) return;
+        detail.value = null; await reloadAIQueue();
+        showToast(action === 'dismiss' ? '已忽略，可在已忽略列表恢复' : '已恢复到待复核');
+    } catch (error) { if (ledgerId === selectedLedgerId.value && identity === getTransactionStateIdentity()) showError(error); } finally { busy.value = false; }
+}
+const dismissReviewItem = () => changeAIReview('dismiss');
+const restoreReviewItem = () => changeAIReview('restore');
+async function openAIReview(id: string, expectedPath?: string, pendingTicket?: number) {
+    if (busy.value) return;
+    const ledgerId = selectedLedgerId.value, identity = getTransactionStateIdentity();
+    try {
+        const item = await aiReviewItemsStore.get(ledgerId, id);
+        if (ledgerId !== selectedLedgerId.value || identity !== getTransactionStateIdentity() || expectedPath !== undefined && route.path !== expectedPath || pendingTicket !== undefined && (pendingTicket !== pendingRouteSerial || pendingRoutingSuspended.value)) return;
+        const recognized = item.recognizedData;
+        const originalPending = aiReviewItemsStore.readPendingConfirm(ledgerId);
+        const response = await transactionEditDialog.value?.open({
+            aiReviewItemId: item.id, aiReviewEditable: (originalPending?.request.id === item.id && !originalPending.receipt) || (item.editable && item.status === 1 && !item.deleted),
+            type: recognized?.type || TransactionType.Expense, time: recognized?.time,
+            categoryId: recognized?.categoryId, accountId: recognized?.sourceAccountId,
+            destinationAccountId: recognized?.destinationAccountId, amount: recognized?.sourceAmount,
+            destinationAmount: recognized?.destinationAmount, tagIds: recognized?.tagIds?.join(','),
+            comment: recognized?.comment || '', noTransactionDraft: true,
+        });
+        if (ledgerId !== selectedLedgerId.value || identity !== getTransactionStateIdentity()) return;
+        if (response?.transactionId) { detail.value = null; await loadPageData(false); showToast('已确认入账'); }
     } catch (error) {
-        showError(error);
-    } finally {
-        busy.value = false;
+        if (ledgerId === selectedLedgerId.value && identity === getTransactionStateIdentity()
+            && (expectedPath === undefined || expectedPath === route.path)
+            && (pendingTicket === undefined || pendingTicket === pendingRouteSerial && !pendingRoutingSuspended.value)
+            && !(error as { canceled?: boolean })?.canceled) {
+            if (pendingTicket !== undefined && pendingTicket === pendingRouteSerial && route.query['pendingTarget'] !== undefined) routeOpeningError.value = '无法打开原待处理，请核对原账本和权限后重试；原入口已保留，不会另建请求。';
+            else showError(error);
+        }
     }
+    finally { refreshAIRecovery(); }
 }
 function postReviewItem() {
     const item = selectedAIReviewItem.value;
-    if (!item || busy.value) return;
-    const recognized = item.recognizedData;
-    const options = recognized
-        ? {
-              type: recognized.type,
-              time: recognized.time,
-              categoryId: recognized.categoryId,
-              accountId: recognized.sourceAccountId,
-              destinationAccountId: recognized.destinationAccountId,
-              amount: recognized.sourceAmount,
-              destinationAmount: recognized.destinationAmount,
-              tagIds: recognized.tagIds?.join(","),
-              comment: recognized.comment,
-              noTransactionDraft: true,
-          }
-        : { autoRecognizeText: item.sourceText, noTransactionDraft: true };
-    transactionEditDialog.value
-        ?.open(options)
-        .then(async (response) => {
-            if (!response?.transactionId) return;
-            await aiReviewItemsStore.resolve(item.id);
-            detail.value = null;
-            await loadPageData(true, false);
-            showToast("已入账，待确认数量已更新");
-        })
-        .catch((error) => {
-            if (error && !(error as { canceled?: boolean }).canceled)
-                showError(error);
-        });
+    if (item?.editable && item.status === 1) void openAIReview(item.id);
 }
 async function saveSettings() {
+    if (selectedSetting.value === "AI 设置") {
+        await aiSettingsPanel.value?.refresh();
+        return;
+    }
     if (saving.value) return;
     if (selectedSetting.value === "个人资料" && !profileName.value) {
         nameTouched.value = true;
@@ -5159,20 +5290,8 @@ async function saveSettings() {
         saving.value = false;
     }
 }
-function downloadReport() {
-    const rows = reportBars.value.map(
-        (item) => `${item.label},${item.incomeAmount},${item.expenseAmount}`,
-    );
-    const blob = new Blob([`\uFEFF月份,收入,支出\n${rows.join("\n")}`], {
-        type: "text/csv;charset=utf-8",
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `Finexy-${reportPeriod.value}-收支报表.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-    showToast(`${reportPeriod.value}报表已导出`);
+async function downloadReport() {
+    await router.push("/statistics/transaction");
 }
 function openAboutInfo(type: "privacy" | "license") {
     aboutInfo.value =
@@ -5200,49 +5319,64 @@ async function checkForUpdates() {
             ? `发现新版本 v${result.release.version}，可在页面顶部查看更新`
             : `当前版本 v${result.currentVersion}，未发现更高的正式版本`);
     } catch {
-        showToast("检查更新失败，请检查网络后重试");
+        showToast("检查更新失败，请检查网络后重试", true);
     } finally {
         busy.value = false;
     }
 }
 onMounted(() => {
-    void loadPageData(false);
-    openQuickTransactionFromRoute();
+    window.addEventListener('storage', onAIStorageChanged);
+    void initializePageFromRoute(false);
 });
 watch(selectedSetting, (value) => {
     if (pageKey.value === "settings" && value === "AI 配置") {
         void loadAIConfiguration();
     }
-});
+}, { immediate: true });
 watch(pageKey, () => {
     detail.value = null;
     assetDetail.value = null;
     query.value = "";
     currentPage.value = 1;
-    selectedSetting.value =
-        pageKey.value === "account" ? "个人资料" : "基础设置";
-    void loadPageData(true, false);
+    selectedSetting.value = settingFromRoute();
+    void initializePageFromRoute(true);
 });
-watch(() => route.query["action"], openQuickTransactionFromRoute);
-watch([typeFilter, accountFilter, monthFilter, query], () => {
+watch(() => route.query["action"], value => { if (value !== undefined) { pendingRouteSerial++; void initializePageFromRoute(false); } });
+watch(() => route.query['pendingTarget'], () => { pendingRouteSerial++; routeOpeningSerial++; void initializePageFromRoute(false); }, { flush: 'sync' });
+watch(() => route.path, () => { pendingRouteSerial++; routeOpeningSerial++; routeOpeningBusy.value = false; routeOpeningError.value = ''; }, { flush: 'sync' });
+watch(() => [selectedLedgerId.value, userStore.currentUserBasicInfo?.username], () => { pendingRouteSerial++; pendingDialogOpen.value = false; }, { flush: 'sync' });
+watch([typeFilter, accountFilter, monthFilter, dateFilter, query], () => {
     currentPage.value = 1;
 });
 watch(totalPages, (value) => {
     if (currentPage.value > value) currentPage.value = value;
 });
-watch(accounts, (value) => {
-    if (!value.length) {
-        selectedAccount.value = null;
-    } else if (
-        !selectedAccount.value ||
-        !value.some((item) => item.title === selectedAccount.value?.title)
-    ) {
-        selectedAccount.value = value[0]!;
-    }
+watch(() => route.query["accountIds"], value => {
+    accountFilter.value = typeof value === "string" ? value : "all";
+});
+watch(() => route.query["dateType"], value => {
+    dateFilter.value = Number(value) || DateRange.All.type;
 });
 </script>
 
 <style scoped>
+.ledger-report-workspace { min-width: 0; margin-top: 14px; }
+.summary-currency { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 14px 0; color: var(--muted); font-size: 14px; }
+.summary-currency select { min-height: 44px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 12px; color: var(--ink); background: var(--panel); }
+.page-data-error, .scope-notice { padding: 12px; font-size: 14px; line-height: 1.5; border: 1px solid var(--line); border-radius: 12px; color: var(--muted); }
+.page-data-error { color: var(--red); border-color: var(--red); }
+.pending-route-error p { margin: 0 0 12px; }
+.pending-route-error > div { display: flex; gap: 12px; flex-wrap: wrap; }
+.pending-route-error :is(button, a) { display: inline-flex; align-items: center; min-height: 48px; padding: 10px 16px; }
+.toast.toast-error { background: var(--red); color: #fff; }
+.trend-values summary { min-height: 44px; padding: 12px 0; cursor: pointer; }
+.trend-values table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.trend-values :is(th, td) { text-align: left; padding: 6px; border-bottom: 1px solid var(--line); }
+.transaction-range { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; color: var(--muted); margin: 12px 0; }
+@media (max-width: 1160px) {
+    .workspace.activity-workspace, .workspace.accounts-workspace { min-width: 0; }
+    .activity-workspace .shell, .accounts-workspace .shell { min-width: 1080px; }
+}
 .workspace {
     --bg: #f1f2f6;
     --panel: #f7f8fa;
@@ -5627,7 +5761,7 @@ main {
 }
 .filters {
     display: grid;
-    grid-template-columns: repeat(3, 1fr) auto;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
     gap: 9px;
     align-items: end;
     margin-top: 14px;
@@ -5644,8 +5778,11 @@ main {
     color: var(--muted);
     font-size: 10px;
 }
+.filters label { min-width: 0; }
 .filters select,
 .filters input {
+    min-width: 0;
+    width: 100%;
     height: 38px;
     padding: 0 9px;
     border: 1px solid var(--line);
@@ -5665,6 +5802,28 @@ main {
     overflow: auto;
     margin-top: 13px;
 }
+.transaction-table { table-layout: fixed; min-width: 840px; }
+.transaction-check-col { width: 32px; }
+.transaction-amount-col { width: 140px; }
+.transaction-date-col { width: 106px; }
+.transaction-kind-col { width: 76px; }
+.transaction-category-col { width: 100px; }
+.transaction-account-col { width: 116px; }
+.transaction-status-col { width: 76px; }
+.transaction-table tbody tr:focus-visible { outline: 2px solid var(--orange); outline-offset: -2px; }
+.transaction-name { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.transaction-name > i { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 9px; color: #fff; font-size: 12px; font-weight: 600; font-style: normal; }
+.transaction-name > span { display: grid; gap: 3px; min-width: 0; }
+.transaction-name b, .transaction-name small, .transaction-cell-label { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.transaction-name b { color: var(--ink); font-size: 14px; font-weight: 600; }
+.transaction-name small { color: var(--muted); font-size: 12px; }
+.transaction-table .transaction-amount-cell { color: var(--ink); font-weight: 650; font-variant-numeric: tabular-nums; white-space: normal; overflow-wrap: anywhere; }
+.transaction-table .transaction-amount-cell.income { color: var(--green); }
+.transaction-date-cell { font-variant-numeric: tabular-nums; }
+.transaction-table :deep(.status-pill) { display: inline-flex; align-items: center; gap: 6px; font-style: normal; font-size: 12px; }
+.transaction-table :deep(.status-pill > i) { width: 6px; height: 6px; border-radius: 50%; background: var(--faint); }
+.transaction-table :deep(.status-pill.success > i) { background: var(--green); }
+.transaction-table :deep(.status-pill.warning > i) { background: var(--orange); }
 table {
     width: 100%;
     border-collapse: collapse;
@@ -5789,6 +5948,7 @@ tr.compact td {
     gap: 14px;
     margin-top: 14px;
 }
+.account-layout { align-items: start; }
 .account-cards {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -5798,8 +5958,11 @@ tr.compact td {
     background: var(--panel);
 }
 .account-cards article {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
     position: relative;
-    min-height: 230px;
+    min-height: 200px;
     padding: 18px;
     border: 3px solid transparent;
     border-radius: 18px;
@@ -5812,6 +5975,7 @@ tr.compact td {
     transform: translateY(-4px);
     box-shadow: 0 12px 25px rgba(18, 20, 26, 0.14);
 }
+.account-cards article:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
 .account-cards article.selected {
     border-color: rgba(255, 255, 255, 0.7);
 }
@@ -5848,15 +6012,15 @@ tr.compact td {
 }
 .account-cards strong,
 .account-cards em {
-    position: absolute;
-    left: 18px;
+    position: static;
 }
 .account-cards strong {
-    bottom: 44px;
+    margin-top: auto;
+    padding-top: 20px;
     font-size: 20px;
 }
 .account-cards em {
-    bottom: 19px;
+    margin-top: 8px;
     color: rgba(255, 255, 255, 0.72);
     font-size: 9.5px;
     font-style: normal;
@@ -6083,9 +6247,28 @@ dd {
 .text-btn.danger {
     color: var(--danger, #b3261e);
 }
+.switch {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+    cursor: pointer;
+}
+.switch:focus-within {
+    outline: 2px solid var(--ink);
+    outline-offset: 2px;
+    border-radius: 12px;
+}
 .switch input {
     position: absolute;
     opacity: 0;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    cursor: inherit;
 }
 .switch i {
     position: relative;
@@ -6754,6 +6937,9 @@ dd {
     margin: 15px 0 4px;
     font-size: 22px;
 }
+.transaction-detail { overflow: auto; max-width: calc(100vw - 36px); }
+.transaction-detail :is(h2, p, dd) { overflow-wrap: anywhere; }
+.transaction-detail .drawer-close { position: sticky; top: 0; right: auto; float: right; width: 44px; height: 44px; z-index: 1; }
 .drawer p {
     margin: 0;
     color: var(--muted);
@@ -8906,13 +9092,21 @@ dl > div {
     gap: 7px;
     margin-top: 10px;
 }
-.category-children span {
+.category-children span,
+.category-children button {
     padding: 6px 9px;
     border-radius: 999px;
     color: #101828;
     background: #fff;
     font-size: 13px;
     font-weight: 600;
+}
+.category-children button {
+    border: 1px solid transparent;
+    cursor: pointer;
+}
+.category-children button:hover {
+    border-color: #c7d2fe;
 }
 .template-grid .template-edit {
     min-width: 58px;
@@ -9120,7 +9314,8 @@ dl > div {
     .asset-value strong,
     .calendar-selection b,
     .calendar-selection strong,
-    .category-children span
+    .category-children span,
+    .category-children button
 ) {
     color: var(--card-ink);
     -webkit-text-fill-color: currentColor;
@@ -9564,5 +9759,163 @@ dl > div {
     margin-top: 12px;
     color: #b42318;
     font-size: 13px;
+}
+
+.account-browser {
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 0.42fr);
+    gap: 20px;
+}
+.account-browser .account-cards {
+    display: block;
+    min-width: 0;
+    padding: 20px;
+    border: 1px solid var(--line);
+    background: var(--finexy-surface, #fff);
+}
+.account-browser-head, .account-group > header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+.account-browser-head h2 { margin: 0; font-size: 20px; }
+.account-browser-head p, .account-balance-overview > p {
+    margin: 6px 0 0;
+    color: var(--muted);
+    font-size: 13px;
+}
+.account-search-row {
+    display: grid;
+    grid-template-columns: minmax(160px, 1fr) 120px 100px 110px;
+    gap: 10px;
+    margin: 20px 0;
+}
+.account-search-row label { display: grid; gap: 7px; min-width: 0; font-size: 13px; color: var(--muted); }
+.account-search-row select, .account-search > div {
+    min-width: 0;
+    min-height: 44px;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--panel);
+    color: var(--ink);
+    font-size: 14px;
+}
+.account-search > div { display: flex; align-items: center; gap: 6px; }
+.account-search input { width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--ink); font-size: 14px; }
+.account-search > div:focus-within { outline: 2px solid var(--ink); outline-offset: 2px; }
+.account-balance-overview { padding: 14px; border-radius: 12px; background: var(--panel); }
+.account-balance-overview > p { margin: 0 0 12px; }
+.account-summary-row { display: grid; grid-template-columns: 42px repeat(3, minmax(0, 1fr)); gap: 12px; align-items: center; }
+.account-summary-row + .account-summary-row { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.account-summary-row > b { font-size: 12px; color: var(--muted); }
+.account-summary-row > div { display: grid; gap: 4px; min-width: 0; }
+.account-summary-row small { font-size: 12px; color: var(--muted); }
+.account-summary-row strong { color: var(--ink); font-size: 15px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.account-summary-note { display: block; margin-top: 12px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.account-group { margin-top: 22px; }
+.account-group > header { margin-bottom: 8px; }
+.account-group h3 { margin: 0; font-size: 14px; }
+.account-group > header span { color: var(--muted); font-size: 12px; }
+.account-browser .account-cards article {
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr) minmax(130px, auto) 50px 20px;
+    align-items: center;
+    gap: 12px;
+    min-height: 84px;
+    padding: 14px 12px;
+    border: 1px solid transparent;
+    border-left: 3px solid transparent;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--ink);
+    box-shadow: none;
+    transform: none;
+}
+.account-browser .account-cards article + article { margin-top: 4px; }
+.account-browser .account-cards article:hover { background: var(--panel); transform: none; box-shadow: none; }
+.account-browser .account-cards article.selected { border-color: var(--line); border-left-color: var(--orange); background: var(--panel); box-shadow: none; transform: none; }
+.account-browser .account-cards article:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.account-browser .account-cards article > i { display: grid; place-items: center; width: 40px; height: 40px; margin: 0; border-radius: 10px; background: var(--finexy-surface, #fff); color: var(--ink); }
+.account-row-name, .account-row-amount { display: grid; min-width: 0; gap: 5px; }
+.account-browser .account-cards article b { color: var(--ink); font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; -webkit-text-fill-color: currentColor; }
+.account-browser .account-cards article small { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; -webkit-text-fill-color: currentColor; }
+.account-row-amount { text-align: right; }
+.account-browser .account-cards article strong { position: static; margin: 0; padding: 0; color: var(--ink); font-size: 17px; line-height: 1.5; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; -webkit-text-fill-color: currentColor; }
+.account-browser .account-cards article em { margin: 0; color: var(--muted); font-size: 12px; font-style: normal; -webkit-text-fill-color: currentColor; }
+.account-browser .account-hidden > i { background: var(--panel); }
+.account-row-selection { color: var(--muted); }
+.selected .account-row-selection { color: var(--orange); }
+.account-list-empty { padding: 32px 0; text-align: center; }
+.account-list-empty h3 { margin: 0 0 8px; font-size: 16px; }
+.account-list-empty p { color: var(--muted); font-size: 14px; }
+.account-list-empty button, .account-browser-head button { min-height: 44px; }
+.account-browser .account-detail { position: sticky; top: 20px; min-width: 0; }
+.account-browser .account-detail > h2 { font-size: 22px; line-height: 1.5; overflow-wrap: anywhere; }
+.account-browser .account-detail .balance strong { font-size: 28px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.account-detail-facts { font-size: 14px; }
+.account-detail-facts > div { gap: 12px; font-size: 14px; }
+.account-detail-facts dd { overflow-wrap: anywhere; text-align: right; }
+.account-detail-note { margin-top: 20px; }
+.account-detail-note h3 { margin: 0 0 8px; color: var(--muted); font-size: 13px; font-weight: 500; }
+.account-detail-note p { margin: 0; color: var(--ink); font-size: 14px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.account-browser .split-buttons { grid-template-columns: 1fr; }
+.account-browser .split-buttons :is(a, button) { min-height: 44px; font-size: 14px; }
+.account-card-navigation { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; justify-content: space-between; }
+.account-wallet-showcase { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 16px; align-items: start; }
+.account-card-navigation label { display: grid; gap: 7px; min-width: 0; flex: 1; font-size: 13px; color: var(--muted); }
+.account-card-navigation select { width: 100%; min-width: 0; min-height: 44px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--ink); font-size: 14px; }
+.account-card-pager { display: flex; gap: 10px; align-items: center; }
+.account-card-pager button { display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid var(--line); border-radius: 50%; background: var(--panel); color: var(--ink); }
+.account-card-pager button:disabled { opacity: 0.45; cursor: default; }
+.account-card-pager span { min-width: 50px; text-align: center; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.account-balance-disclosure { margin-top: 24px; border-top: 1px solid var(--line); }
+.account-balance-disclosure > summary { display: list-item; min-height: 44px; padding: 14px 0; color: var(--ink); font-size: 14px; cursor: pointer; }
+.account-balance-disclosure > summary span { margin-left: 12px; color: var(--muted); font-size: 12px; }
+.account-balance-disclosure > summary:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+@media (max-width: 1300px) {
+    .account-browser { grid-template-columns: minmax(0, 1fr) 280px; }
+    .account-search-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .account-browser .account-cards article { grid-template-columns: 32px minmax(0, 1fr) minmax(100px, auto) 20px; gap: 8px; }
+    .account-browser .account-cards article > i { width: 32px; height: 32px; }
+    .account-browser .account-cards article em { grid-column: 2; grid-row: 2; }
+    .account-row-amount { grid-column: 3; grid-row: 1 / 3; }
+    .account-row-selection { grid-column: 4; grid-row: 1 / 3; }
+    .account-summary-row { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .account-summary-row > b { grid-column: 1 / -1; }
+}
+.workspace.periodic-workspace { min-width: 0; }
+.periodic-workspace :is(.scope-notice, .schedule-row span, .schedule-row strong, .metrics strong, .template-grid h2, .template-grid dl) { overflow-wrap: anywhere; }
+@media (max-width: 1160px) {
+    .workspace.periodic-workspace { padding: 16px; }
+    .periodic-workspace .shell { padding: 16px; }
+    .periodic-workspace .topbar { height: auto; flex-wrap: wrap; gap: 12px; }
+    .periodic-workspace .top-actions { flex-wrap: wrap; justify-content: flex-end; }
+    .periodic-workspace .topnav { order: 3; width: 100%; margin-left: 0; gap: 8px; justify-content: space-between; }
+    .periodic-workspace .topnav a { flex: 1; text-align: center; white-space: nowrap; }
+    .periodic-workspace .topnav a { min-height: 44px; display: flex; align-items: center; justify-content: center; }
+    .periodic-workspace .body { gap: 12px; }
+    .periodic-workspace .rail { width: 44px; }
+    .periodic-workspace .page-head { flex-wrap: wrap; align-items: flex-start; }
+    .periodic-workspace .program { grid-template-columns: minmax(0, 1fr); }
+    .periodic-workspace .metrics, .periodic-workspace .template-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+    .workspace.periodic-workspace { padding: 8px; }
+    .periodic-workspace .shell { padding: 12px; border-radius: 20px; }
+    .periodic-workspace .top-actions { width: 100%; margin-left: 0; justify-content: flex-start; }
+    .periodic-workspace .profile > b { display: none; }
+    .periodic-workspace .topnav a.active { padding-inline: 8px; }
+    .periodic-workspace .panel { padding: 12px; }
+    .periodic-workspace .body { flex-direction: column; }
+    .periodic-workspace .rail { width: 100%; flex-direction: row; overflow-x: auto; gap: 8px; }
+    .periodic-workspace .rail-group { flex-direction: row; flex-shrink: 0; }
+    .periodic-workspace .rail-group.bottom { margin-top: 0; }
+    .periodic-workspace .template-grid { grid-template-columns: minmax(0, 1fr); }
+    .periodic-workspace .schedule-row { grid-template-columns: 44px minmax(0, 1fr); }
+    .periodic-workspace .schedule-row time { grid-row: 1 / 4; }
+    .periodic-workspace .schedule-row > strong, .periodic-workspace .schedule-controls, .periodic-workspace .row-actions { grid-column: 2; }
+    .periodic-workspace .row-actions { flex-wrap: wrap; }
+    .periodic-workspace .calendar-note, .periodic-workspace .panel-head { flex-wrap: wrap; }
 }
 </style>

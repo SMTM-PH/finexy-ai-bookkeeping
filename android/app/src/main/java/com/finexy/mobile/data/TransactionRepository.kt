@@ -16,27 +16,289 @@ import java.math.RoundingMode
  * The legacy JSON preferences are imported once. The original values are not
  * removed until the Room copy has been written successfully.
  */
-class TransactionRepository(context: Context, private val database: FinexyDatabase = FinexyDatabase.get(context.applicationContext), private val importLegacy: Boolean = true) {
+class TransactionRepository(context: Context, private val database: FinexyDatabase = FinexyDatabase.get(context.applicationContext), private val importLegacy: Boolean = true) : LedgerWriteStore, PeriodicActionStore, TemplateCreationStore {
     private val appContext = context.applicationContext
     private val store = SecureStore(appContext)
     private val dao = database.dao()
+    val aiReview = AIReviewPersistence(database)
 
     fun observeTransactions(): Flow<List<TransactionEntity>> = dao.observeTransactions()
+    /** Read-only pending inspection includes unsynchronized deletion intents hidden by the UI Flow. */
+    suspend fun ledgerPendingTransactions(): List<TransactionEntity> = dao.allTransactions()
     fun observeAccounts(): Flow<List<AccountEntity>> = dao.observeAccounts()
     fun observeCategories(): Flow<List<CategoryEntity>> = dao.observeCategories()
     fun observeConflicts(): Flow<List<SyncConflictEntity>> = dao.observeConflicts()
     fun observeCategoryMappings(): Flow<List<CategoryMappingEntity>> = dao.observeCategoryMappings()
     fun observeAccountMappings(): Flow<List<AccountMappingEntity>> = dao.observeAccountMappings()
     fun observeTags(): Flow<List<TagEntity>> = dao.observeTags()
-    fun observeTemplates(): Flow<List<TemplateEntity>> = dao.observeTemplates()
+    fun observeTemplates(ledgerId: Long = 0): Flow<List<TemplateEntity>> = dao.observeTemplates(ledgerId)
+    fun observeNormalTemplates(ledgerId: Long): Flow<List<TemplateEntity>> = dao.observeNormalTemplates(ledgerId)
 
-    fun observeScheduledTemplates(): Flow<List<TemplateEntity>> = dao.observeScheduledTemplates()
+    fun observeTemplateDraft(ledgerId: Long, templateType: Int): Flow<TemplateFormDraftEntity?> = dao.observeTemplateDraft(ledgerId, templateType)
+    fun observeTemplateCreations(): Flow<List<TemplateCreationEntity>> = dao.observeTemplateCreations()
+    override suspend fun templateCreations(): List<TemplateCreationEntity> = dao.allTemplateCreations()
+    suspend fun templateDraft(ledgerId: Long, templateType: Int): TemplateFormDraftEntity? = dao.findTemplateDraft(ledgerId, templateType)
 
-    fun observeOccurrences(): Flow<List<ScheduledOccurrenceEntity>> = dao.observeOccurrences()
+    /** Compare the editor revision so an older asynchronous save cannot replace newer input. */
+    suspend fun saveTemplateDraft(ledgerId: Long, templateType: Int, editingId: Long, formJson: String,
+        expected: TemplateFormDraftEntity? = null): TemplateFormDraftEntity = database.withTransaction {
+        val current = dao.findTemplateDraft(ledgerId, templateType)
+        require(current == expected) { "模板草稿已更新，请重新打开" }
+        require(expected == null || expected.ledgerId == ledgerId && expected.templateType == templateType && expected.editingId == editingId)
+        val draft = TemplateFormDraftEntity(ledgerId, templateType, current?.draftId ?: java.util.UUID.randomUUID().toString(),
+            Math.addExact(current?.revision ?: 0, 1), editingId, formJson)
+        validateTemplateDraft(draft)
+        dao.upsertTemplateDraft(draft)
+        draft
+    }
+
+    suspend fun discardTemplateDraft(draft: TemplateFormDraftEntity): Boolean = database.withTransaction {
+        val write = dao.findTemplateCreation(draft.ledgerId, draft.templateType)
+        require(write == null || write.draftId != draft.draftId) { "已确认请求不能丢弃，请先核对原操作结果" }
+        dao.deleteTemplateDraft(draft.ledgerId, draft.templateType, draft.draftId, draft.revision) > 0
+    }
+
+    /** A confirmed request is immutable until its receipt and a complete scoped refresh are durable. */
+    suspend fun enqueueTemplateCreation(draft: TemplateFormDraftEntity, payloadJson: String): TemplateCreationEntity = database.withTransaction {
+        validateTemplateDraft(draft)
+        require(draft.editingId == 0L) { "创建队列不接受修改操作" }
+        require(dao.findTemplateDraft(draft.ledgerId, draft.templateType) == draft) { "请先保存最新模板草稿" }
+        validateTemplateCreationPayload(payloadJson, draft.ledgerId, draft.templateType)
+        val current = dao.findTemplateCreation(draft.ledgerId, draft.templateType)
+        if (current != null) {
+            require(current.draftId == draft.draftId && current.draftRevision == draft.revision && current.payloadJson == payloadJson) { "原模板创建结果尚待确认，请重试原请求" }
+            return@withTransaction current
+        }
+        val write = TemplateCreationEntity(draft.ledgerId, draft.templateType, java.util.UUID.randomUUID().toString(), draft.draftId, draft.revision, payloadJson)
+        validateTemplateCreation(write)
+        dao.insertTemplateCreation(write)
+        write
+    }
+
+    override suspend fun markTemplateCreationPosted(write: TemplateCreationEntity, receipt: TemplateCreationReceipt): Boolean = database.withTransaction {
+        require(receipt.id > 0 && receipt.ledgerId == write.ledgerId && receipt.templateType == write.templateType) { "模板回执范围错误" }
+        val current = dao.findTemplateCreation(write.ledgerId, write.templateType) ?: return@withTransaction false
+        if (!current.sameRequest(write)) return@withTransaction false
+        if (current.state == TemplateCreationEntity.POSTED) return@withTransaction current.serverId == receipt.id && current.serverDeleted == receipt.deleted
+        dao.markTemplateCreationPosted(write.ledgerId, write.templateType, write.clientSessionId, receipt.id, receipt.deleted)
+        true
+    }
+
+    override suspend fun markTemplateCreationFailed(write: TemplateCreationEntity, message: String) = database.withTransaction {
+        val current = dao.findTemplateCreation(write.ledgerId, write.templateType)
+        if (current != null && current.sameRequest(write)) dao.markTemplateCreationFailed(write.ledgerId, write.templateType, write.clientSessionId, message.take(2000))
+    }
+
+    private fun TemplateCreationEntity.sameRequest(other: TemplateCreationEntity): Boolean =
+        copy(state = TemplateCreationEntity.PENDING, serverId = null, serverDeleted = false, lastError = "") ==
+            other.copy(state = TemplateCreationEntity.PENDING, serverId = null, serverDeleted = false, lastError = "")
+
+    fun observeScheduledTemplates(ledgerId: Long = 0): Flow<List<TemplateEntity>> = dao.observeScheduledTemplates(ledgerId)
+
+    fun observeOccurrences(ledgerId: Long = 0): Flow<List<ScheduledOccurrenceEntity>> = dao.observeOccurrences(ledgerId)
 
     fun observeAIReviewItems(): Flow<List<AIReviewItemEntity>> = dao.observeAIReviewItems()
     fun observeProductAssets(): Flow<List<ProductAssetEntity>> = dao.observeProductAssets()
     fun observeExchangeRates(): Flow<List<ExchangeRateEntity>> = dao.observeExchangeRates()
+    fun observeLedgerWrites(): Flow<List<LedgerWriteEntity>> = dao.observeLedgerWrites()
+    override suspend fun ledgerWrites(): List<LedgerWriteEntity> = dao.allLedgerWrites()
+
+    /** Save the user-confirmed immutable snapshot before issuing a create request. */
+    suspend fun enqueueLedgerWrite(ledgerId: Long, transaction: TransactionEntity): LedgerWriteEntity = database.withTransaction {
+        require(ledgerId > 0 && transaction.serverId == null && transaction.localId.isNotBlank()) { "写入账本或草稿无效" }
+        require(dao.allLedgers().any { it.id == ledgerId }) { "账本已不可访问，请重新同步" }
+        require(dao.findLedgerWrite(ledgerId) == null) { "此账本还有写入结果待确认，请先重试原记录" }
+        val payload = transaction.toApiPayload().put("ledgerId", ledgerId.toString()).toString()
+        LedgerWriteEntity(ledgerId, transaction.localId, payload).also { dao.insertLedgerWrite(it) }
+    }
+
+    override suspend fun markLedgerWritePosted(write: LedgerWriteEntity, serverId: Long) = database.withTransaction {
+        require(serverId > 0) { "保存响应缺少流水 ID" }
+        val current = dao.findLedgerWrite(write.ledgerId) ?: error("原写入记录已不存在")
+        require(current.localId == write.localId && current.payloadJson == write.payloadJson) { "写入快照已改变" }
+        dao.markLedgerWritePosted(write.ledgerId, write.localId, serverId)
+    }
+
+    override suspend fun markLedgerWriteFailed(write: LedgerWriteEntity, message: String) {
+        dao.markLedgerWriteFailed(write.ledgerId, write.localId, message)
+    }
+
+    /** Original-target recovery never reads or rewrites a different queue or financial row. */
+    internal fun observeOriginalTransaction(localId: String): Flow<TransactionEntity?> = dao.observeOriginalTransaction(localId)
+    internal suspend fun originalTransaction(localId: String): TransactionEntity? = dao.findTransaction(localId)
+    internal suspend fun originalConflict(localId: String): SyncConflictEntity? = dao.findConflict(localId)
+    internal suspend fun originalLedgerWrite(ledgerId: Long): LedgerWriteEntity? = dao.findLedgerWrite(ledgerId)
+
+    internal suspend fun saveOriginalTransaction(expected: TransactionEntity, draft: TransactionDraft,
+        current: () -> Boolean): TransactionEntity = database.withTransaction {
+        requireOrdinaryOriginalEditor(expected)
+        require(draft.localId == expected.localId && draft.reviewItemId == null)
+        require(draft.type == expected.type) { "恢复编辑必须保留原流水种类" }
+        check(current() && dao.findTransaction(expected.localId) == expected && dao.findConflict(expected.localId) == null) {
+            "原流水已变化，请返回重新核验"
+        }
+        // The existing write path retains serverId, original time, pictures, location and baseline.
+        save(draft)
+        val saved = requireNotNull(dao.findTransaction(expected.localId))
+        val sideIds = listOf(saved.sourceAccountId, saved.destinationAccountId ?: 0L).filter { it > 0L }
+        sideIds.forEach { id ->
+            val account = requireNotNull(dao.findAccount(id))
+            require(!account.hidden && account.type == 1 && (account.parentId == 0L ||
+                dao.findAccount(account.parentId)?.hidden == false)) { "原账户或父账户已不可用" }
+        }
+        require(draft.type == TYPE_MODIFY_BALANCE || draft.categoryId == null || saved.categoryId == draft.categoryId) {
+            "原分类已不可用，请明确核验后保存；不自动改成其他分类"
+        }
+        saved.categoryId?.let { id ->
+            val category = requireNotNull(dao.findCategory(id))
+            val parent = requireNotNull(dao.findCategory(category.parentId))
+            require(!category.hidden && !parent.hidden && parent.parentId == 0L && parent.type == category.type &&
+                category.type == when (saved.type) { TYPE_INCOME -> 1; TYPE_EXPENSE -> 2; TYPE_TRANSFER -> 3; else -> 0 }) {
+                "原分类的类型或父级已变化"
+            }
+        }
+        check(saved.localId == expected.localId && saved.serverId == expected.serverId && saved.timeSequenceId == expected.timeSequenceId && saved.time == expected.time &&
+            saved.utcOffset == expected.utcOffset && saved.pictureIdsJson == expected.pictureIdsJson && saved.geoLocationJson == expected.geoLocationJson)
+        check(current()) { "原登录归属已变化，修改未提交" }
+        saved
+    }
+
+    internal suspend fun markOriginalLedgerWritePosted(expected: LedgerWriteEntity, serverId: Long): LedgerWriteEntity? = database.withTransaction {
+        require(serverId > 0)
+        val row = dao.findLedgerWrite(expected.ledgerId) ?: return@withTransaction null
+        val command = pendingLedgerWriteRecord(expected).target
+        if (pendingLedgerWriteRecord(row).target != command) return@withTransaction null
+        if (row.state == LedgerWriteEntity.POSTED) return@withTransaction row.takeIf { it.serverId == serverId }
+        if (row != expected || row.state != LedgerWriteEntity.PENDING) return@withTransaction null
+        dao.markLedgerWritePosted(expected.ledgerId, expected.localId, serverId)
+        dao.findLedgerWrite(expected.ledgerId)
+    }
+
+    internal suspend fun failOriginalLedgerWrite(expected: LedgerWriteEntity) = database.withTransaction {
+        val row = dao.findLedgerWrite(expected.ledgerId)
+        if (row != null && row.state == LedgerWriteEntity.PENDING && pendingLedgerWriteRecord(row).target == pendingLedgerWriteRecord(expected).target)
+            dao.markLedgerWriteFailed(row.ledgerId, row.localId, "原请求结果仍待核验，请重试原请求；不会替代新增。")
+    }
+
+    internal suspend fun acknowledgeOriginalLedgerWrite(expected: LedgerWriteEntity, remote: RemoteTransaction,
+        current: () -> Boolean): Boolean = database.withTransaction {
+        require(expected.state == LedgerWriteEntity.POSTED && (expected.serverId ?: 0) > 0)
+        require(remote.ledgerId == expected.ledgerId && remote.id == expected.serverId && remote.type in 1..4)
+        if (!current() || dao.findLedgerWrite(expected.ledgerId) != expected) return@withTransaction false
+        // A GET of one original transaction is one cache upsert, never a complete ledger snapshot.
+        dao.upsertLedgerTransactions(listOf(LedgerTransactionCacheEntity(remote.id, remote.ledgerId, remote.type,
+            remote.sourceAccountId, remote.destinationAccountId, remote.categoryId, remote.categoryName,
+            remote.sourceAmountMinor, remote.destinationAmountMinor, remote.currency, remote.comment,
+            Math.multiplyExact(remote.time, 1000L), remote.utcOffset, remote.tagIdsJson, remote.hideAmount,
+            remote.recorderUid, remote.payerUid, remote.editable)))
+        check(dao.acknowledgeOriginalLedgerWrite(expected.ledgerId, expected.localId, expected.createdAt,
+            expected.payloadJson, requireNotNull(expected.serverId)) == 1)
+        val previousStatus = dao.findSyncStatus() ?: SyncStatusEntity()
+        dao.upsertSyncStatus(previousStatus.copy(state = SyncRunState.IDLE,
+            message = "原流水结果已核对，账户余额和其他账本数据仍待明确刷新", nextRetryAt = 0))
+        check(current()) { "原登录归属已变化，读取结果未写入" }
+        true
+    }
+
+    /** A single original upload is not a full sync: preserve the other cached data's stale status. */
+    internal suspend fun acknowledgeOriginalLocalSnapshot(uploaded: TransactionEntity, remote: RemoteTransaction?) = database.withTransaction {
+        require(uploaded.reviewItemId == null)
+        require(remote == null && uploaded.deleted || remote != null && remote.ledgerId == 0L && remote.id > 0 &&
+            (uploaded.serverId == null || uploaded.serverId == remote.id))
+        val current = dao.findTransaction(uploaded.localId) ?: return@withTransaction
+        // An edit made while the HTTP request ran survives, but a new identity,
+        // a legacy association or a different pinned receipt cannot inherit it.
+        check(current.reviewItemId == null && current.serverId == uploaded.serverId &&
+            current.time == uploaded.time && current.utcOffset == uploaded.utcOffset && current.timeSequenceId == uploaded.timeSequenceId) {
+            "原流水身份已变化，原回执不得覆盖替代记录"
+        }
+        markSynced(uploaded, remote)
+        val previous = dao.findSyncStatus() ?: SyncStatusEntity()
+        dao.upsertSyncStatus(previous.copy(state = SyncRunState.IDLE,
+            message = "原流水已核对，账户余额和其他数据仍待明确刷新", nextRetryAt = 0))
+    }
+
+    internal suspend fun mergeOriginalTransaction(expected: TransactionEntity, remote: RemoteTransaction,
+        current: () -> Boolean): TransactionEntity = database.withTransaction {
+        require(expected.reviewItemId == null && expected.serverId == remote.id && remote.ledgerId == 0L)
+        check(current() && dao.findTransaction(expected.localId) == expected) { "原流水已变化" }
+        val approved = dao.findConflict(expected.localId)?.takeIf { it.resolution == ConflictResolution.KEEP_LOCAL }
+        if (approved != null) {
+            val approvedSnapshot = runCatching { originalConflictRemote(approved, expected.localId).syncSnapshot() }.getOrNull()
+            if (approvedSnapshot != remote.toEntity(expected.localId).syncSnapshot()) {
+                // KEEP_LOCAL authorizes overwriting only the remote version the
+                // user actually saw, never an unseen subsequent server edit.
+                dao.upsertConflict(SyncConflictEntity(expected.localId, remote.id, expected.comment,
+                    expected.sourceAmountMinor, remote.comment, remote.sourceAmountMinor, remote.toJson()))
+                dao.upsertTransaction(expected.copy(syncState = SyncState.CONFLICT))
+            }
+        } else mergeRemote(listOf(remote))
+        check(current())
+        requireNotNull(dao.findTransaction(expected.localId))
+    }
+
+    /** A read-only submission receipt binds identity; it is never a replay of the mutable current payload. */
+    internal suspend fun bindOriginalTransactionReceipt(expected: TransactionEntity, serverId: Long,
+        current: () -> Boolean): TransactionEntity = database.withTransaction {
+        require(expected.serverId == null && expected.reviewItemId == null && serverId > 0)
+        check(current() && dao.findTransaction(expected.localId) == expected && dao.findConflict(expected.localId) == null)
+        check(dao.allTransactions().none { it.localId != expected.localId && it.serverId == serverId }) {
+            "原服务器流水已关联另一条本机记录，请先专用核验"
+        }
+        // There is no immutable pre-upload snapshot for old local rows. An
+        // unequal GET must become a conflict, not a freshly invented baseline.
+        val bound = expected.copy(serverId = serverId, syncedSnapshotJson = "")
+        dao.upsertTransaction(bound)
+        check(current())
+        bound
+    }
+
+    /** A caller must first validate an unfiltered, complete default-ledger read. Only this row changes. */
+    internal suspend fun recordOriginalAbsence(expected: TransactionEntity, current: () -> Boolean): TransactionEntity = database.withTransaction {
+        require(expected.reviewItemId == null && expected.serverId != null)
+        check(current() && dao.findTransaction(expected.localId) == expected)
+        if (expected.deleted) {
+            markSynced(expected)
+        } else {
+            dao.upsertConflict(SyncConflictEntity(expected.localId, requireNotNull(expected.serverId), expected.comment,
+                expected.sourceAmountMinor, "原账本中已不存在（可能删除或迁移）", 0, REMOTE_DELETION_MARKER))
+            dao.upsertTransaction(expected.copy(syncState = SyncState.CONFLICT))
+        }
+        check(current())
+        requireNotNull(dao.findTransaction(expected.localId))
+    }
+
+    internal suspend fun undoOriginalDeletion(expected: TransactionEntity, remote: RemoteTransaction,
+        current: () -> Boolean): TransactionEntity = database.withTransaction {
+        require(expected.deleted && expected.reviewItemId == null && expected.serverId == remote.id && remote.ledgerId == 0L)
+        require(remote.toEntity(expected.localId).syncSnapshot() == expected.syncSnapshot()) {
+            "服务器原流水已变化，不能静默撤回删除，请先重新核验冲突"
+        }
+        check(current() && dao.findTransaction(expected.localId) == expected && dao.findConflict(expected.localId) == null)
+        val restored = remote.toEntity(expected.localId)
+        dao.upsertTransaction(restored)
+        check(current())
+        restored
+    }
+
+    internal suspend fun resolveOriginalConflict(expected: TransactionEntity, conflict: SyncConflictEntity,
+        keepRemote: Boolean, current: () -> Boolean): TransactionEntity = database.withTransaction {
+        require(expected.reviewItemId == null && conflict.localId == expected.localId && conflict.serverId == expected.serverId)
+        check(current() && dao.findTransaction(expected.localId) == expected && dao.findConflict(expected.localId) == conflict)
+        val deletedOnServer = conflict.remoteEntityJson == REMOTE_DELETION_MARKER
+        val remote = if (deletedOnServer) null else originalConflictRemote(conflict, expected.localId)
+        val resolved = when {
+            keepRemote && deletedOnServer -> expected.copy(deleted = true, syncState = SyncState.SYNCED, updatedAt = System.currentTimeMillis())
+            keepRemote -> requireNotNull(remote).copy(reviewItemId = null)
+            deletedOnServer -> error("原流水可能已删除或迁移；先保留原冲突，不能通过恢复操作另存替代流水")
+            else -> expected.copy(syncState = SyncState.PENDING)
+        }
+        dao.upsertTransaction(resolved)
+        if (!keepRemote && !deletedOnServer) dao.upsertConflict(conflict.copy(resolution = ConflictResolution.KEEP_LOCAL))
+        else dao.deleteConflict(expected.localId)
+        check(current())
+        resolved
+    }
 
     // --- 账本与存钱目标 -------------------------------------------------
     fun observeLedgers(): Flow<List<LedgerEntity>> = dao.observeLedgers()
@@ -93,6 +355,9 @@ class TransactionRepository(context: Context, private val database: FinexyDataba
                 item.comment, Math.multiplyExact(item.time, 1000L), item.utcOffset, item.tagIdsJson, item.hideAmount,
                 item.recorderUid, item.payerUid, item.editable)
         })
+        // This is a validated complete read after a confirmed write. The row
+        // may already have been deleted by another member; never resend it.
+        dao.acknowledgeLedgerWrites(ledgerId)
     }
 
     /**
@@ -146,9 +411,9 @@ class TransactionRepository(context: Context, private val database: FinexyDataba
         require(remote.map { it.id }.distinct().size == remote.size) { "AI 待复核响应包含重复条目" }
         dao.upsertAIReviewItems(remote.map { it.toEntity() })
         dao.deleteAIReviewItemsNotIn(remote.map { it.id })
-        val remoteIds = remote.map { it.id }.toSet()
-        dao.allTransactions().filter { it.reviewItemId != null && it.reviewItemId !in remoteIds }
-            .forEach { dao.clearTransactionReviewItem(it.localId) }
+        // This legacy pending list is not a posting receipt (and may be paged).
+        // Keep every transaction association until an explicit original-transaction
+        // recovery flow verifies it; absence cannot authorize a second confirmation.
     }
 
     suspend fun cacheAIReviewItem(remote: RemoteAIReviewItem) {
@@ -167,33 +432,79 @@ class TransactionRepository(context: Context, private val database: FinexyDataba
         dao.clearTransactionReviewItem(transaction.localId)
     }
 
-    suspend fun replaceScheduledTemplates(remote: List<RemoteTemplate>) = database.withTransaction {
-        require(remote.all { it.templateType == 2 }) { "周期模板响应类型错误" }
+    suspend fun replaceTemplates(remote: List<RemoteTemplate>, ledgerId: Long = 0, templateType: Int = 1) = database.withTransaction {
+        require(ledgerId >= 0 && templateType in 1..2 && remote.all { it.ledgerId == ledgerId && it.templateType == templateType } && remote.map { it.id }.distinct().size == remote.size) { "模板响应范围错误" }
         mergeTemplates(remote)
-        dao.deleteMissingScheduledTemplates(remote.map { it.id })
+        dao.deleteMissingTemplates(remote.map { it.id }, templateType, ledgerId)
     }
 
-    /**
-     * Reconciles the local review queue with a fully-paginated server pull.
-     * The parser rejects malformed pages, so a partial response never clears
-     * locally cached rows; rows confirmed on the server disappear from the
-     * pending/dismissed lists and are dropped here as well.
-     */
-    suspend fun replaceOccurrences(remote: List<RemoteOccurrence>) = database.withTransaction {
-        require(remote.all { it.status != ScheduledOccurrenceEntity.STATUS_CONFIRMED }) { "确认记录不进入待确认队列" }
-        dao.upsertOccurrences(remote.map { it.toEntity() })
+    suspend fun replaceScheduledTemplates(remote: List<RemoteTemplate>, ledgerId: Long = 0) = replaceTemplates(remote, ledgerId, 2)
+
+    /** Commit a fully validated ledger snapshot together; retain uncertain action snapshots. */
+    suspend fun replacePeriodicSnapshot(ledgerId: Long, templates: List<RemoteTemplate>, scheduled: List<RemoteTemplate>?, occurrences: List<RemoteOccurrence>?) = database.withTransaction {
+        require((scheduled == null) == (occurrences == null)) { "周期快照不完整" }
+        replaceTemplates(templates, ledgerId)
+        if (scheduled != null && occurrences != null) {
+            replaceScheduledTemplates(scheduled, ledgerId)
+            replaceOccurrences(occurrences, ledgerId)
+        }
+        // The receipt is already stored. Clear only after a complete, validated
+        // snapshot; a failed read keeps the receipt and never re-posts creation.
+        for (write in dao.allTemplateCreations().filter { it.ledgerId == ledgerId && it.state == TemplateCreationEntity.POSTED && (it.templateType == 1 || scheduled != null) }) {
+            dao.deleteTemplateDraft(ledgerId, write.templateType, write.draftId, write.draftRevision)
+            dao.acknowledgeTemplateCreation(ledgerId, write.templateType, write.clientSessionId)
+        }
+    }
+
+    suspend fun replaceOccurrences(remote: List<RemoteOccurrence>, ledgerId: Long = 0) = database.withTransaction {
+        require(ledgerId >= 0 && remote.all { it.ledgerId == ledgerId && it.status in listOf(ScheduledOccurrenceEntity.STATUS_PENDING, ScheduledOccurrenceEntity.STATUS_DISMISSED) }) { "待确认响应范围错误" }
         val keys = remote.map { "${it.templateId}:${it.scheduledUnixTime}" }
-        dao.deleteOccurrencesNotIn(keys)
+        require(keys.distinct().size == keys.size) { "待确认响应包含重复项" }
+        val protected = dao.occurrencesInLedger(ledgerId).filter { it.pendingAction != ScheduledOccurrenceEntity.ACTION_NONE }
+            .map { it.templateId to it.scheduledUnixTime }.toSet()
+        dao.upsertOccurrences(remote.filter { (it.templateId to it.scheduledUnixTime) !in protected }.map { it.toEntity() })
+        dao.deleteOccurrencesNotIn(keys, ledgerId)
     }
 
     suspend fun allOccurrences(): List<ScheduledOccurrenceEntity> = dao.allOccurrences()
 
-    /** Applies the result of a successful confirm/dismiss/restore API call. */
-    suspend fun applyOccurrenceAction(templateId: Long, scheduledUnixTime: Long, status: Int, transactionId: Long = 0) = database.withTransaction {
-        require(status in listOf(ScheduledOccurrenceEntity.STATUS_PENDING, ScheduledOccurrenceEntity.STATUS_CONFIRMED, ScheduledOccurrenceEntity.STATUS_DISMISSED)) { "待确认状态无效" }
-        val current = dao.allOccurrences().firstOrNull {
-            it.templateId == templateId && it.scheduledUnixTime == scheduledUnixTime
-        } ?: return@withTransaction
+    /** Persist the immutable intent before networking; another action cannot replace an unknown result. */
+    suspend fun enqueuePeriodicAction(ledgerId: Long, templateId: Long, scheduledUnixTime: Long, action: Int): PeriodicAction = database.withTransaction {
+        val current = dao.findOccurrence(ledgerId, templateId, scheduledUnixTime) ?: error("此待确认记录已不在本机，请刷新")
+        if (current.pendingAction != ScheduledOccurrenceEntity.ACTION_NONE) {
+            require(current.pendingAction == action) { "原操作结果尚待确认，请先重试原操作" }
+            return@withTransaction current.toAction()
+        }
+        require(if (action == ScheduledOccurrenceEntity.ACTION_RESTORE) current.status == ScheduledOccurrenceEntity.STATUS_DISMISSED
+            else action in ScheduledOccurrenceEntity.ACTION_CONFIRM..ScheduledOccurrenceEntity.ACTION_DISMISS && current.status == ScheduledOccurrenceEntity.STATUS_PENDING) { "待确认记录状态不允许此操作" }
+        val queued = current.copy(pendingAction = action, pendingActionQueuedAt = System.currentTimeMillis().coerceAtLeast(current.updatedAt + 1))
+        val intent = queued.toAction()
+        dao.upsertOccurrences(listOf(queued))
+        intent
+    }
+
+    override suspend fun pendingPeriodicActions(): List<PeriodicAction> = dao.allOccurrences().filter { it.pendingAction != ScheduledOccurrenceEntity.ACTION_NONE }.map { it.toAction() }
+
+    override suspend fun acknowledgePeriodicAction(action: PeriodicAction, transactionId: Long): Boolean = database.withTransaction {
+        val current = dao.findOccurrence(action.ledgerId, action.templateId, action.scheduledUnixTime) ?: return@withTransaction false
+        if (current.pendingAction != action.action || current.pendingActionQueuedAt != action.queuedAt) return@withTransaction false
+        require(if (action.action == ScheduledOccurrenceEntity.ACTION_CONFIRM) transactionId > 0 else transactionId == 0L) { "周期回执无效" }
+        val status = when (action.action) {
+            ScheduledOccurrenceEntity.ACTION_CONFIRM -> ScheduledOccurrenceEntity.STATUS_CONFIRMED
+            ScheduledOccurrenceEntity.ACTION_DISMISS -> ScheduledOccurrenceEntity.STATUS_DISMISSED
+            else -> ScheduledOccurrenceEntity.STATUS_PENDING
+        }
+        dao.upsertOccurrences(listOf(current.copy(status = status, transactionId = transactionId, pendingAction = 0, pendingActionQueuedAt = 0, updatedAt = System.currentTimeMillis())))
+        true
+    }
+
+    private fun ScheduledOccurrenceEntity.toAction() = PeriodicAction(ledgerId, templateId, scheduledUnixTime, pendingAction, pendingActionQueuedAt)
+
+    /** Compatibility for callers applying an already explicit receipt; cannot replace a pending intent. */
+    suspend fun applyOccurrenceAction(templateId: Long, scheduledUnixTime: Long, status: Int, transactionId: Long = 0, ledgerId: Long = 0) = database.withTransaction {
+        require(status in 1..3 && (status != ScheduledOccurrenceEntity.STATUS_CONFIRMED || transactionId > 0)) { "待确认回执无效" }
+        val current = dao.findOccurrence(ledgerId, templateId, scheduledUnixTime) ?: return@withTransaction
+        require(current.pendingAction == ScheduledOccurrenceEntity.ACTION_NONE) { "必须先核对原操作回执" }
         dao.upsertOccurrences(listOf(current.copy(status = status, transactionId = transactionId, updatedAt = System.currentTimeMillis())))
     }
     fun observeSyncStatus(): Flow<SyncStatusEntity?> = dao.observeSyncStatus()
@@ -239,8 +550,11 @@ class TransactionRepository(context: Context, private val database: FinexyDataba
 
     suspend fun save(draft: TransactionDraft) = database.withTransaction {
         require(draft.type in listOf(TYPE_MODIFY_BALANCE, TYPE_INCOME, TYPE_EXPENSE, TYPE_TRANSFER)) { "不支持的流水类型" }
-        if (draft.type == TYPE_MODIFY_BALANCE) require(draft.sourceAmountMinor != 0L && draft.sourceAmountMinor in -99_999_999_999L..99_999_999_999L) { "调整金额不能为 0 或超出范围" }
-        else require(draft.sourceAmountMinor in 1..99_999_999_999L) { "金额超出范围" }
+        if (draft.type == TYPE_MODIFY_BALANCE || draft.type == TYPE_EXPENSE) require(draft.sourceAmountMinor != 0L && draft.sourceAmountMinor in -9_999_999_999_999L..9_999_999_999_999L) { "金额不能为 0 或超出范围" }
+        else if (draft.type == TYPE_TRANSFER && draft.transferDirection == TransactionTransferDirection.IN)
+            require(draft.sourceAmountMinor == 0L && draft.destinationAmountMinor in 1..9_999_999_999_999L) { "转入金额超出范围" }
+        else require(draft.sourceAmountMinor in 1..9_999_999_999_999L) { "金额超出范围" }
+        requireTransactionTransferDirection(draft)
         require(draft.comment.length <= 255) { "描述最多 255 个字符" }
         val current = dao.findTransaction(draft.localId)
         require(current == null || current.type in listOf(TYPE_MODIFY_BALANCE, TYPE_INCOME, TYPE_EXPENSE, TYPE_TRANSFER)) { "不支持编辑该流水" }
@@ -248,13 +562,21 @@ class TransactionRepository(context: Context, private val database: FinexyDataba
             dao.findAccountMapping(TransactionEntity.LOCAL_ACCOUNT_ID)?.serverId ?: TransactionEntity.LOCAL_ACCOUNT_ID
         else draft.sourceAccountId
         val account = dao.findAccount(resolvedAccountId)
-        require(resolvedAccountId == TransactionEntity.LOCAL_ACCOUNT_ID || (account?.hidden == false && account.type == 1)) { "账户已不可用，请重新选择" }
-        val resolvedDestinationId = if (draft.type == TYPE_TRANSFER) draft.destinationAccountId else null
+        val incoming = draft.type == TYPE_TRANSFER && draft.transferDirection == TransactionTransferDirection.IN
+        require(incoming && resolvedAccountId == 0L || resolvedAccountId == TransactionEntity.LOCAL_ACCOUNT_ID ||
+            account?.hidden == false && account.type == 1) { "账户已不可用，请重新选择" }
+        val resolvedDestinationId = if (draft.type == TYPE_TRANSFER) draft.destinationAccountId?.takeIf { it != 0L } else null
         val destinationAccount = resolvedDestinationId?.let { dao.findAccount(it) }
         if (draft.type == TYPE_TRANSFER) {
-            require(resolvedDestinationId != null && resolvedDestinationId != resolvedAccountId) { "转入账户必须与转出账户不同" }
-            require(destinationAccount?.hidden == false && destinationAccount.type == 1) { "转入账户已不可用，请重新选择" }
-            require(draft.destinationAmountMinor in 1..99_999_999_999L) { "转入金额超出范围" }
+            if (draft.transferDirection == TransactionTransferDirection.OUT) {
+                require(resolvedDestinationId == null && draft.destinationAmountMinor == 0L)
+            } else {
+                require(resolvedDestinationId != null && resolvedDestinationId != resolvedAccountId) { "转入账户必须与转出账户不同" }
+                require(destinationAccount?.hidden == false && destinationAccount.type == 1) { "转入账户已不可用，请重新选择" }
+                require(draft.destinationAmountMinor in 1..9_999_999_999_999L) { "转入金额超出范围" }
+                if (draft.transferDirection == TransactionTransferDirection.INTERNAL && account != null && account.currency == destinationAccount?.currency)
+                    require(draft.sourceAmountMinor == draft.destinationAmountMinor) { "同币种转账的双侧金额必须一致，请明确核对" }
+            }
         } else require(draft.destinationAccountId == null && draft.destinationAmountMinor == 0L) { "非转账流水不能设置转入账户或金额" }
         val categoryType = when (draft.type) { TYPE_INCOME -> 1; TYPE_EXPENSE -> 2; TYPE_TRANSFER -> 3; else -> 0 }
         val unchangedCategory = current?.categoryName == draft.categoryName && current.type == draft.type
@@ -279,8 +601,9 @@ class TransactionRepository(context: Context, private val database: FinexyDataba
             categoryId = mappedCategoryId, categoryName = draft.categoryName,
             sourceAmountMinor = draft.sourceAmountMinor, destinationAmountMinor = if (draft.type == TYPE_TRANSFER) draft.destinationAmountMinor else 0,
             comment = draft.comment,
-            currency = account?.currency ?: base.currency, tagIdsJson = tags.toString(),
+            currency = account?.currency ?: destinationAccount?.currency ?: base.currency, tagIdsJson = tags.toString(),
             reviewItemId = draft.reviewItemId ?: base.reviewItemId,
+            hideAmount = draft.hideAmount ?: base.hideAmount,
             syncState = SyncState.PENDING, deleted = false, updatedAt = System.currentTimeMillis(),
             syncedSnapshotJson = base.syncedSnapshotJson.ifBlank {
                 if (base.serverId != null && base.syncState == SyncState.SYNCED) base.syncSnapshot() else ""
@@ -314,7 +637,7 @@ class TransactionRepository(context: Context, private val database: FinexyDataba
             val local = byServerId[item.id]
             // reviewItemId is client-only linkage used to resolve the server
             // review after a successful transaction upload. A normal pull has
-            // no such field, so preserve it until resolvePostedAIReviews clears it.
+            // no such field, so preserve it for explicit original-transaction recovery.
             val remoteEntity = item.toEntity(local?.localId).copy(reviewItemId = local?.reviewItemId)
             val remoteSnapshot = remoteEntity.syncSnapshot()
             val existingConflict = local?.let { dao.findConflict(it.localId) }
@@ -436,16 +759,16 @@ class TransactionRepository(context: Context, private val database: FinexyDataba
     suspend fun mergeTemplates(remote: List<RemoteTemplate>) {
         val pausedBackups = dao.allTemplates().filter {
             it.templateType == 2 && it.scheduledFrequencyType == 0
-        }.associateBy({ it.id }, { it.pausedFromFrequencyType to it.pausedFromFrequency })
+        }.associateBy({ it.ledgerId to it.id }, { it.pausedFromFrequencyType to it.pausedFromFrequency })
         dao.upsertTemplates(remote.map {
             TemplateEntity(it.id, it.name, it.type, it.categoryId, it.sourceAccountId, it.sourceAmountMinor, it.comment, it.tagIdsJson, it.hidden,
                 templateType = it.templateType, destinationAccountId = it.destinationAccountId, destinationAmountMinor = it.destinationAmountMinor,
                 hideAmount = it.hideAmount, scheduledFrequencyType = it.scheduledFrequencyType, scheduledFrequency = it.scheduledFrequency,
                 scheduledStartDate = it.scheduledStartDate, scheduledEndDate = it.scheduledEndDate, utcOffset = it.utcOffset,
-                scheduledAt = it.scheduledAt, nextScheduledTime = it.nextScheduledTime, displayOrder = it.displayOrder).let { entity ->
+                scheduledAt = it.scheduledAt, nextScheduledTime = it.nextScheduledTime, displayOrder = it.displayOrder, ledgerId = it.ledgerId).let { entity ->
                 // The pre-pause frequency only lives locally; keep it while the
                 // server still shows the schedule as paused.
-                val backup = pausedBackups[it.id]
+                val backup = pausedBackups[it.ledgerId to it.id]
                 if (entity.templateType == 2 && entity.scheduledFrequencyType == 0 && backup != null)
                     entity.copy(pausedFromFrequencyType = backup.first, pausedFromFrequency = backup.second)
                 else entity
@@ -453,7 +776,7 @@ class TransactionRepository(context: Context, private val database: FinexyDataba
         })
     }
 
-    suspend fun removeTemplate(id: Long) = dao.deleteTemplate(id)
+    suspend fun removeTemplate(id: Long, ledgerId: Long = 0) = dao.deleteTemplate(id, ledgerId)
 
     /** Persists a locally reordered schedule list after a successful server move. */
     suspend fun saveTemplates(items: List<TemplateEntity>) = dao.upsertTemplates(items)
@@ -463,7 +786,7 @@ class TransactionRepository(context: Context, private val database: FinexyDataba
         name = name, type = type, categoryId = categoryId, sourceAccountId = sourceAccountId,
         destinationAccountId = destinationAccountId, sourceAmountMinor = sourceAmountMinor,
         destinationAmountMinor = destinationAmountMinor, utcOffset = utcOffset, hideAmount = hideAmount,
-        tagIdsJson = stringIds(tagIdsJson).toString(), comment = comment
+        tagIdsJson = stringIds(tagIdsJson).toString(), comment = comment, ledgerId = ledgerId
     )
 
     suspend fun mapCategory(localName: String, transactionType: Int, serverId: Long) = database.withTransaction {

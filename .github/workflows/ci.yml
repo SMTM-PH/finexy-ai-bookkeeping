@@ -6,6 +6,7 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -41,10 +42,15 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Desktop navigation and IPC policy
+        run: node --test desktop/navigation-policy.node-test.cjs
+
   backend:
     name: Backend test
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      CGO_ENABLED: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -64,13 +70,21 @@ jobs:
       - name: Test
         run: go test ./...
 
+      - name: Ledger periodic confirmation race contracts
+        run: go test -race ./pkg/services -run 'TestPeriodicLedger|TestScheduledOccurrence' -count=1
+
+  android:
+    name: Android validation
+    uses: ./.github/workflows/android.yml
+
   quality-gate:
     name: Quality gate
     if: always()
-    needs: [frontend, backend]
+    needs: [frontend, backend, android]
     runs-on: ubuntu-latest
     steps:
       - name: Verify required jobs
         run: |
           test "${{ needs.frontend.result }}" = "success"
           test "${{ needs.backend.result }}" = "success"
+          test "${{ needs.android.result }}" = "success"

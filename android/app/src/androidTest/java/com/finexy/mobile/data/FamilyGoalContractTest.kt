@@ -276,9 +276,9 @@ class FamilyGoalContractTest {
             persisted.close()
             persisted = null
             android.database.sqlite.SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null,
-                android.database.sqlite.SQLiteDatabase.OPEN_READWRITE).use { old -> old.version = 17 }
+                android.database.sqlite.SQLiteDatabase.OPEN_READWRITE).use { old -> old.removeAIImageSchemaForTest(); old.version = 17 }
             persisted = Room.databaseBuilder(context, FinexyDatabase::class.java, name)
-                .addMigrations(FinexyDatabase.MIGRATION_17_18, FinexyDatabase.MIGRATION_18_19, FinexyDatabase.MIGRATION_19_20, FinexyDatabase.MIGRATION_20_21).build()
+                .addMigrations(FinexyDatabase.MIGRATION_17_18, FinexyDatabase.MIGRATION_18_19, FinexyDatabase.MIGRATION_19_20, FinexyDatabase.MIGRATION_20_21, FinexyDatabase.MIGRATION_21_22, FinexyDatabase.MIGRATION_22_23, FinexyDatabase.MIGRATION_23_24, FinexyDatabase.MIGRATION_24_25, FinexyDatabase.MIGRATION_25_26).build()
             assertTrue(persisted.dao().allSavingsGoals().isEmpty())
             val migrated = persisted.openHelper.readableDatabase
             listOf("ledgers", "savings_goals", "ledger_account_cache", "ledger_transaction_cache").forEach { table ->

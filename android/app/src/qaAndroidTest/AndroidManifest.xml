@@ -1,0 +1,47 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Test APK only: no broad storage, MANAGE_DOCUMENTS or financial permission requested. -->
+    <uses-permission android:name="com.finexy.mobile.qa.permission.REPORT_SAF_FIXTURE" />
+    <queries>
+        <package android:name="com.finexy.mobile.qa" />
+        <provider android:authorities="com.android.providers.downloads.documents" />
+    </queries>
+    <application>
+        <provider
+            android:name="com.finexy.mobile.reportqa.ReportSafControlProvider"
+            android:authorities="com.finexy.mobile.qa.test.reportcontrol"
+            android:exported="true"
+            android:permission="com.finexy.mobile.qa.permission.REPORT_SAF_FIXTURE"
+            android:process=":report_support" />
+        <provider
+            android:name="com.finexy.mobile.reportqa.ReportSafDocumentsProvider"
+            android:authorities="com.finexy.mobile.qa.test.reportdocs"
+            android:exported="true"
+            android:grantUriPermissions="true"
+            android:permission="android.permission.MANAGE_DOCUMENTS"
+            android:process=":report_support">
+            <intent-filter>
+                <action android:name="android.content.action.DOCUMENTS_PROVIDER" />
+            </intent-filter>
+        </provider>
+        <activity
+            android:name="com.finexy.mobile.reportqa.ReportSafCsvReceiverActivity"
+            android:label="Finexy QA CSV probe"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:permission="com.finexy.mobile.qa.permission.REPORT_SAF_FIXTURE"
+            android:process=":report_support">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" android:mimeType="text/csv" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/csv" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

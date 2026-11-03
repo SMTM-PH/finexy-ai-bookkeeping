@@ -74,6 +74,9 @@ export interface LedgerDeletePreviewResponse {
     readonly transactionCount: number;
     readonly savingsGoalCount: number;
     readonly savingsGoalFundCount: number;
+    readonly monthlyBudgetCount?: number;
+    readonly transactionTemplateCount?: number;
+    readonly scheduledOccurrenceCount?: number;
     readonly canDelete: boolean;
     readonly blockingReasons: string[];
 }
@@ -117,7 +120,7 @@ export class LedgerOverview {
 }
 
 export class LedgerDeletePreview {
-    private static readonly blockerNames = new Set(['accounts', 'transactions', 'savingsGoals']);
+    private static readonly blockerNames = new Set(['accounts', 'transactions', 'savingsGoals', 'monthlyBudgets', 'transactionTemplates', 'scheduledOccurrences']);
     readonly ledgerId: string;
     readonly ledgerName: string;
     readonly activeMemberCount: number;
@@ -126,21 +129,27 @@ export class LedgerDeletePreview {
     readonly transactionCount: number;
     readonly savingsGoalCount: number;
     readonly savingsGoalFundCount: number;
+    readonly monthlyBudgetCount: number;
+    readonly transactionTemplateCount: number;
+    readonly scheduledOccurrenceCount: number;
     readonly canDelete: boolean;
     readonly blockingReasons: string[];
 
     private constructor(info: LedgerDeletePreviewResponse) {
         if (typeof info.ledgerId !== 'string' || !/^\d+$/.test(info.ledgerId) || info.ledgerId === '0') throw new Error('invalid ledger id');
         if (typeof info.ledgerName !== 'string' || !info.ledgerName.trim()) throw new Error('invalid ledger name');
-        const counts = [info.activeMemberCount, info.pendingInvitationCount, info.accountCount, info.transactionCount, info.savingsGoalCount, info.savingsGoalFundCount];
+        const counts = [info.activeMemberCount, info.pendingInvitationCount, info.accountCount, info.transactionCount, info.savingsGoalCount, info.savingsGoalFundCount, info.monthlyBudgetCount ?? 0, info.transactionTemplateCount ?? 0, info.scheduledOccurrenceCount ?? 0];
         if (counts.some(value => !Number.isSafeInteger(value) || value < 0)) throw new Error('invalid ledger delete counts');
         if (!Array.isArray(info.blockingReasons) || info.blockingReasons.some(value => !LedgerDeletePreview.blockerNames.has(value))) throw new Error('invalid ledger delete blockers');
-        const blocked = info.accountCount > 0 || info.transactionCount > 0 || info.savingsGoalCount > 0;
+        const blocked = info.accountCount > 0 || info.transactionCount > 0 || info.savingsGoalCount > 0 || (info.monthlyBudgetCount ?? 0) > 0 || (info.transactionTemplateCount ?? 0) > 0 || (info.scheduledOccurrenceCount ?? 0) > 0;
         if (info.canDelete === blocked) throw new Error('inconsistent ledger delete state');
         this.ledgerId = info.ledgerId; this.ledgerName = info.ledgerName;
         this.activeMemberCount = info.activeMemberCount; this.pendingInvitationCount = info.pendingInvitationCount;
         this.accountCount = info.accountCount; this.transactionCount = info.transactionCount;
         this.savingsGoalCount = info.savingsGoalCount; this.savingsGoalFundCount = info.savingsGoalFundCount;
+        this.monthlyBudgetCount = info.monthlyBudgetCount ?? 0;
+        this.transactionTemplateCount = info.transactionTemplateCount ?? 0;
+        this.scheduledOccurrenceCount = info.scheduledOccurrenceCount ?? 0;
         this.canDelete = info.canDelete; this.blockingReasons = [...info.blockingReasons];
     }
 

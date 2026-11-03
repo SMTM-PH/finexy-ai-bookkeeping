@@ -390,6 +390,9 @@ func (s *TransactionTagService) DeleteTag(c core.Context, uid int64, tagId int64
 	}
 
 	return s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
+		if _, err := sess.Where("uid=? AND tag_id=? AND deleted=?", uid, tagId, false).SetExpr("updated_unix_time", "updated_unix_time").Update(new(models.TransactionTag)); err != nil {
+			return err
+		}
 		exists, err := sess.Cols("uid", "tag_id").Where("uid=? AND deleted=? AND tag_id=?", uid, false, tagId).Limit(1).Exist(&models.TransactionTagIndex{})
 
 		if err != nil {
@@ -420,6 +423,17 @@ func (s *TransactionTagService) DeleteTag(c core.Context, uid int64, tagId int64
 			}
 		}
 
+		snapshots, err := pendingScheduledSnapshots(sess, uid)
+		if err != nil {
+			return err
+		}
+		for _, snapshot := range snapshots {
+			for _, raw := range snapshot.TagIds {
+				if raw == utils.Int64ToString(tagId) {
+					return errs.ErrTransactionTagInUseCannotBeDeleted
+				}
+			}
+		}
 		deletedRows, err := sess.ID(tagId).Cols("deleted", "deleted_unix_time").Where("uid=? AND deleted=?", uid, false).Update(updateModel)
 
 		if err != nil {
@@ -446,6 +460,18 @@ func (s *TransactionTagService) DeleteAllTags(c core.Context, uid int64) error {
 	}
 
 	return s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
+		if _, err := sess.Where("uid=? AND deleted=?", uid, false).SetExpr("updated_unix_time", "updated_unix_time").Update(new(models.TransactionTag)); err != nil {
+			return err
+		}
+		snapshots, err := pendingScheduledSnapshots(sess, uid)
+		if err != nil {
+			return err
+		}
+		for _, snapshot := range snapshots {
+			if len(snapshot.TagIds) > 0 {
+				return errs.ErrTransactionTagInUseCannotBeDeleted
+			}
+		}
 		exists, err := sess.Cols("uid", "deleted").Where("uid=? AND deleted=?", uid, false).Limit(1).Exist(&models.TransactionTagIndex{})
 
 		if err != nil {

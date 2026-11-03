@@ -46,7 +46,7 @@ func updateDatabaseStructure(c *core.CliContext) error {
 func updateAllDatabaseTablesStructure(c *core.CliContext) error {
 	var err error
 
-	err = datastore.Container.UserStore.SyncStructs(new(models.User), new(models.AgentAccessSetting))
+	err = datastore.Container.UserStore.SyncStructs(new(models.User), new(models.AgentAccessSetting), new(models.AIUsageRecord))
 
 	if err != nil {
 		return err
@@ -86,7 +86,7 @@ func updateAllDatabaseTablesStructure(c *core.CliContext) error {
 
 	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] account table maintained successfully")
 
-	err = datastore.Container.UserDataStore.SyncStructs(new(models.Transaction))
+	err = datastore.Container.UserDataStore.SyncStructs(new(models.Transaction), new(models.TransactionSubmission))
 
 	if err != nil {
 		return err
@@ -126,7 +126,7 @@ func updateAllDatabaseTablesStructure(c *core.CliContext) error {
 
 	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] transaction tag index table maintained successfully")
 
-	err = datastore.Container.UserDataStore.SyncStructs(new(models.TransactionTemplate), new(models.ScheduledOccurrence), new(models.AgentImportBatch), new(models.AgentImportFingerprint))
+	err = datastore.Container.UserDataStore.SyncStructs(new(models.TransactionTemplate), new(models.TemplateSubmission), new(models.ScheduledOccurrence), new(models.AgentImportBatch), new(models.AgentImportFingerprint))
 
 	if err != nil {
 		return err
@@ -150,7 +150,7 @@ func updateAllDatabaseTablesStructure(c *core.CliContext) error {
 
 	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] user custom exchange rate table maintained successfully")
 
-	err = datastore.Container.UserDataStore.SyncStructs(new(models.UserApplicationCloudSetting))
+	err = datastore.Container.UserDataStore.SyncStructs(new(models.UserApplicationCloudSetting), new(models.AccountCardAppearance))
 
 	if err != nil {
 		return err
@@ -187,6 +187,9 @@ func updateAllDatabaseTablesStructure(c *core.CliContext) error {
 	if err != nil {
 		return err
 	}
+	if err = services.MonthlyBudgets.MigrateLegacyMonthlyBudgets(c); err != nil {
+		return err
+	}
 
 	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] monthly budget table maintained successfully")
 
@@ -205,6 +208,9 @@ func updateAllDatabaseTablesStructure(c *core.CliContext) error {
 	}
 
 	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] AI review item table maintained successfully")
+	if err = services.AIReviewItems.MigrateLegacyReviewItems(c); err != nil {
+		return err
+	}
 
 	err = datastore.Container.UserDataStore.SyncStructs(new(models.FamilyGroup), new(models.FamilyMember), new(models.FamilyInvitation))
 

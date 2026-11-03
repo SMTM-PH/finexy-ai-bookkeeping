@@ -54,6 +54,7 @@ internal fun FinexyTheme(isLightTheme: Boolean, content: @Composable () -> Unit)
             surface = LightPanel, onSurface = LightInk,
             surfaceVariant = LightPanelRaised, onSurfaceVariant = LightMuted,
             secondary = LightIncomeGreen, onSecondary = Color.White,
+            tertiary = Color(0xFFB25309),
             tertiaryContainer = LightWalletHighlight,
             outline = LightHairline, error = Color(0xFFB3261E)
         ) else darkColorScheme(
@@ -62,6 +63,7 @@ internal fun FinexyTheme(isLightTheme: Boolean, content: @Composable () -> Unit)
             surface = Color(0xFF202226), onSurface = Color(0xFFF5F5F6),
             surfaceVariant = Color(0xFF292C31), onSurfaceVariant = Color(0xFFADB2BC),
             secondary = IncomeGreen, onSecondary = Color(0xFF101113),
+            tertiary = Color(0xFFFDB022),
             tertiaryContainer = Color(0xFF36393E),
             outline = Color(0xFF666B75), error = Color(0xFFFF9D91)
         ),

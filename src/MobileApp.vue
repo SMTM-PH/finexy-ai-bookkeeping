@@ -19,6 +19,14 @@ import { useEnvironmentsStore } from '@/stores/environment.ts';
 import { useUserStore } from '@/stores/user.ts';
 import { useTokensStore } from '@/stores/token.ts';
 import { useExchangeRatesStore } from '@/stores/exchangeRates.ts';
+import { useLedgersStore } from '@/stores/ledger.ts';
+import { useAccountsStore } from '@/stores/account.ts';
+import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
+import { useTransactionTagsStore } from '@/stores/transactionTag.ts';
+import { useTransactionTemplatesStore } from '@/stores/transactionTemplate.ts';
+import { useTransactionsStore } from '@/stores/transaction.ts';
+import { useOverviewStore } from '@/stores/overview.ts';
+import { useSavingsGoalsStore } from '@/stores/savingsGoal.ts';
 
 import { APPLICATION_LOGO_PATH } from '@/consts/asset.ts';
 import { ThemeType } from '@/core/theme.ts';
@@ -40,6 +48,20 @@ const environmentsStore = useEnvironmentsStore();
 const userStore = useUserStore();
 const tokensStore = useTokensStore();
 const exchangeRatesStore = useExchangeRatesStore();
+const ledgersStore = useLedgersStore();
+watch(() => userStore.currentUserBasicInfo?.username, () => ledgersStore.reset(), { flush: 'sync' });
+watch(() => [ledgersStore.selectedLedgerId, userStore.currentUserBasicInfo?.username], () => {
+    // Stop displaying the previous scope synchronously. Draft storage is kept.
+    useAccountsStore().resetAccounts();
+    useTransactionCategoriesStore().resetTransactionCategories();
+    useTransactionTagsStore().resetTransactionTags();
+    useTransactionTemplatesStore().resetTransactionTemplates();
+    const transactions = useTransactionsStore();
+    transactions.clearTransactions();
+    transactions.updateTransactionListFilter({ accountIds: '', categoryIds: '', tagFilter: '' });
+    useOverviewStore().resetTransactionOverview();
+    useSavingsGoalsStore().reset();
+}, { flush: 'sync' });
 
 const f7params = ref<Framework7Parameters>({
     name: 'Finexy',

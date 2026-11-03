@@ -19,13 +19,17 @@ import (
 // temporary SQLite database. The package-level service singletons read that
 // container, so Confirm exercises the real transaction posting path.
 func setupOccurrenceLedger(t *testing.T) {
+	setupOccurrenceLedgerWithConnections(t, 1)
+}
+
+func setupOccurrenceLedgerWithConnections(t *testing.T, connections int) {
 	t.Helper()
 	config := &settings.Config{
 		DatabaseConfig: &settings.DatabaseConfig{
 			DatabaseType:      settings.Sqlite3DbType,
 			DatabasePath:      filepath.Join(t.TempDir(), "ledger.db"),
-			MaxOpenConnection: 1,
-			MaxIdleConnection: 1,
+			MaxOpenConnection: uint16(connections),
+			MaxIdleConnection: uint16(connections),
 		},
 		UuidGeneratorType: settings.InternalUuidGeneratorType,
 		UuidServerId:      1,
@@ -82,6 +86,7 @@ func occurrenceRow(t *testing.T, uid, templateId, scheduledUnixTime int64) *mode
 }
 
 type occurrenceSeed struct {
+	t          *testing.T
 	uid        int64
 	account    *models.Account
 	other      *models.Account
@@ -96,6 +101,7 @@ func insertOccurrenceSeed(t *testing.T, uid int64, accountBalance int64, otherBa
 	session := occurrenceDB(t).NewSession(nil)
 	defer session.Close()
 	seed := &occurrenceSeed{
+		t:   t,
 		uid: uid,
 		account: &models.Account{AccountId: uid*100000 + 1, Uid: uid, Category: models.ACCOUNT_CATEGORY_CHECKING_ACCOUNT,
 			Type: models.ACCOUNT_TYPE_SINGLE_ACCOUNT, Name: "Main", Icon: 1, Color: "000000",
@@ -136,6 +142,16 @@ func occurrenceTemplate(uid, templateId int64, seed *occurrenceSeed, transaction
 		template.RelatedAccountId = seed.other.AccountId
 		template.RelatedAccountAmount = amount - 100
 	}
+	var existing models.TransactionTemplate
+	found, err := occurrenceDB(seed.t).NewSession(nil).ID(templateId).Get(&existing)
+	if err != nil {
+		seed.t.Fatal(err)
+	}
+	if !found {
+		if _, err := occurrenceDB(seed.t).NewSession(nil).Insert(template); err != nil {
+			seed.t.Fatal(err)
+		}
+	}
 	return template
 }
 
@@ -163,7 +179,7 @@ func TestScheduledOccurrenceConfirmPostsOnceWithCorrectBalance(t *testing.T) {
 	const uid = int64(1)
 	seed := insertOccurrenceSeed(t, uid, 10000, 5000)
 	template := occurrenceTemplate(uid, 7001, seed, models.TRANSACTION_TYPE_EXPENSE, 3000)
-	const scheduledUnixTime = int64(1757100000)
+	const scheduledUnixTime = int64(1757030400)
 
 	occurrence, err := ScheduledOccurrences.Enqueue(nil, template, scheduledUnixTime)
 	if err != nil {
@@ -250,7 +266,7 @@ func TestScheduledOccurrenceConcurrentConfirmPostsExactlyOnce(t *testing.T) {
 	const uid = int64(1)
 	seed := insertOccurrenceSeed(t, uid, 8000, 5000)
 	template := occurrenceTemplate(uid, 7002, seed, models.TRANSACTION_TYPE_EXPENSE, 2500)
-	const scheduledUnixTime = int64(1757200000)
+	const scheduledUnixTime = int64(1757116800)
 	if _, err := ScheduledOccurrences.Enqueue(nil, template, scheduledUnixTime); err != nil {
 		t.Fatal(err)
 	}
@@ -296,7 +312,7 @@ func TestScheduledOccurrenceRejectsCrossUserAndNonPendingStates(t *testing.T) {
 	seedOne := insertOccurrenceSeed(t, 1, 10000, 5000)
 	seedTwo := insertOccurrenceSeed(t, 2, 20000, 3000)
 	template := occurrenceTemplate(2, 8001, seedTwo, models.TRANSACTION_TYPE_EXPENSE, 1200)
-	const scheduledUnixTime = int64(1757300000)
+	const scheduledUnixTime = int64(1757289600)
 	if _, err := ScheduledOccurrences.Enqueue(nil, template, scheduledUnixTime); err != nil {
 		t.Fatal(err)
 	}
@@ -386,6 +402,7 @@ func TestScheduledDispatchQueuesDueTemplateWithoutTouchingBalance(t *testing.T) 
 	pausedTemplate := *dueTemplate
 	pausedTemplate.TemplateId = 9002
 	pausedTemplate.ScheduledFrequencyType = models.TRANSACTION_SCHEDULE_FREQUENCY_TYPE_DISABLED
+	pausedTemplate.ScheduledFrequency = ""
 	if err := TransactionTemplates.CreateTemplate(nil, &pausedTemplate); err != nil {
 		t.Fatal(err)
 	}
@@ -522,7 +539,7 @@ func TestScheduledOccurrenceTransferAndCorruptSnapshot(t *testing.T) {
 	const uid = int64(1)
 	seed := insertOccurrenceSeed(t, uid, 5000, 2000)
 	template := occurrenceTemplate(uid, 7003, seed, models.TRANSACTION_TYPE_TRANSFER, 1000)
-	const scheduledUnixTime = int64(1757400000)
+	const scheduledUnixTime = int64(1757376000)
 	if _, err := ScheduledOccurrences.Enqueue(nil, template, scheduledUnixTime); err != nil {
 		t.Fatal(err)
 	}
@@ -567,7 +584,7 @@ func TestScheduledOccurrenceTransferAndCorruptSnapshot(t *testing.T) {
 	// A persisted snapshot that no longer satisfies the validation rules must
 	// be rejected before any ledger write, and the occurrence stays pending.
 	broken := occurrenceTemplate(uid, 7004, seed, models.TRANSACTION_TYPE_EXPENSE, 100)
-	const brokenTime = int64(1757500000)
+	const brokenTime = int64(1757462400)
 	if _, err := ScheduledOccurrences.Enqueue(nil, broken, brokenTime); err != nil {
 		t.Fatal(err)
 	}

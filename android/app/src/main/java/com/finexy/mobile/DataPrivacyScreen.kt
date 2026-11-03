@@ -90,7 +90,7 @@ internal fun DataPrivacyScreen(store: SecureStore, backup: LedgerBackup, databas
         HorizontalDivider()
         Text("当前账本数据", style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
         Text(statistics)
-        Text("备份包含流水、账户、分类、映射、标签、模板与冲突记录；不含登录凭据、PIN 或图片原文件。只可恢复到相同用户/服务器（本地模式可恢复本地备份）。", color = Muted)
+        Text("备份包含流水、账户、分类、映射、标签、模板、已保存的 AI 来源原图与待核对请求；原图在密码备份内受加密保护。不包含尚未保存的拍照内容，请先回到来源页处理；不含登录凭据或 PIN。只可恢复到相同用户/服务器（本地模式可恢复本地备份）。", color = Muted)
         SecretField("备份密码（12–128 个字符）", password, { password = it.take(128) }, enabled = !busy)
         SecretField("再次输入密码（导出时必填）", passwordConfirm, { passwordConfirm = it.take(128) }, enabled = !busy)
         Button(onClick = { run {
@@ -118,10 +118,12 @@ internal fun DataPrivacyScreen(store: SecureStore, backup: LedgerBackup, databas
             } }) { Text("确认导入") } }, dismissButton = { TextButton(onClick = { importPreview = null }) { Text("取消") } })
     }
     if (clearDialog && (context as? PrivacyActivity)?.isPrivacyLocked != true) AlertDialog(onDismissRequest = { clearDialog = false }, title = { Text("清空当前本地账本？") }, text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("未备份且未上传的数据将无法恢复。请输入“清空当前账本”确认。服务器和其他账本不受影响。")
+        Text("未备份且未上传的数据将无法恢复，也会删除此账号本机尚未保存的拍照内容。请输入“清空当前账本”确认。服务器和其他账号不受影响。")
         OutlinedTextField(clearText, { clearText = it }, label = { Text("确认文字") })
     } }, confirmButton = { TextButton(onClick = { clearDialog = false; run {
         SyncEngine.withoutSync {
+            require(clearText == "清空当前账本") { "请输入完整确认文字" }
+            withContext(Dispatchers.IO) { AIPendingCaptureStore.clearPartition(context.applicationContext, databaseName) }
             // Prevent legacy JSON from restoring data after the explicit clear operation.
             if (databaseName == "finexy.db") store.put(TransactionRepository.KEY_ROOM_MIGRATED, "true", durable = true)
             backup.clearLocal(clearText)

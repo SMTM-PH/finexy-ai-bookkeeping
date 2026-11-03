@@ -1,5 +1,5 @@
 <template>
-    <StatementMappingPanel v-if="importTransactions?.length" :rows="importTransactions" :accounts="allAccountsMap" :categories="allCategoriesMap" :disabled="disabled || isEditing" @mapped="updateAllTransactionsIsValid" />
+    <StatementMappingPanel v-if="importTransactions?.length" :rows="importTransactions" :accounts="allAccountsMap" :categories="allCategoriesMap" :ledger-id="ledgerId" :file-type="fileType" :disabled="disabled || !!editingTransaction" @mapped="updateAllTransactionsIsValid" @busy="mappingBusy = $event" />
     <v-data-table
         fixed-header
         fixed-footer
@@ -513,6 +513,8 @@ interface ImportTransactionCheckDataMenu {
 const props = defineProps<{
     importTransactions?: ImportTransaction[]
     disabled?: boolean;
+    ledgerId?: string;
+    fileType?: string;
 }>();
 
 const {
@@ -581,7 +583,8 @@ const hasVisibleExpenseCategories = computed<boolean>(() => transactionCategorie
 const hasVisibleIncomeCategories = computed<boolean>(() => transactionCategoriesStore.hasVisibleIncomeCategories);
 const hasVisibleTransferCategories = computed<boolean>(() => transactionCategoriesStore.hasVisibleTransferCategories);
 
-const isEditing = computed<boolean>(() => !!editingTransaction.value);
+const mappingBusy = ref(false);
+const isEditing = computed<boolean>(() => !!editingTransaction.value || mappingBusy.value);
 const canImport = computed<boolean>(() => selectedImportTransactionCount.value > 0 && selectedInvalidTransactionCount.value < 1);
 
 const filterMenus = computed<ImportTransactionCheckDataMenuGroup[]>(() => [

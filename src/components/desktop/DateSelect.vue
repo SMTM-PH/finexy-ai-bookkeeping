@@ -7,8 +7,9 @@
         :label="label"
         :error="error"
         :error-messages="errorMessages"
-        :menu-props="{ contentClass: 'date-select-menu' }"
+        :menu-props="{ contentClass: 'date-select-menu', key: menuSession }"
         v-model="displayTime"
+        @update:menu="onMenuStateChanged"
     >
         <template #selection>
             <span class="text-truncate cursor-pointer">{{ displayTime }}</span>
@@ -28,7 +29,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { useTheme } from 'vuetify';
 
 import { useI18n } from '@/locales/helpers.ts';
@@ -59,6 +60,11 @@ const emit = defineEmits<{
 }>();
 
 const theme = useTheme();
+const menuSession = ref(0);
+
+function onMenuStateChanged(state: boolean): void {
+    if (state) menuSession.value++;
+}
 const { tt, formatGregorianTextualYearMonthDayToLongDate } = useI18n();
 
 const dateTime = computed<Date | null>({

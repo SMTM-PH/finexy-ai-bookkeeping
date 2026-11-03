@@ -6,14 +6,17 @@
                 <f7-link icon-f7="xmark" :class="{ 'disabled': displayOrderSaving }" @click="cancelSort"></f7-link>
             </f7-nav-left>
             <f7-nav-title :title="tt('Account List')"></f7-nav-title>
-            <f7-nav-right :class="{ 'navbar-compact-icons': true, 'disabled': loading }">
+            <f7-nav-right v-if="isDefaultLedger" :class="{ 'navbar-compact-icons': true, 'disabled': loading }">
                 <f7-link icon-f7="ellipsis" :class="{ 'disabled': !allAccountCount || sortable }" @click="showMoreActionSheet = true"></f7-link>
                 <f7-link icon-f7="plus" href="/account/add" v-if="!sortable"></f7-link>
                 <f7-link icon-f7="checkmark_alt" :class="{ 'disabled': displayOrderSaving || !displayOrderModified }" @click="saveSortResult" v-else-if="sortable"></f7-link>
             </f7-nav-right>
         </f7-navbar>
 
-        <f7-card class="account-overview-card margin-top-half" :class="{ 'skeleton-text': loading }">
+        <ledger-context-notice :limited="!isDefaultLedger" />
+        <f7-block v-if="loadingError" role="alert">当前账本账户加载失败，请重试。 <f7-link @click="init()">重试</f7-link></f7-block>
+        <f7-block v-if="!isDefaultLedger">账户余额按各账户币种分别展示。点击账户查看当前账本流水。</f7-block>
+        <f7-card v-if="isDefaultLedger" class="account-overview-card margin-top-half" :class="{ 'skeleton-text': loading }">
             <f7-card-header class="display-block" style="padding-top: 120px;">
                 <p class="no-margin">
                     <small class="card-header-content" v-if="loading">Net assets</small>
@@ -66,7 +69,7 @@
             </f7-list>
         </div>
 
-        <f7-list strong inset dividers class="margin-vertical" v-if="!loading && noAvailableAccount">
+        <f7-list strong inset dividers class="margin-vertical" v-if="!loading && !loadingError && noAvailableAccount">
             <f7-list-item :title="tt('No available account')"></f7-list-item>
         </f7-list>
 
@@ -80,7 +83,7 @@
                 <f7-list-item group-title :sortable="false">
                     <small>
                         <span>{{ tt(accountCategory.name) }}</span>
-                        <span style="margin-inline-start: 10px">{{ accountCategoryTotalBalance(accountCategory) }}</span>
+                        <span style="margin-inline-start: 10px">{{ isDefaultLedger ? accountCategoryTotalBalance(accountCategory) : '' }}</span>
                     </small>
                 </f7-list-item>
                 <f7-list-item swipeout
@@ -142,7 +145,7 @@
                     </template>
                     <f7-swipeout-actions :left="textDirection === TextDirection.LTR"
                                          :right="textDirection === TextDirection.RTL"
-                                         v-if="sortable">
+                                         v-if="sortable && isDefaultLedger">
                         <f7-swipeout-button :color="account.hidden ? 'blue' : 'gray'" class="padding-horizontal"
                                             overswipe close @click="hide(account, !account.hidden)">
                             <f7-icon :f7="account.hidden ? 'eye' : 'eye_slash'"></f7-icon>
@@ -150,7 +153,7 @@
                     </f7-swipeout-actions>
                     <f7-swipeout-actions :left="textDirection === TextDirection.RTL"
                                          :right="textDirection === TextDirection.LTR"
-                                         v-if="!sortable">
+                                         v-if="!sortable && isDefaultLedger">
                         <f7-swipeout-button color="orange" close :text="tt('Edit')" @click="edit(account)"></f7-swipeout-button>
                         <f7-swipeout-button color="primary" close :text="tt('More')" @click="showMoreActionSheetForAccount(account)"></f7-swipeout-button>
                         <f7-swipeout-button color="red" class="padding-horizontal" @click="remove(account, false)">
@@ -223,7 +226,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import type { Router } from 'framework7/types';
 
 import { useI18n } from '@/locales/helpers.ts';
@@ -232,6 +235,10 @@ import { useAccountListPageBase } from '@/views/base/accounts/AccountListPageBas
 
 import { useRootStore } from '@/stores/index.ts';
 import { useAccountsStore } from '@/stores/account.ts';
+import { useLedgersStore } from '@/stores/ledger.ts';
+import { DefaultLedgerId } from '@/models/ledger.ts';
+import LedgerContextNotice from '@/components/mobile/LedgerContextNotice.vue';
+import { mobileLedgerUnsupportedMessage } from '@/lib/mobile_ledger.ts';
 
 import { TextDirection } from '@/core/text.ts';
 import { AccountType, AccountCategory } from '@/core/account.ts';
@@ -245,7 +252,7 @@ const props = defineProps<{
 }>();
 
 const { tt, getCurrentLanguageTextDirection } = useI18n();
-const { showAlert, showConfirm, showToast, routeBackOnError } = useI18nUIComponents();
+const { showAlert, showConfirm, showToast } = useI18nUIComponents();
 
 const {
     loading,
@@ -266,6 +273,15 @@ const {
 
 const rootStore = useRootStore();
 const accountsStore = useAccountsStore();
+const ledgersStore = useLedgersStore();
+const isDefaultLedger = computed(() => ledgersStore.selectedLedgerId === DefaultLedgerId);
+let loadGeneration = 0;
+
+function canManageAccounts(): boolean {
+    if (isDefaultLedger.value && accountsStore.accountListLedgerId === DefaultLedgerId) return true;
+    showToast(mobileLedgerUnsupportedMessage);
+    return false;
+}
 
 const loadingError = ref<unknown | null>(null);
 const sortable = ref<boolean>(false);
@@ -315,56 +331,54 @@ function parseAccountIdFromDomId(domId: string): string | null {
 
 function init(): void {
     loading.value = true;
-
-    accountsStore.loadAllAccounts({
-        force: false
-    }).then(() => {
-        loading.value = false;
-    }).catch(error => {
-        if (error.processed) {
-            loading.value = false;
-        } else {
-            loadingError.value = error;
-            showToast(error.message || error);
-        }
-    });
+    reload();
 }
 
 function reload(done?: () => void): void {
-    if (sortable.value) {
-        done?.();
-        return;
-    }
-
-    const force = !!done;
-
-    accountsStore.loadAllAccounts({
-        force: force
-    }).then(() => {
-        done?.();
-
-        if (force) {
-            showToast('Account list has been updated');
-        }
+    if (sortable.value) { done?.(); return; }
+    const generation = ++loadGeneration;
+    const ledgerId = ledgersStore.selectedLedgerId;
+    loadingError.value = null;
+    accountsStore.loadAllAccounts({ force: !!done, ledgerId }).then(() => {
+        if (generation === loadGeneration && done) showToast('Account list has been updated');
     }).catch(error => {
+        if (generation !== loadGeneration || ledgerId !== ledgersStore.selectedLedgerId || error.stale || error.isUpToDate) return;
+        loadingError.value = error;
+        if (!error.processed) showToast(error.message || error);
+    }).finally(() => {
         done?.();
-
-        if (!error.processed) {
-            showToast(error.message || error);
-        }
+        if (generation === loadGeneration) loading.value = false;
     });
 }
 
+watch(() => ledgersStore.selectedLedgerId, () => {
+    sortable.value = false;
+    showAccountMoreActionSheet.value = false;
+    showMoreActionSheet.value = false;
+    showDeleteActionSheet.value = false;
+    showInputPasswordSheetForClearAllTransactions.value = false;
+    accountForMoreActionSheet.value = null;
+    accountToDelete.value = null;
+    accountToClearTransactions.value = null;
+    init();
+}, { flush: 'sync' });
+
 function edit(account: Account): void {
+    if (!isDefaultLedger.value) {
+        props.f7router.navigate('/transaction/list?accountIds=' + account.id);
+        return;
+    }
     props.f7router.navigate('/account/edit?id=' + account.id);
 }
 
 function showMoreActionSheetForAccount(account: Account): void {
+    if (!canManageAccounts()) return;
     accountForMoreActionSheet.value = account;
     showAccountMoreActionSheet.value = true;
 }
 
 function showReconciliationStatement(account: Account | null): void {
+    if (!canManageAccounts()) return;
     if (!account) {
         showAlert('An error occurred');
         return;
@@ -376,12 +390,14 @@ function showReconciliationStatement(account: Account | null): void {
 }
 
 function updateLastReconciledTime(account: Account | null): void {
+    if (!canManageAccounts()) return;
     if (!account) {
         showAlert('An error occurred');
         return;
     }
 
     showConfirm('Are you sure you want to update the last reconciled time of this account to the current time?', () => {
+        if (!canManageAccounts()) return;
         updatingLastReconciledTime.value = true;
         showLoading(() => updatingLastReconciledTime.value);
 
@@ -408,6 +424,7 @@ function updateLastReconciledTime(account: Account | null): void {
 }
 
 function moveAllTransactions(account: Account | null): void {
+    if (!canManageAccounts()) return;
     if (!account) {
         showAlert('An error occurred');
         return;
@@ -419,6 +436,7 @@ function moveAllTransactions(account: Account | null): void {
 }
 
 function showPasswordSheetForClearAllTransaction(account: Account | null): void {
+    if (!canManageAccounts()) return;
     if (!account) {
         showAlert('An error occurred');
         return;
@@ -432,6 +450,7 @@ function showPasswordSheetForClearAllTransaction(account: Account | null): void 
 }
 
 function clearAllTransactions(password: string): void {
+    if (!canManageAccounts()) return;
     if (!accountToClearTransactions.value) {
         showAlert('An error occurred');
         return;
@@ -461,6 +480,7 @@ function clearAllTransactions(password: string): void {
 }
 
 function hide(account: Account, hidden: boolean): void {
+    if (!canManageAccounts()) return;
     showLoading();
 
     accountsStore.hideAccount({
@@ -478,6 +498,7 @@ function hide(account: Account, hidden: boolean): void {
 }
 
 function remove(account: Account | null, confirm: boolean): void {
+    if (!canManageAccounts()) return;
     if (!account) {
         showAlert('An error occurred');
         return;
@@ -510,6 +531,7 @@ function remove(account: Account | null, confirm: boolean): void {
 }
 
 function setSortable(): void {
+    if (!canManageAccounts()) return;
     if (sortable.value) {
         return;
     }
@@ -520,6 +542,7 @@ function setSortable(): void {
 }
 
 function saveSortResult(): void {
+    if (!canManageAccounts()) return;
     if (!displayOrderModified.value) {
         showHidden.value = false;
         sortable.value = false;
@@ -557,7 +580,7 @@ function cancelSort(): void {
     showLoading();
 
     accountsStore.loadAllAccounts({
-        force: false
+        force: false, ledgerId: ledgersStore.selectedLedgerId
     }).then(() => {
         displayOrderSaving.value = false;
         hideLoading();
@@ -580,6 +603,7 @@ function setAccountsIncludedInTotal(): void {
 }
 
 function onSort(event: { el: { id: string }; from: number; to: number }): void {
+    if (!canManageAccounts()) return;
     if (!event || !event.el || !event.el.id) {
         showToast('Unable to move account');
         return;
@@ -610,7 +634,7 @@ function onPageAfterIn(): void {
         reload();
     }
 
-    routeBackOnError(props.f7router, loadingError);
+
 }
 
 init();

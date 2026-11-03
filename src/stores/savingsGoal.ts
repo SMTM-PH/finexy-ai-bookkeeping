@@ -8,14 +8,16 @@ import services from '@/lib/services.ts';
 /**
  * Savings goals of one ledger. The saved amount always comes from the server
  * derived value; the client never keeps a local balance. A 400/403/404
- * response means the savings goal feature is unavailable on this server and
- * is presented as an empty state.
+ * response stays a visible error and preserves valid data of the same ledger.
  */
 export const useSavingsGoalsStore = defineStore('savingsGoals', () => {
     const goals = ref<SavingsGoal[]>([]);
     const featureDisabled = ref(false);
     const loading = ref(false);
     const loaded = ref(false);
+    const loadedLedgerId = ref('0');
+    let loadGeneration = 0;
+    let accountsGeneration = 0;
     // goalId -> movements of that goal, newest first (only loaded on demand).
     const fundsByGoalId = ref<Record<string, SavingsGoalFund[]>>({});
     // Accounts that may fund a goal of the currently selected ledger. Family
@@ -23,39 +25,48 @@ export const useSavingsGoalsStore = defineStore('savingsGoals', () => {
     const fundAccounts = ref<AccountInfoResponse[]>([]);
 
     async function loadFundAccounts(ledgerId: string): Promise<void> {
-        const response = await services.listSavingsGoalAccounts({ ledgerId: ledgerId });
-        if (!response.data?.success) throw { message: '无法读取可用账户' };
-        fundAccounts.value = response.data.result ?? [];
+        if (loadedLedgerId.value !== ledgerId) return;
+        const generation = ++accountsGeneration;
+        fundAccounts.value = [];
+        const response = await services.listSavingsGoalAccounts({ ledgerId });
+        if (generation !== accountsGeneration) return;
+        if (!response.data?.success || !Array.isArray(response.data.result)) throw new Error('无法读取有效资金账户，请重试');
+        fundAccounts.value = response.data.result;
     }
 
     async function load(ledgerId: string): Promise<void> {
+        if (loadedLedgerId.value !== ledgerId) {
+            reset();
+            loadedLedgerId.value = ledgerId;
+        }
+        const generation = ++loadGeneration;
         loading.value = true;
         try {
-            const response = await services.listSavingsGoals({ ledgerId: ledgerId });
-            if (!response.data?.success) throw { message: '无法读取存钱计划' };
-            goals.value = (response.data.result ?? []).map(info => SavingsGoal.of(info));
+            const response = await services.listSavingsGoals({ ledgerId });
+            if (generation !== loadGeneration) return;
+            if (!response.data?.success || !Array.isArray(response.data.result)) throw new Error('无法读取有效存钱计划，请重试');
+            const next = response.data.result.map(info => SavingsGoal.of(info));
+            if (next.some(goal => goal.ledgerId !== ledgerId)) throw new Error('存钱计划账本归属不匹配，请重试');
+            goals.value = next;
             featureDisabled.value = false;
             loaded.value = true;
         } catch (error) {
-            const status = (error as { response?: { status?: number } })?.response?.status;
-            if (status === 400 || status === 403 || status === 404) {
-                featureDisabled.value = true;
-                goals.value = [];
-                return;
-            }
+            if (generation !== loadGeneration) return;
+            featureDisabled.value = (error as { response?: { status?: number } })?.response?.status === 404;
             throw error;
         } finally {
-            loading.value = false;
+            if (generation === loadGeneration) loading.value = false;
         }
     }
 
     async function loadFunds(goalId: string): Promise<void> {
-        const response = await services.listSavingsGoalFunds({ goalId: goalId });
-        if (!response.data?.success) throw { message: '无法读取资金记录' };
-        fundsByGoalId.value = {
-            ...fundsByGoalId.value,
-            [goalId]: (response.data.result ?? []).map(info => SavingsGoalFund.of(info))
-        };
+        const generation = loadGeneration;
+        const response = await services.listSavingsGoalFunds({ goalId });
+        if (generation !== loadGeneration) return;
+        if (!response.data?.success || !Array.isArray(response.data.result)) throw new Error('无法读取有效资金记录，请重试');
+        const funds = response.data.result.map(info => SavingsGoalFund.of(info));
+        if (funds.some(fund => fund.goalId !== goalId)) throw new Error('资金记录目标归属不匹配，请重试');
+        fundsByGoalId.value = { ...fundsByGoalId.value, [goalId]: funds };
     }
 
     async function createGoal(ledgerId: string, name: string, targetAmount: number, deadlineTime: number, comment: string): Promise<void> {
@@ -67,6 +78,7 @@ export const useSavingsGoalsStore = defineStore('savingsGoals', () => {
             comment: comment
         });
         if (!response.data?.success) throw { message: '无法创建存钱目标' };
+        if (loadedLedgerId.value !== ledgerId) return;
         await load(ledgerId);
     }
 
@@ -79,18 +91,21 @@ export const useSavingsGoalsStore = defineStore('savingsGoals', () => {
             comment: comment
         });
         if (!response.data?.success) throw { message: '无法保存存钱目标' };
+        if (loadedLedgerId.value !== goal.ledgerId) return;
         await load(goal.ledgerId);
     }
 
     async function deleteGoal(goal: SavingsGoal): Promise<void> {
         const response = await services.deleteSavingsGoal({ id: goal.id });
         if (!response.data?.success) throw { message: '无法删除存钱目标' };
+        if (loadedLedgerId.value !== goal.ledgerId) return;
         await load(goal.ledgerId);
     }
 
     async function deposit(goal: SavingsGoal, amount: number, accountId: string, comment: string): Promise<void> {
         const response = await services.depositToSavingsGoal({ id: goal.id, amount: amount, accountId: accountId, comment: comment });
         if (!response.data?.success) throw { message: '无法存入目标' };
+        if (loadedLedgerId.value !== goal.ledgerId) return;
         await load(goal.ledgerId);
 		await loadFundAccounts(goal.ledgerId);
     }
@@ -98,11 +113,18 @@ export const useSavingsGoalsStore = defineStore('savingsGoals', () => {
     async function withdraw(goal: SavingsGoal, amount: number, accountId: string, comment: string): Promise<void> {
         const response = await services.withdrawFromSavingsGoal({ id: goal.id, amount: amount, accountId: accountId, comment: comment });
         if (!response.data?.success) throw { message: '无法从目标取出' };
+        if (loadedLedgerId.value !== goal.ledgerId) return;
         await load(goal.ledgerId);
 		await loadFundAccounts(goal.ledgerId);
     }
 
     function reset(): void {
+        ++loadGeneration;
+        ++accountsGeneration;
+        loading.value = false;
+        loaded.value = false;
+        loadedLedgerId.value = '0';
+        fundAccounts.value = [];
         goals.value = [];
         fundsByGoalId.value = {};
         featureDisabled.value = false;
@@ -113,6 +135,7 @@ export const useSavingsGoalsStore = defineStore('savingsGoals', () => {
         featureDisabled,
         loading,
         loaded,
+        loadedLedgerId,
         fundsByGoalId,
         fundAccounts,
         load,

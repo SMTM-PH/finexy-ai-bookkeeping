@@ -1,455 +1,155 @@
 import { ref, computed } from 'vue';
 import { defineStore } from 'pinia';
-
-import { type BeforeResolveFunction, itemAndIndex, entries } from '@/core/base.ts';
-
+import type { BeforeResolveFunction } from '@/core/base.ts';
 import { TransactionType } from '@/core/transaction.ts';
+import { TransactionTemplate } from '@/models/transaction_template.ts';
+import { isEquals } from '@/lib/common.ts';
+import services from '@/lib/services.ts';
+import { periodicError, usePeriodicScope } from './periodicScope.ts';
 
-import {
-    type TransactionTemplateInfoResponse,
-    type TransactionTemplateNewDisplayOrderRequest,
-    TransactionTemplate
-} from '@/models/transaction_template.ts';
-
-import { isDefined, isObject, isArray, isEquals } from '@/lib/common.ts';
-
-import logger from '@/lib/logger.ts';
-import services, { type ApiResponsePromise } from '@/lib/services.ts';
-
-export const useTransactionTemplatesStore = defineStore('transactionTemplates', () =>{
+export const useTransactionTemplatesStore = defineStore('transactionTemplates', () => {
     const allTransactionTemplates = ref<Record<number, TransactionTemplate[]>>({});
     const allTransactionTemplatesMap = ref<Record<number, Record<string, TransactionTemplate>>>({});
     const transactionTemplateListStatesInvalid = ref<Record<number, boolean>>({});
-
-    const allVisibleTemplates = computed<Record<number, TransactionTemplate[]>>(() => {
-        const allVisibleTemplates: Record<number, TransactionTemplate[]> = {};
-
-        for (const [templateType, allTemplates] of entries(allTransactionTemplates.value)) {
-            const visibleTemplates: TransactionTemplate[] = [];
-
-            for (const template of allTemplates) {
-                if (!template.hidden) {
-                    visibleTemplates.push(template);
-                }
-            }
-
-            allVisibleTemplates[parseInt(templateType)] = visibleTemplates;
-        }
-
-        return allVisibleTemplates;
-    });
-
-    const allAvailableTemplatesCount = computed<Record<number, number>>(() => {
-        const allAvailableTemplateCounts: Record<number, number> = {};
-
-        for (const [templateType, allTemplates] of entries(allTransactionTemplates.value)) {
-            allAvailableTemplateCounts[parseInt(templateType)] = allTemplates.length;
-        }
-
-        return allAvailableTemplateCounts;
-    });
-
-    const allVisibleTemplatesCount = computed<Record<number, number>>(() => {
-        const allVisibleTemplateCounts: Record<number, number> = {};
-
-        for (const [templateType, allTemplates] of entries(allVisibleTemplates.value)) {
-            allVisibleTemplateCounts[parseInt(templateType)] = allTemplates.length;
-        }
-
-        return allVisibleTemplateCounts;
-    });
-
-    function loadTransactionTemplateList(templateType: number, templates: TransactionTemplate[]): void {
-        allTransactionTemplates.value[templateType] = templates;
-        allTransactionTemplatesMap.value[templateType] = {};
-
-        for (const template of templates) {
-            allTransactionTemplatesMap.value[templateType][template.id] = template;
-        }
-    }
-
-    function addTemplateToTransactionTemplateList(templateType: number, template: TransactionTemplate): void {
-        const templates = allTransactionTemplates.value[templateType];
-        const templateMap = allTransactionTemplatesMap.value[templateType];
-
-        if (isArray(templates)) {
-            templates.push(template);
-        }
-
-        if (isObject(templateMap)) {
-            templateMap[template.id] = template;
-        }
-    }
-
-    function updateTemplateInTransactionTemplateList(templateType: number, currentTemplate: TransactionTemplate): void {
-        const templates = allTransactionTemplates.value[templateType];
-        const templateMap = allTransactionTemplatesMap.value[templateType];
-
-        if (isArray(templates)) {
-            for (const [template, index] of itemAndIndex(templates)) {
-                if (template.id === currentTemplate.id) {
-                    templates.splice(index, 1, currentTemplate);
-                    break;
-                }
-            }
-        }
-
-        if (isObject(templateMap)) {
-            templateMap[currentTemplate.id] = currentTemplate;
-        }
-    }
-
-    function updateTemplateDisplayOrderInTransactionTemplateList(templateType: number, { from, to }: { from: number, to: number }): void {
-        const templates = allTransactionTemplates.value[templateType];
-
-        if (isArray(templates)) {
-            templates.splice(to, 0, templates.splice(from, 1)[0] as TransactionTemplate);
-        }
-    }
-
-    function updateTemplateVisibilityInTransactionTemplateList(templateType: number, { template, hidden }: { template: TransactionTemplate, hidden: boolean }): void {
-        const templateMap = allTransactionTemplatesMap.value[templateType];
-
-        if (isObject(templateMap)) {
-            if (templateMap[template.id]) {
-                templateMap[template.id]!.hidden = hidden;
-            }
-        }
-    }
-
-    function removeTemplateFromTransactionTemplateList(templateType: number, currentTemplate: TransactionTemplate): void {
-        const templates = allTransactionTemplates.value[templateType];
-        const templateMap = allTransactionTemplatesMap.value[templateType];
-
-        if (isArray(templates)) {
-            for (const [template, index] of itemAndIndex(templates)) {
-                if (template.id === currentTemplate.id) {
-                    templates.splice(index, 1);
-                    break;
-                }
-            }
-        }
-
-        if (isObject(templateMap)) {
-            if (templateMap[currentTemplate.id]) {
-                delete templateMap[currentTemplate.id];
-            }
-        }
-    }
-
-    function updateTransactionTemplateListInvalidState(templateType: number, invalidState: boolean): void {
-        transactionTemplateListStatesInvalid.value[templateType] = invalidState;
-    }
-
-    function resetTransactionTemplates(): void {
+    const versions = new Map<number, number>();
+    const scope = usePeriodicScope(() => {
         allTransactionTemplates.value = {};
         allTransactionTemplatesMap.value = {};
         transactionTemplateListStatesInvalid.value = {};
-    }
+        versions.clear();
+    });
+    const allVisibleTemplates = computed(() => Object.fromEntries(Object.entries(allTransactionTemplates.value).map(([type, rows]) => [type, rows.filter(row => !row.hidden)])) as Record<number, TransactionTemplate[]>);
+    const allAvailableTemplatesCount = computed(() => Object.fromEntries(Object.entries(allTransactionTemplates.value).map(([type, rows]) => [type, rows.length])) as Record<number, number>);
+    const allVisibleTemplatesCount = computed(() => Object.fromEntries(Object.entries(allVisibleTemplates.value).map(([type, rows]) => [type, rows.length])) as Record<number, number>);
 
-    function loadAllTemplates({ templateType, force }: { templateType: number, force?: boolean }): Promise<TransactionTemplate[]> {
-        if (!force && isDefined(transactionTemplateListStatesInvalid.value[templateType]) && !transactionTemplateListStatesInvalid.value[templateType]) {
-            return new Promise((resolve) => {
-                resolve(allTransactionTemplates.value[templateType] || []);
-            });
+    function setRows(type: number, rows: TransactionTemplate[]): void {
+        allTransactionTemplates.value[type] = rows;
+        allTransactionTemplatesMap.value[type] = Object.fromEntries(rows.map(row => [row.id, row]));
+    }
+    function invalidate(type: number): void {
+        versions.set(type, (versions.get(type) ?? 0) + 1);
+        transactionTemplateListStatesInvalid.value[type] = true;
+    }
+    function upsert(template: TransactionTemplate): void {
+        invalidate(template.templateType);
+        const rows = [...(allTransactionTemplates.value[template.templateType] ?? [])];
+        const index = rows.findIndex(row => row.id === template.id);
+        if (index < 0) rows.push(template); else rows[index] = template;
+        setRows(template.templateType, rows);
+    }
+    async function loadAllTemplates({ templateType, force, ledgerId = '0' }: { templateType: number; force?: boolean; ledgerId?: string }): Promise<TransactionTemplate[]> {
+        const context = scope.capture(ledgerId);
+        const version = (versions.get(templateType) ?? 0) + 1;
+        versions.set(templateType, version);
+        try {
+            await scope.authorize(context, 'read');
+            if (!force && transactionTemplateListStatesInvalid.value[templateType] === false) return allTransactionTemplates.value[templateType] ?? [];
+            const response = await services.getAllTransactionTemplates({ templateType, ledgerId, expectedUsername: context.username });
+            scope.assertCurrent(context);
+            if (versions.get(templateType) !== version) throw Object.assign(new Error('模板读取已被后续请求替代'), { stale: true });
+            if (!response.data?.success || !Array.isArray(response.data.result)) throw new Error('模板响应不完整，请重试');
+            const rows = TransactionTemplate.ofMultiTemplates(response.data.result, ledgerId);
+            if (rows.some(row => row.templateType !== templateType) || new Set(rows.map(row => row.id)).size !== rows.length) throw new Error('模板响应类型错误或重复，请重试');
+            const unchanged = force && isEquals(allTransactionTemplates.value[templateType], rows);
+            setRows(templateType, rows);
+            transactionTemplateListStatesInvalid.value[templateType] = false;
+            if (unchanged) throw { message: 'Template list is up to date', isUpToDate: true };
+            return rows;
+        } catch (error) {
+            if ((error as { isUpToDate?: boolean })?.isUpToDate) throw error;
+            return periodicError(error, '无法读取当前账本模板');
         }
-
-        return new Promise((resolve, reject) => {
-            services.getAllTransactionTemplates({ templateType }).then(response => {
-                const data = response.data;
-
-                if (!data || !data.success || !data.result) {
-                    reject({ message: 'Unable to retrieve template list' });
-                    return;
-                }
-
-                if (!isDefined(transactionTemplateListStatesInvalid.value[templateType]) || transactionTemplateListStatesInvalid.value[templateType]) {
-                    updateTransactionTemplateListInvalidState(templateType, false);
-                }
-
-                const templates = TransactionTemplate.ofMultiTemplates(data.result);
-
-                if (force && data.result && isEquals(allTransactionTemplates.value[templateType], templates)) {
-                    reject({ message: 'Template list is up to date', isUpToDate: true });
-                    return;
-                }
-
-                loadTransactionTemplateList(templateType, templates);
-
-                resolve(templates);
-            }).catch(error => {
-                if (force) {
-                    logger.error('failed to force load template list', error);
-                } else {
-                    logger.error('failed to load template list', error);
-                }
-
-                if (error.response && error.response.data && error.response.data.errorMessage) {
-                    reject({ error: error.response.data });
-                } else if (!error.processed) {
-                    reject({ message: 'Unable to retrieve template list' });
-                } else {
-                    reject(error);
-                }
-            });
-        });
     }
-
-    function getTemplate({ templateId }: { templateId: string }): Promise<TransactionTemplate> {
-        return new Promise((resolve, reject) => {
-            services.getTransactionTemplate({
-                id: templateId
-            }).then(response => {
-                const data = response.data;
-
-                if (!data || !data.success || !data.result) {
-                    reject({ message: 'Unable to retrieve template' });
-                    return;
-                }
-
-                const template = TransactionTemplate.ofTemplate(data.result);
-
-                resolve(template);
-            }).catch(error => {
-                logger.error('failed to load template info', error);
-
-                if (error.response && error.response.data && error.response.data.errorMessage) {
-                    reject({ error: error.response.data });
-                } else if (!error.processed) {
-                    reject({ message: 'Unable to retrieve template' });
-                } else {
-                    reject(error);
-                }
-            });
-        });
+    async function getTemplate({ templateId, ledgerId = '0' }: { templateId: string; ledgerId?: string }): Promise<TransactionTemplate> {
+        const context = scope.capture(ledgerId);
+        try {
+            await scope.authorize(context, 'read');
+            const response = await services.getTransactionTemplate({ id: templateId, ledgerId, expectedUsername: context.username });
+            scope.assertCurrent(context);
+            if (!response.data?.success || !response.data.result) throw new Error('模板响应不完整');
+            const template = TransactionTemplate.ofTemplate(response.data.result, ledgerId);
+            if (template.id !== templateId) throw new Error('模板标识不匹配');
+            return template;
+        } catch (error) { return periodicError(error, '无法读取当前账本模板'); }
     }
-
-    function saveTemplateContent({ template, isEdit, clientSessionId }: { template: TransactionTemplate, isEdit: boolean, clientSessionId: string }): Promise<TransactionTemplate> {
-        return new Promise((resolve, reject) => {
-            let promise: ApiResponsePromise<TransactionTemplateInfoResponse>;
-
-            if (template.type !== TransactionType.Expense &&
-                template.type !== TransactionType.Income &&
-                template.type !== TransactionType.Transfer) {
-                reject({ message: 'An error occurred' });
-                return;
-            }
-
-            if (!isEdit) {
-                promise = services.addTransactionTemplate(template.toTemplateCreateRequest(clientSessionId));
-            } else {
-                promise = services.modifyTransactionTemplate(template.toTemplateModifyRequest());
-            }
-
-            promise.then(response => {
-                const data = response.data;
-
-                if (!data || !data.success || !data.result) {
-                    if (!isEdit) {
-                        reject({ message: 'Unable to add template' });
-                    } else {
-                        reject({ message: 'Unable to save template' });
-                    }
-                    return;
-                }
-
-                const template = TransactionTemplate.ofTemplate(data.result);
-
-                if (!isEdit) {
-                    addTemplateToTransactionTemplateList(template.templateType, template);
-                } else {
-                    updateTemplateInTransactionTemplateList(template.templateType, template);
-                }
-
-                resolve(template);
-            }).catch(error => {
-                logger.error('failed to save template', error);
-
-                if (error.response && error.response.data && error.response.data.errorMessage) {
-                    reject({ error: error.response.data });
-                } else if (!error.processed) {
-                    if (!isEdit) {
-                        reject({ message: 'Unable to add template' });
-                    } else {
-                        reject({ message: 'Unable to save template' });
-                    }
-                } else {
-                    reject(error);
-                }
-            });
-        });
+    async function saveTemplateContent({ template, isEdit, clientSessionId }: { template: TransactionTemplate; isEdit: boolean; clientSessionId: string }): Promise<TransactionTemplate> {
+        const context = scope.capture(template.ledgerId);
+        const request = isEdit ? template.toTemplateModifyRequest() : template.toTemplateCreateRequest(clientSessionId);
+        const originalId = template.id;
+        const originalType = template.templateType;
+        if (![TransactionType.Expense, TransactionType.Income, TransactionType.Transfer].includes(template.type)) throw new Error('模板交易类型无效');
+        try {
+            await scope.authorize(context, 'manage');
+            const response = isEdit ? await services.modifyTransactionTemplate(request as ReturnType<TransactionTemplate['toTemplateModifyRequest']>, context.username)
+                : await services.addTransactionTemplate(request as ReturnType<TransactionTemplate['toTemplateCreateRequest']>, context.username);
+            scope.assertCurrent(context);
+            if (!response.data?.success || !response.data.result) throw new Error('模板保存回包不完整，请读取原模板核对结果');
+            const saved = TransactionTemplate.ofTemplate(response.data.result, context.ledgerId);
+            if (saved.templateType !== originalType || (isEdit && saved.id !== originalId)) throw new Error('模板保存回包不匹配');
+            upsert(saved);
+            return saved;
+        } catch (error) { return periodicError(error, '无法保存当前账本模板'); }
     }
-
-    function changeTemplateDisplayOrder({ templateType, templateId, from, to }: { templateType: number, templateId: string, from: number, to: number }): Promise<void> {
-        return new Promise((resolve, reject) => {
-            let currentTemplate: TransactionTemplate | null = null;
-
-            if (!isArray(allTransactionTemplates.value[templateType])) {
-                reject({ message: 'Unable to move template' });
-                return;
-            }
-
-            for (const template of allTransactionTemplates.value[templateType]) {
-                if (template.id === templateId) {
-                    currentTemplate = template;
-                    break;
-                }
-            }
-
-            if (!currentTemplate || !allTransactionTemplates.value[templateType][to]) {
-                reject({ message: 'Unable to move template' });
-                return;
-            }
-
-            if (isDefined(transactionTemplateListStatesInvalid.value[templateType]) && !transactionTemplateListStatesInvalid.value[templateType]) {
-                updateTransactionTemplateListInvalidState(templateType, true);
-            }
-
-            updateTemplateDisplayOrderInTransactionTemplateList(templateType, { from, to });
-
-            resolve();
-        });
+    async function changeTemplateDisplayOrder({ templateType, templateId, from, to }: { templateType: number; templateId: string; from: number; to: number }): Promise<void> {
+        const context = scope.capture(scope.loadedLedgerId.value);
+        await scope.authorize(context, 'manage');
+        const rows = [...(allTransactionTemplates.value[templateType] ?? [])];
+        if (!Number.isInteger(from) || !Number.isInteger(to) || rows[from]?.id !== templateId || !rows[to]) throw new Error('模板排序目标无效');
+        rows.splice(to, 0, rows.splice(from, 1)[0]!);
+        invalidate(templateType);
+        setRows(templateType, rows);
     }
-
-    function updateTemplateDisplayOrders({ templateType }: { templateType: number }): Promise<boolean> {
-        const newDisplayOrders: TransactionTemplateNewDisplayOrderRequest[] = [];
-
-        if (isArray(allTransactionTemplates.value[templateType])) {
-            for (const [template, index] of itemAndIndex(allTransactionTemplates.value[templateType])) {
-                newDisplayOrders.push({
-                    id: template.id,
-                    displayOrder: index + 1
-                });
-            }
-        }
-
-        return new Promise((resolve, reject) => {
-            services.moveTransactionTemplate({
-                newDisplayOrders: newDisplayOrders
-            }).then(response => {
-                const data = response.data;
-
-                if (!data || !data.success || !data.result) {
-                    reject({ message: 'Unable to move template' });
-                    return;
-                }
-
-                loadAllTemplates({ templateType: templateType, force: false }).finally(() => {
-                    if (!isDefined(transactionTemplateListStatesInvalid.value[templateType]) || transactionTemplateListStatesInvalid.value[templateType]) {
-                        updateTransactionTemplateListInvalidState(templateType, false);
-                    }
-
-                    resolve(data.result);
-                });
-            }).catch(error => {
-                logger.error('failed to save templates display order', error);
-
-                if (error.response && error.response.data && error.response.data.errorMessage) {
-                    reject({ error: error.response.data });
-                } else if (!error.processed) {
-                    reject({ message: 'Unable to move template' });
-                } else {
-                    reject(error);
-                }
-            });
-        });
+    async function updateTemplateDisplayOrders({ templateType }: { templateType: number }): Promise<boolean> {
+        const context = scope.capture(scope.loadedLedgerId.value);
+        const newDisplayOrders = (allTransactionTemplates.value[templateType] ?? []).map((row, index) => ({ id: row.id, displayOrder: index + 1 }));
+        try {
+            await scope.authorize(context, 'manage');
+            const response = await services.moveTransactionTemplate({ ledgerId: context.ledgerId, newDisplayOrders }, context.username);
+            scope.assertCurrent(context);
+            if (!response.data?.success || response.data.result !== true) throw new Error('模板排序结果尚未确认');
+            invalidate(templateType);
+            await loadAllTemplates({ templateType, ledgerId: context.ledgerId });
+            return true;
+        } catch (error) { return periodicError(error, '无法保存当前账本模板排序'); }
     }
-
-    function hideTemplate({ template, hidden }: { template: TransactionTemplate, hidden: boolean }): Promise<boolean> {
-        return new Promise((resolve, reject) => {
-            services.hideTransactionTemplate({
-                id: template.id,
-                hidden: hidden
-            }).then(response => {
-                const data = response.data;
-
-                if (!data || !data.success || !data.result) {
-                    if (hidden) {
-                        reject({ message: 'Unable to hide this template' });
-                    } else {
-                        reject({ message: 'Unable to unhide this template' });
-                    }
-
-                    return;
-                }
-
-                updateTemplateVisibilityInTransactionTemplateList(template.templateType, {
-                    template: template,
-                    hidden: hidden
-                });
-
-                resolve(data.result);
-            }).catch(error => {
-                logger.error('failed to change template visibility', error);
-
-                if (error.response && error.response.data && error.response.data.errorMessage) {
-                    reject({ error: error.response.data });
-                } else if (!error.processed) {
-                    if (hidden) {
-                        reject({ message: 'Unable to hide this template' });
-                    } else {
-                        reject({ message: 'Unable to unhide this template' });
-                    }
-                } else {
-                    reject(error);
-                }
-            });
-        });
+    async function hideTemplate({ template, hidden }: { template: TransactionTemplate; hidden: boolean }): Promise<boolean> {
+        const context = scope.capture(template.ledgerId);
+        const id = template.id;
+        try {
+            await scope.authorize(context, 'manage');
+            const response = await services.hideTransactionTemplate({ ledgerId: context.ledgerId, id, hidden }, context.username);
+            scope.assertCurrent(context);
+            if (!response.data?.success || response.data.result !== true) throw new Error('模板隐藏结果尚未确认');
+            const current = allTransactionTemplatesMap.value[template.templateType]?.[id];
+            if (current) current.hidden = hidden;
+            invalidate(template.templateType);
+            return true;
+        } catch (error) { return periodicError(error, '无法修改当前账本模板可见性'); }
     }
-
-    function deleteTemplate({ template, beforeResolve }: { template: TransactionTemplate, beforeResolve?: BeforeResolveFunction }): Promise<boolean> {
-        return new Promise((resolve, reject) => {
-            services.deleteTransactionTemplate({
-                id: template.id
-            }).then(response => {
-                const data = response.data;
-
-                if (!data || !data.success || !data.result) {
-                    reject({ message: 'Unable to delete this template' });
-                    return;
-                }
-
-                if (beforeResolve) {
-                    beforeResolve(() => {
-                        removeTemplateFromTransactionTemplateList(template.templateType, template);
-                    });
-                } else {
-                    removeTemplateFromTransactionTemplateList(template.templateType, template);
-                }
-
-                resolve(data.result);
-            }).catch(error => {
-                logger.error('failed to delete template', error);
-
-                if (error.response && error.response.data && error.response.data.errorMessage) {
-                    reject({ error: error.response.data });
-                } else if (!error.processed) {
-                    reject({ message: 'Unable to delete this template' });
-                } else {
-                    reject(error);
-                }
-            });
-        });
+    async function deleteTemplate({ template, beforeResolve }: { template: TransactionTemplate; beforeResolve?: BeforeResolveFunction }): Promise<boolean> {
+        const context = scope.capture(template.ledgerId);
+        const id = template.id;
+        const type = template.templateType;
+        try {
+            await scope.authorize(context, 'manage');
+            const response = await services.deleteTransactionTemplate({ ledgerId: context.ledgerId, id }, context.username);
+            scope.assertCurrent(context);
+            if (!response.data?.success || response.data.result !== true) throw new Error('模板删除结果尚未确认');
+            invalidate(type);
+            const remove = () => {
+                try { scope.assertCurrent(context); } catch { return; }
+                setRows(type, (allTransactionTemplates.value[type] ?? []).filter(row => row.id !== id));
+            };
+            if (beforeResolve) beforeResolve(remove); else remove();
+            return true;
+        } catch (error) { return periodicError(error, '无法删除当前账本模板'); }
     }
-
     return {
-        // states
-        allTransactionTemplates,
-        allTransactionTemplatesMap,
-        transactionTemplateListStatesInvalid,
-        // computed states
-        allVisibleTemplates,
-        allAvailableTemplatesCount,
-        allVisibleTemplatesCount,
-        // functions
-        updateTransactionTemplateListInvalidState,
-        resetTransactionTemplates,
-        loadAllTemplates,
-        getTemplate,
-        saveTemplateContent,
-        changeTemplateDisplayOrder,
-        updateTemplateDisplayOrders,
-        hideTemplate,
-        deleteTemplate
+        allTransactionTemplates, allTransactionTemplatesMap, transactionTemplateListStatesInvalid,
+        allVisibleTemplates, allAvailableTemplatesCount, allVisibleTemplatesCount,
+        loadedLedgerId: scope.loadedLedgerId, canManage: scope.canManage, selectLedger: scope.selectLedger,
+        updateTransactionTemplateListInvalidState: (type: number, invalid: boolean) => { transactionTemplateListStatesInvalid.value[type] = invalid; },
+        resetTransactionTemplates: () => scope.reset(), loadAllTemplates, getTemplate, saveTemplateContent,
+        changeTemplateDisplayOrder, updateTemplateDisplayOrders, hideTemplate, deleteTemplate,
     };
 });

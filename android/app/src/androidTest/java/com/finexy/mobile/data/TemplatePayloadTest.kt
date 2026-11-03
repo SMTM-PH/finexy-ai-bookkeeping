@@ -51,7 +51,7 @@ class TemplatePayloadTest {
         assertEquals(480, payload.getInt("utcOffset"))
         assertEquals(JSONObject.NULL, payload.get("scheduledEndDate"))
 
-        val parsed = api.parseTemplateResponse(JSONObject().put("result", JSONArray().put(JSONObject()
+        val parsed = api.parseTemplateResponse(JSONObject().put("success", true).put("result", JSONArray().put(JSONObject()
             .put("id", "9007199254740993").put("templateType", 2).put("name", "房租").put("type", 4)
             .put("categoryId", "201").put("sourceAccountId", "10").put("destinationAccountId", "11")
             .put("sourceAmount", 888800).put("destinationAmount", 888800).put("tagIds", JSONArray().put("31"))

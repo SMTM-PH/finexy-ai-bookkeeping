@@ -16,6 +16,22 @@ class PrivacyDataTest {
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
     private val password = "Test-backup-passphrase-123"
 
+    private fun removePeriodicFieldsForLegacyBackup(document: JSONObject) {
+        val tables = document.getJSONObject("tables")
+        tables.remove("template_form_drafts"); tables.remove("template_creation_queue"); tables.remove("ledger_ai_review_cache"); tables.remove("ai_review_drafts"); tables.remove("ai_review_requests"); tables.remove("ai_review_images"); tables.remove("ai_review_image_chunks")
+        listOf("transaction_templates", "scheduled_occurrences").forEach { table ->
+            tables.optJSONArray(table)?.let { rows ->
+                repeat(rows.length()) { index ->
+                    rows.getJSONObject(index).apply {
+                        remove("ledgerId")
+                        remove("pendingAction")
+                        remove("pendingActionQueuedAt")
+                    }
+                }
+            }
+        }
+    }
+
     @Test fun corruptedPinRecordCannotDisableTheLock() {
         val name = "privacy-corrupt-${UUID.randomUUID()}"
         try {
@@ -90,7 +106,7 @@ class PrivacyDataTest {
             val from = LedgerBackup(source, "scope-a"); val to = LedgerBackup(target, "scope-a")
             val encrypted = from.export(password)
             val preview = to.preview(encrypted, password)
-            assertEquals(15, preview.getInt("schema"))
+            assertEquals(20, preview.getInt("schema"))
             assertEquals(1, to.restore(preview)); assertEquals(row, target.dao().findTransaction(row.localId))
             assertEquals(77L, target.dao().findAIReviewItem(77)!!.id)
             assertEquals("旅行电脑", target.dao().allProductAssets().single().name)
@@ -114,6 +130,8 @@ class PrivacyDataTest {
             source.dao().upsertLedgers(listOf(LedgerEntity(9, 100, 2, 7, "迁移后账本", "", 1700000000)))
             val current = JSONObject(PrivacyCrypto.decrypt(LedgerBackup(source, "local").export(password), password))
             current.put("schema", 14)
+            removePeriodicFieldsForLegacyBackup(current)
+            current.getJSONObject("tables").remove("ledger_write_queue")
             current.getJSONObject("tables")
                 .put("family_groups", org.json.JSONArray().put(JSONObject()
                     .put("id", 7).put("ownerUid", 100).put("name", "旧家庭").put("comment", "")
@@ -139,6 +157,8 @@ class PrivacyDataTest {
                 sourceAmountMinor = 100, comment = "旧备份", time = 1L))
             val current = JSONObject(PrivacyCrypto.decrypt(LedgerBackup(source, "local").export(password), password))
             current.put("schema", 8)
+            removePeriodicFieldsForLegacyBackup(current)
+            current.getJSONObject("tables").remove("ledger_write_queue")
             listOf("family_groups", "family_members", "ledgers", "savings_goals").forEach { current.getJSONObject("tables").remove(it) }
             current.getJSONObject("tables").remove("account_mappings")
             current.getJSONObject("tables").remove("scheduled_occurrences")
@@ -161,6 +181,8 @@ class PrivacyDataTest {
                 sourceAmountMinor = 100, comment = "九版备份", time = 1L))
             val current = JSONObject(PrivacyCrypto.decrypt(LedgerBackup(source, "local").export(password), password))
             current.put("schema", 9)
+            removePeriodicFieldsForLegacyBackup(current)
+            current.getJSONObject("tables").remove("ledger_write_queue")
             listOf("family_groups", "family_members", "ledgers", "savings_goals").forEach { current.getJSONObject("tables").remove(it) }
             current.getJSONObject("tables").remove("scheduled_occurrences")
             current.getJSONObject("tables").remove("ai_review_items")
@@ -181,6 +203,8 @@ class PrivacyDataTest {
                 sourceAmountMinor = 100, comment = "十版备份", time = 1L))
             val current = JSONObject(PrivacyCrypto.decrypt(LedgerBackup(source, "local").export(password), password))
             current.put("schema", 10)
+            removePeriodicFieldsForLegacyBackup(current)
+            current.getJSONObject("tables").remove("ledger_write_queue")
             listOf("family_groups", "family_members", "ledgers", "savings_goals").forEach { current.getJSONObject("tables").remove(it) }
             current.getJSONObject("tables").remove("ai_review_items")
             current.getJSONObject("tables").remove("product_assets")
@@ -200,6 +224,8 @@ class PrivacyDataTest {
                 sourceAmountMinor = 100, comment = "十一版备份", time = 1L))
             val current = JSONObject(PrivacyCrypto.decrypt(LedgerBackup(source, "local").export(password), password))
             current.put("schema", 11)
+            removePeriodicFieldsForLegacyBackup(current)
+            current.getJSONObject("tables").remove("ledger_write_queue")
             listOf("family_groups", "family_members", "ledgers", "savings_goals").forEach { current.getJSONObject("tables").remove(it) }
             current.getJSONObject("tables").remove("product_assets")
             current.getJSONObject("tables").remove("exchange_rates")
@@ -219,6 +245,8 @@ class PrivacyDataTest {
                 usefulLifeDays = 1460, residualAmountMinor = 0, bookValueMinor = 200000))
             val current = JSONObject(PrivacyCrypto.decrypt(LedgerBackup(source, "local").export(password), password))
             current.put("schema", 12)
+            removePeriodicFieldsForLegacyBackup(current)
+            current.getJSONObject("tables").remove("ledger_write_queue")
             current.getJSONObject("tables").remove("exchange_rates")
             listOf("family_groups", "family_members", "ledgers", "savings_goals").forEach { current.getJSONObject("tables").remove(it) }
             val preview = LedgerBackup(target, "local").preview(PrivacyCrypto.encrypt(current.toString(), password), password)

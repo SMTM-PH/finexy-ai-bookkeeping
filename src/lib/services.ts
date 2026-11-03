@@ -1,6 +1,8 @@
-import axios, { type AxiosRequestConfig, type AxiosRequestHeaders, type AxiosResponse } from 'axios';
+import axios, { AxiosHeaders, type AxiosRequestConfig, type AxiosRequestHeaders, type AxiosResponse } from 'axios';
 
 import type { ApiResponse } from '@/core/api.ts';
+import type { TemplateCreationCapabilities } from '@/models/template_creation.ts';
+import type { LedgerReportPage, LedgerReportQueryRequest, LedgerReportExportPreview, LedgerReportExportPreviewRequest, LedgerReportExportRequest } from '@/models/ledger_report.ts';
 
 import type {
     ApplicationCloudSetting
@@ -154,6 +156,7 @@ import type {
 } from '@/models/monthly_budget.ts';
 import type { LocalOCRResponse } from '@/models/local_ocr.ts';
 import type { AIReviewItemCreateRequest, AIReviewItemInfoResponse } from '@/models/ai_review_item.ts';
+import type { AIReviewCapabilities, AIReviewLedgerItem, LedgerAIReviewCreateRequest, AIReviewConfirmRequest, AIReviewConfirmationReceipt } from '@/models/ai_review_ledger.ts';
 import type { ScheduledOccurrenceActionRequest, ScheduledOccurrenceInfoResponse } from '@/models/scheduled_occurrence.ts';
 import type {
     FamilyGroupInfoResponse, FamilyGroupCreateRequest, FamilyGroupModifyRequest,
@@ -218,9 +221,11 @@ import type {
     AIConfigurationResponse,
     AIConfigurationUpdateRequest
 } from '@/models/ai_configuration.ts';
+import type { AIUsageResponse, AIBalanceResponse } from '@/models/ai_usage.ts';
 
 import {
     getCurrentToken,
+    getCurrentUserInfo,
     clearCurrentTokenAndUserInfo
 } from './userstate.ts';
 
@@ -245,6 +250,7 @@ import {
 } from './datetime.ts';
 import { generateRandomUUID } from './misc.ts';
 import { getBasePath } from './web.ts';
+import type { AccountCardStyle } from '@/models/account_card.ts';
 import logger from './logger.ts';
 
 interface ApiRequestConfig extends AxiosRequestConfig {
@@ -254,6 +260,7 @@ interface ApiRequestConfig extends AxiosRequestConfig {
     readonly ignoreError?: boolean;
     readonly timeout?: number;
     readonly cancelableUuid?: string;
+    readonly expectedUsername?: string;
 }
 
 export type ApiResponsePromise<T> = Promise<AxiosResponse<ApiResponse<T>>>;
@@ -265,6 +272,9 @@ const cancelableRequests: Record<string, boolean> = {};
 axios.defaults.baseURL = getBasePath() + BASE_API_URL_PATH;
 axios.defaults.timeout = DEFAULT_API_TIMEOUT;
 axios.interceptors.request.use((config: ApiRequestConfig) => {
+    if (config.expectedUsername && getCurrentUserInfo()?.username !== config.expectedUsername) {
+        return Promise.reject({ message: '登录账号已变化，请重新打开记账页' });
+    }
     const token = getCurrentToken();
 
     if (token && !config.noAuth) {
@@ -282,8 +292,12 @@ axios.interceptors.request.use((config: ApiRequestConfig) => {
     config.headers['X-Timezone-Name'] = timezoneName;
 
     if (needBlockRequest && !config.ignoreBlocked) {
-        return new Promise(resolve => {
+        return new Promise((resolve, reject) => {
             blockedRequests.push(newToken => {
+                if (config.expectedUsername && getCurrentUserInfo()?.username !== config.expectedUsername) {
+                    reject({ message: '登录账号已变化，请重新打开记账页' });
+                    return;
+                }
                 if (newToken) {
                     config.headers.Authorization = `Bearer ${newToken}`;
                 }
@@ -307,7 +321,7 @@ axios.interceptors.response.use(response => {
 
     return response;
 }, error => {
-    if ('cancelableUuid' in error.response.config && error.response.config.cancelableUuid && cancelableRequests[error.response.config.cancelableUuid]) {
+    if (error.response?.config && 'cancelableUuid' in error.response.config && error.response.config.cancelableUuid && cancelableRequests[error.response.config.cancelableUuid]) {
         logger.debug('Response canceled by user request, url: ' + error.response.config.url + ', cancelableUuid: ' + error.response.config.cancelableUuid);
         delete cancelableRequests[error.response.config.cancelableUuid];
         return Promise.reject({ canceled: true });
@@ -455,8 +469,8 @@ export default {
     revokeAllTokens: (): ApiResponsePromise<boolean> => {
         return axios.post<ApiResponse<boolean>>('v1/tokens/revoke_all.json');
     },
-    getProfile: (): ApiResponsePromise<UserProfileResponse> => {
-        return axios.get<ApiResponse<UserProfileResponse>>('v1/users/profile/get.json');
+    getProfile: ({ expectedUsername, ignoreError = false }: { expectedUsername?: string; ignoreError?: boolean } = {}): ApiResponsePromise<UserProfileResponse> => {
+        return axios.get<ApiResponse<UserProfileResponse>>('v1/users/profile/get.json', { expectedUsername, ignoreError } as ApiRequestConfig);
     },
     updateProfile: (req: UserProfileUpdateRequest): ApiResponsePromise<UserProfileUpdateResponse> => {
         return axios.post<ApiResponse<UserProfileUpdateResponse>>('v1/users/profile/update.json', req);
@@ -559,6 +573,12 @@ export default {
     getAccount: ({ id }: { id: string }): ApiResponsePromise<AccountInfoResponse> => {
         return axios.get<ApiResponse<AccountInfoResponse>>('v1/accounts/get.json?id=' + id);
     },
+    getAccountCard: (ledgerId: string, accountId: string): ApiResponsePromise<AccountCardStyle> => {
+        return axios.get('v1/accounts/card/get.json', { params: { ledgerId, accountId } });
+    },
+    updateAccountCard: (ledgerId: string, accountId: string, appearance: AccountCardStyle): ApiResponsePromise<AccountCardStyle> => {
+        return axios.post('v1/accounts/card/update.json', { ledgerId, accountId, appearance });
+    },
     addAccount: (req: AccountCreateRequest): ApiResponsePromise<AccountInfoResponse> => {
         return axios.post<ApiResponse<AccountInfoResponse>>('v1/accounts/add.json', req);
     },
@@ -598,14 +618,14 @@ export default {
     deleteProductAsset: (req: ProductAssetDeleteRequest): ApiResponsePromise<boolean> => {
         return axios.post<ApiResponse<boolean>>('v1/product/assets/delete.json', req);
     },
-    getMonthlyBudget: ({ yearMonth }: { yearMonth: number }): ApiResponsePromise<MonthlyBudgetInfoResponse | null> => {
-        return axios.get<ApiResponse<MonthlyBudgetInfoResponse | null>>('v1/budget/monthly/get.json?yearMonth=' + yearMonth);
+    getMonthlyBudget: ({ yearMonth, ledgerId = '0', expectedUsername }: { yearMonth: number; ledgerId?: string; expectedUsername?: string }): ApiResponsePromise<MonthlyBudgetInfoResponse | null> => {
+        return axios.get<ApiResponse<MonthlyBudgetInfoResponse | null>>(`v1/budget/monthly/get.json?yearMonth=${yearMonth}&ledgerId=${encodeURIComponent(ledgerId)}`, { expectedUsername } as ApiRequestConfig);
     },
-    setMonthlyBudget: (req: MonthlyBudgetSetRequest): ApiResponsePromise<MonthlyBudgetInfoResponse> => {
-        return axios.post<ApiResponse<MonthlyBudgetInfoResponse>>('v1/budget/monthly/set.json', req);
+    setMonthlyBudget: (req: MonthlyBudgetSetRequest, expectedUsername?: string): ApiResponsePromise<MonthlyBudgetInfoResponse> => {
+        return axios.post<ApiResponse<MonthlyBudgetInfoResponse>>('v1/budget/monthly/set.json', req, { expectedUsername } as ApiRequestConfig);
     },
-    deleteMonthlyBudget: (req: MonthlyBudgetDeleteRequest): ApiResponsePromise<boolean> => {
-        return axios.post<ApiResponse<boolean>>('v1/budget/monthly/delete.json', req);
+    deleteMonthlyBudget: (req: MonthlyBudgetDeleteRequest, expectedUsername?: string): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/budget/monthly/delete.json', req, { expectedUsername } as ApiRequestConfig);
     },
     getTransactions: (req: TransactionListByMaxTimeRequest): ApiResponsePromise<TransactionInfoPageWrapperResponse> => {
         const tagFilter = encodeURIComponent(req.tagFilter);
@@ -624,6 +644,18 @@ export default {
     },
     getReconciliationStatements: (req: TransactionReconciliationStatementRequest): ApiResponsePromise<TransactionReconciliationStatementResponse> => {
         return axios.get<ApiResponse<TransactionReconciliationStatementResponse>>(`v1/transactions/reconciliation_statements.json?account_id=${req.accountId}&start_time=${req.startTime}&end_time=${req.endTime}`);
+    },
+    queryLedgerReport: (request: LedgerReportQueryRequest, expectedUsername: string): ApiResponsePromise<LedgerReportPage> => {
+        return axios.post<ApiResponse<LedgerReportPage>>('v1/reports/query.json', request,
+            { expectedUsername, ignoreError: true } as ApiRequestConfig);
+    },
+    previewLedgerReportExport: (request: LedgerReportExportPreviewRequest, expectedUsername: string): ApiResponsePromise<LedgerReportExportPreview> => {
+        return axios.post<ApiResponse<LedgerReportExportPreview>>('v1/reports/export/preview.json', request,
+            { expectedUsername, ignoreError: true } as ApiRequestConfig);
+    },
+    downloadLedgerReport: (request: LedgerReportExportRequest, expectedUsername: string): Promise<AxiosResponse<Blob>> => {
+        return axios.post<Blob>('v1/reports/export.csv', request,
+            { expectedUsername, ignoreError: true, responseType: 'blob', timeout: DEFAULT_EXPORT_API_TIMEOUT } as ApiRequestConfig);
     },
     getTransactionStatistics: (req: TransactionStatisticRequest): ApiResponsePromise<TransactionStatisticResponse> => {
         const queryParams: string[] = [];
@@ -704,18 +736,18 @@ export default {
 
         return axios.get<ApiResponse<TransactionAmountsResponse>>(`v1/transactions/amounts.json?${queryParams}`);
     },
-    getTransaction: ({ id, withPictures, ledgerId }: { id: string, withPictures: boolean | undefined, ledgerId?: string }): ApiResponsePromise<TransactionInfoResponse> => {
+    getTransaction: ({ id, withPictures, ledgerId, expectedUsername, ignoreError = false }: { id: string, withPictures: boolean | undefined, ledgerId?: string, expectedUsername?: string, ignoreError?: boolean }): ApiResponsePromise<TransactionInfoResponse> => {
         if (!isDefined(withPictures)) {
             withPictures = true;
         }
 
-        return axios.get<ApiResponse<TransactionInfoResponse>>(`v1/transactions/get.json?id=${id}&with_pictures=${withPictures}&trim_account=true&trim_category=true&trim_tag=true${ledgerId ? `&ledgerId=${ledgerId}` : ''}`);
+        return axios.get<ApiResponse<TransactionInfoResponse>>(`v1/transactions/get.json?id=${id}&with_pictures=${withPictures}&trim_account=true&trim_category=true&trim_tag=true${ledgerId ? `&ledgerId=${ledgerId}` : ''}`, { expectedUsername, ignoreError } as ApiRequestConfig);
     },
-    addTransaction: (req: TransactionCreateRequest): ApiResponsePromise<TransactionInfoResponse> => {
-        return axios.post<ApiResponse<TransactionInfoResponse>>('v1/transactions/add.json', req);
+    addTransaction: (req: TransactionCreateRequest, expectedUsername?: string): ApiResponsePromise<TransactionInfoResponse> => {
+        return axios.post<ApiResponse<TransactionInfoResponse>>('v1/transactions/add.json', req, { expectedUsername } as ApiRequestConfig);
     },
-    modifyTransaction: (req: TransactionModifyRequest): ApiResponsePromise<TransactionInfoResponse> => {
-        return axios.post<ApiResponse<TransactionInfoResponse>>('v1/transactions/modify.json', req);
+    modifyTransaction: (req: TransactionModifyRequest, expectedUsername?: string): ApiResponsePromise<TransactionInfoResponse> => {
+        return axios.post<ApiResponse<TransactionInfoResponse>>('v1/transactions/modify.json', req, { expectedUsername } as ApiRequestConfig);
     },
     batchUpdateTransactionCategories: (req: TransactionBatchUpdateCategoryRequest): ApiResponsePromise<boolean> => {
         return axios.post<ApiResponse<boolean>>('v1/transactions/batch_update/category.json', req, {
@@ -745,8 +777,8 @@ export default {
     moveAllTransactionsBetweenAccounts: (req: TransactionMoveBetweenAccountsRequest): ApiResponsePromise<boolean> => {
         return axios.post<ApiResponse<boolean>>('v1/transactions/move/all.json', req);
     },
-    deleteTransaction: (req: TransactionDeleteRequest): ApiResponsePromise<boolean> => {
-        return axios.post<ApiResponse<boolean>>('v1/transactions/delete.json', req);
+    deleteTransaction: (req: TransactionDeleteRequest, expectedUsername?: string): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/transactions/delete.json', req, { expectedUsername } as ApiRequestConfig);
     },
     batchDeleteTransaction: (req: TransactionBatchDeleteRequest): ApiResponsePromise<boolean> => {
         return axios.post<ApiResponse<boolean>>('v1/transactions/batch_delete.json', req, {
@@ -899,38 +931,44 @@ export default {
     deleteTransactionTag: (req: TransactionTagDeleteRequest): ApiResponsePromise<boolean> => {
         return axios.post<ApiResponse<boolean>>('v1/transaction/tags/delete.json', req);
     },
-    getAllTransactionTemplates: ({ templateType }: { templateType: number }): ApiResponsePromise<TransactionTemplateInfoResponse[]> => {
-        return axios.get<ApiResponse<TransactionTemplateInfoResponse[]>>('v1/transaction/templates/list.json?templateType=' + templateType);
+    getAllTransactionTemplates: ({ templateType, ledgerId = '0', expectedUsername }: { templateType: number; ledgerId?: string; expectedUsername?: string }): ApiResponsePromise<TransactionTemplateInfoResponse[]> => {
+        return axios.get<ApiResponse<TransactionTemplateInfoResponse[]>>(`v1/transaction/templates/list.json?templateType=${templateType}&ledgerId=${encodeURIComponent(ledgerId)}`, { expectedUsername } as ApiRequestConfig);
     },
-    getTransactionTemplate: ({ id }: { id: string }): ApiResponsePromise<TransactionTemplateInfoResponse> => {
-        return axios.get<ApiResponse<TransactionTemplateInfoResponse>>('v1/transaction/templates/get.json?id=' + id);
+    getTransactionTemplate: ({ id, ledgerId = '0', expectedUsername }: { id: string; ledgerId?: string; expectedUsername?: string }): ApiResponsePromise<TransactionTemplateInfoResponse> => {
+        return axios.get<ApiResponse<TransactionTemplateInfoResponse>>(`v1/transaction/templates/get.json?id=${encodeURIComponent(id)}&ledgerId=${encodeURIComponent(ledgerId)}`, { expectedUsername } as ApiRequestConfig);
     },
-    addTransactionTemplate: (req: TransactionTemplateCreateRequest): ApiResponsePromise<TransactionTemplateInfoResponse> => {
-        return axios.post<ApiResponse<TransactionTemplateInfoResponse>>('v1/transaction/templates/add.json', req);
+    addTransactionTemplate: (req: TransactionTemplateCreateRequest, expectedUsername?: string): ApiResponsePromise<TransactionTemplateInfoResponse> => {
+        return axios.post<ApiResponse<TransactionTemplateInfoResponse>>('v1/transaction/templates/add.json', { ...req, ledgerId: req.ledgerId ?? '0' }, { expectedUsername } as ApiRequestConfig);
     },
-    modifyTransactionTemplate: (req: TransactionTemplateModifyRequest): ApiResponsePromise<TransactionTemplateInfoResponse> => {
-        return axios.post<ApiResponse<TransactionTemplateInfoResponse>>('v1/transaction/templates/modify.json', req);
+    getTemplateCreationCapabilities: (expectedUsername: string): ApiResponsePromise<TemplateCreationCapabilities> => {
+        return axios.get<ApiResponse<TemplateCreationCapabilities>>('v1/transaction/templates/capabilities.json', { expectedUsername, headers: new AxiosHeaders({ 'Cache-Control': 'no-cache' }) } as ApiRequestConfig);
     },
-    hideTransactionTemplate: (req: TransactionTemplateHideRequest): ApiResponsePromise<boolean> => {
-        return axios.post<ApiResponse<boolean>>('v1/transaction/templates/hide.json', req);
+    addDurableTransactionTemplate: (req: TransactionTemplateCreateRequest, expectedUsername: string): ApiResponsePromise<TransactionTemplateInfoResponse & { deleted?: boolean }> => {
+        return axios.post<ApiResponse<TransactionTemplateInfoResponse & { deleted?: boolean }>>('v1/transaction/templates/add_durable.json', req, { expectedUsername } as ApiRequestConfig);
     },
-    moveTransactionTemplate: (req: TransactionTemplateMoveRequest): ApiResponsePromise<boolean> => {
-        return axios.post<ApiResponse<boolean>>('v1/transaction/templates/move.json', req);
+    modifyTransactionTemplate: (req: TransactionTemplateModifyRequest, expectedUsername?: string): ApiResponsePromise<TransactionTemplateInfoResponse> => {
+        return axios.post<ApiResponse<TransactionTemplateInfoResponse>>('v1/transaction/templates/modify.json', { ...req, ledgerId: req.ledgerId ?? '0' }, { expectedUsername } as ApiRequestConfig);
     },
-    deleteTransactionTemplate: (req: TransactionTemplateDeleteRequest): ApiResponsePromise<boolean> => {
-        return axios.post<ApiResponse<boolean>>('v1/transaction/templates/delete.json', req);
+    hideTransactionTemplate: (req: TransactionTemplateHideRequest, expectedUsername?: string): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/transaction/templates/hide.json', { ...req, ledgerId: req.ledgerId ?? '0' }, { expectedUsername } as ApiRequestConfig);
     },
-    listScheduledOccurrences: ({ status, offset, limit }: { status: number, offset?: number, limit?: number }): ApiResponsePromise<ScheduledOccurrenceInfoResponse[]> => {
-        return axios.get<ApiResponse<ScheduledOccurrenceInfoResponse[]>>('v1/schedule/review/list.json', { params: { status: status, offset: offset, limit: limit } });
+    moveTransactionTemplate: (req: TransactionTemplateMoveRequest, expectedUsername?: string): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/transaction/templates/move.json', { ...req, ledgerId: req.ledgerId ?? '0' }, { expectedUsername } as ApiRequestConfig);
     },
-    confirmScheduledOccurrence: (req: ScheduledOccurrenceActionRequest): ApiResponsePromise<{ transactionId: string }> => {
-        return axios.post<ApiResponse<{ transactionId: string }>>('v1/schedule/review/confirm.json', req);
+    deleteTransactionTemplate: (req: TransactionTemplateDeleteRequest, expectedUsername?: string): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/transaction/templates/delete.json', { ...req, ledgerId: req.ledgerId ?? '0' }, { expectedUsername } as ApiRequestConfig);
     },
-    dismissScheduledOccurrence: (req: ScheduledOccurrenceActionRequest): ApiResponsePromise<boolean> => {
-        return axios.post<ApiResponse<boolean>>('v1/schedule/review/dismiss.json', req);
+    listScheduledOccurrences: ({ status, offset, limit, ledgerId = '0', expectedUsername, ignoreError = false }: { status: number; offset?: number; limit?: number; ledgerId?: string; expectedUsername?: string; ignoreError?: boolean }): ApiResponsePromise<ScheduledOccurrenceInfoResponse[]> => {
+        return axios.get<ApiResponse<ScheduledOccurrenceInfoResponse[]>>('v1/schedule/review/list.json', { params: { status, offset, limit, ledgerId }, expectedUsername, ignoreError } as ApiRequestConfig);
     },
-    restoreScheduledOccurrence: (req: ScheduledOccurrenceActionRequest): ApiResponsePromise<boolean> => {
-        return axios.post<ApiResponse<boolean>>('v1/schedule/review/restore.json', req);
+    confirmScheduledOccurrence: (req: ScheduledOccurrenceActionRequest, expectedUsername?: string): ApiResponsePromise<{ ledgerId?: string; transactionId: string }> => {
+        return axios.post<ApiResponse<{ ledgerId?: string; transactionId: string }>>('v1/schedule/review/confirm.json', { ...req, ledgerId: req.ledgerId ?? '0' }, { expectedUsername } as ApiRequestConfig);
+    },
+    dismissScheduledOccurrence: (req: ScheduledOccurrenceActionRequest, expectedUsername?: string): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/schedule/review/dismiss.json', { ...req, ledgerId: req.ledgerId ?? '0' }, { expectedUsername } as ApiRequestConfig);
+    },
+    restoreScheduledOccurrence: (req: ScheduledOccurrenceActionRequest, expectedUsername?: string): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/schedule/review/restore.json', { ...req, ledgerId: req.ledgerId ?? '0' }, { expectedUsername } as ApiRequestConfig);
     },
     createFamilyGroup: (req: FamilyGroupCreateRequest): ApiResponsePromise<FamilyGroupInfoResponse> => {
         return axios.post<ApiResponse<FamilyGroupInfoResponse>>('v1/family/group/create.json', req);
@@ -971,8 +1009,8 @@ export default {
     acceptFamilyInvitation: (req: FamilyInvitationAcceptRequest): ApiResponsePromise<FamilyGroupInfoResponse> => {
         return axios.post<ApiResponse<FamilyGroupInfoResponse>>('v1/family/invitation/accept.json', req);
     },
-    listLedgers: ({ familyId }: { familyId?: string } = {}): ApiResponsePromise<LedgerInfoResponse[]> => {
-        return axios.get<ApiResponse<LedgerInfoResponse[]>>('v1/ledger/list.json', { params: { familyId: familyId } });
+    listLedgers: ({ familyId, expectedUsername, ignoreError = false }: { familyId?: string; expectedUsername?: string; ignoreError?: boolean } = {}): ApiResponsePromise<LedgerInfoResponse[]> => {
+        return axios.get<ApiResponse<LedgerInfoResponse[]>>('v1/ledger/list.json', { params: { familyId: familyId }, expectedUsername, ignoreError } as ApiRequestConfig);
     },
     createLedger: (req: LedgerCreateRequest): ApiResponsePromise<LedgerInfoResponse> => {
         return axios.post<ApiResponse<LedgerInfoResponse>>('v1/ledger/create.json', req);
@@ -989,8 +1027,8 @@ export default {
     previewLedgerDelete: ({ id }: { id: string }): ApiResponsePromise<LedgerDeletePreviewResponse> => {
         return axios.get<ApiResponse<LedgerDeletePreviewResponse>>('v1/ledger/delete/preview.json', { params: { id } });
     },
-    listLedgerMembers: ({ ledgerId }: { ledgerId: string }): ApiResponsePromise<LedgerMemberInfoResponse[]> => {
-        return axios.get<ApiResponse<LedgerMemberInfoResponse[]>>('v1/ledger/member/list.json', { params: { ledgerId } });
+    listLedgerMembers: ({ ledgerId, expectedUsername, ignoreError = false }: { ledgerId: string; expectedUsername?: string; ignoreError?: boolean }): ApiResponsePromise<LedgerMemberInfoResponse[]> => {
+        return axios.get<ApiResponse<LedgerMemberInfoResponse[]>>('v1/ledger/member/list.json', { params: { ledgerId }, expectedUsername, ignoreError } as ApiRequestConfig);
     },
     changeLedgerMemberRole: (req: { ledgerId: string; memberId: string; role: number }): ApiResponsePromise<LedgerMemberInfoResponse> => {
         return axios.post<ApiResponse<LedgerMemberInfoResponse>>('v1/ledger/member/change_role.json', req);
@@ -1071,8 +1109,23 @@ export default {
             timeout: DEFAULT_LLM_API_TIMEOUT
         } as ApiRequestConfig);
     },
+    recognizeLedgerTransactionText: (request: { ledgerId: string; text: string }, expectedUsername: string): ApiResponsePromise<RecognizedTransactionResponse> => {
+        return axios.post<ApiResponse<RecognizedTransactionResponse>>('v1/llm/transactions/recognize_text.json', request,
+            { timeout: DEFAULT_LLM_API_TIMEOUT, expectedUsername, ignoreError: true } as ApiRequestConfig);
+    },
+    recognizeLedgerReceiptImage: (request: { ledgerId: string; imageFile: File; cancelableUuid?: string }, expectedUsername: string): ApiResponsePromise<RecognizedTransactionResponse> => {
+        return axios.postForm<ApiResponse<RecognizedTransactionResponse>>('v1/llm/transactions/recognize_receipt_image.json',
+            { ledgerId: request.ledgerId, image: request.imageFile },
+            { timeout: DEFAULT_LLM_API_TIMEOUT, cancelableUuid: request.cancelableUuid, expectedUsername, ignoreError: true } as ApiRequestConfig);
+    },
     getAIConfiguration: (): ApiResponsePromise<AIConfigurationResponse> => {
         return axios.get<ApiResponse<AIConfigurationResponse>>('v1/llm/configuration/get.json');
+    },
+    getAIUsage: (): ApiResponsePromise<AIUsageResponse> => {
+        return axios.get<ApiResponse<AIUsageResponse>>('v1/llm/usage/get.json');
+    },
+    getAIBalance: (): ApiResponsePromise<AIBalanceResponse> => {
+        return axios.get<ApiResponse<AIBalanceResponse>>('v1/llm/balance/get.json');
     },
     updateAIConfiguration: (req: AIConfigurationUpdateRequest): ApiResponsePromise<AIConfigurationResponse> => {
         return axios.post<ApiResponse<AIConfigurationResponse>>('v1/llm/configuration/update.json', req);
@@ -1094,6 +1147,24 @@ export default {
     },
     listAIReviewItems: (): ApiResponsePromise<AIReviewItemInfoResponse[]> => {
         return axios.get<ApiResponse<AIReviewItemInfoResponse[]>>('v1/ai/review/list.json');
+    },
+    getAIReviewCapabilities: (ledgerId: string, expectedUsername: string): ApiResponsePromise<AIReviewCapabilities> => {
+        return axios.get<ApiResponse<AIReviewCapabilities>>('v1/ai/review/capabilities.json', { params: { ledgerId }, expectedUsername, ignoreError: true } as ApiRequestConfig);
+    },
+    listLedgerAIReviewItems: (params: { ledgerId: string; status: number; beforeId: string; limit: number }, expectedUsername: string): ApiResponsePromise<AIReviewLedgerItem[]> => {
+        return axios.get<ApiResponse<AIReviewLedgerItem[]>>('v1/ai/review/list.json', { params, expectedUsername, ignoreError: true } as ApiRequestConfig);
+    },
+    getLedgerAIReviewItem: (params: { ledgerId: string; id: string }, expectedUsername: string): ApiResponsePromise<AIReviewLedgerItem> => {
+        return axios.get<ApiResponse<AIReviewLedgerItem>>('v1/ai/review/get.json', { params, expectedUsername, ignoreError: true } as ApiRequestConfig);
+    },
+    createLedgerAIReviewItem: (request: LedgerAIReviewCreateRequest, expectedUsername: string): ApiResponsePromise<AIReviewLedgerItem> => {
+        return axios.post<ApiResponse<AIReviewLedgerItem>>('v1/ai/review/create.json', request, { expectedUsername, ignoreError: true } as ApiRequestConfig);
+    },
+    confirmLedgerAIReviewItem: (request: AIReviewConfirmRequest, expectedUsername: string): ApiResponsePromise<AIReviewConfirmationReceipt> => {
+        return axios.post<ApiResponse<AIReviewConfirmationReceipt>>('v1/ai/review/confirm.json', request, { expectedUsername, ignoreError: true } as ApiRequestConfig);
+    },
+    changeLedgerAIReviewItem: (action: 'dismiss' | 'restore' | 'delete', request: { ledgerId: string; id: string }, expectedUsername: string): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>(`v1/ai/review/${action}.json`, request, { expectedUsername, ignoreError: true } as ApiRequestConfig);
     },
     createAIReviewItem: (req: AIReviewItemCreateRequest): ApiResponsePromise<AIReviewItemInfoResponse> => {
         return axios.post<ApiResponse<AIReviewItemInfoResponse>>('v1/ai/review/create.json', req);

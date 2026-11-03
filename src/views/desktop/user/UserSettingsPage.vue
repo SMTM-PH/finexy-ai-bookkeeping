@@ -9,6 +9,7 @@
                 <v-icon size="20" start :icon="mdiLockOpenOutline"/>
                 {{ tt('Security') }}
             </v-tab>
+            <v-tab value="aiSetting" @click="pushRouter('aiSetting')">AI 设置</v-tab>
             <v-tab value="twoFactorSetting" @click="pushRouter('twoFactorSetting')">
                 <v-icon size="20" start :icon="mdiOnepassword"/>
                 {{ tt('Two-Factor Authentication') }}
@@ -27,6 +28,7 @@
             <v-window-item value="securitySetting">
                 <user-security-setting-tab/>
             </v-window-item>
+            <v-window-item value="aiSetting"><AISettingsPanel v-if="activeTab === 'aiSetting'" /></v-window-item>
 
             <v-window-item value="twoFactorSetting">
                 <user-two-factor-auth-setting-tab ref="twoFactorSettingTab"/>
@@ -41,6 +43,7 @@
 
 <script setup lang="ts">
 import UserBasicSettingTab from './settings/tabs/UserBasicSettingTab.vue';
+import AISettingsPanel from '@/components/AISettingsPanel.vue';
 import UserSecuritySettingTab from './settings/tabs/UserSecuritySettingTab.vue';
 import UserTwoFactorAuthSettingTab from './settings/tabs/UserTwoFactorAuthSettingTab.vue';
 import UserDataManagementSettingTab from './settings/tabs/UserDataManagementSettingTab.vue';
@@ -70,6 +73,7 @@ const { tt } = useI18n();
 const ALL_TABS: string[] = [
     'basicSetting',
     'securitySetting',
+    'aiSetting',
     'twoFactorSetting',
     'dataManagementSetting'
 ];

@@ -23,17 +23,30 @@ docker compose ps
 离线镜像包用户先运行：
 
 ```bash
-docker load -i Finexy-NAS-1.9.2-linux-amd64.tar
+docker load -i Finexy-NAS-1.9.3-linux-amd64.tar
 ```
 
-本版本的镜像包包含 `ph97/finexy-bookkeeping:1.9.2-amd64` 记账服务。
+本版本的镜像包包含 `ph97/finexy-bookkeeping:1.9.3` 记账服务。
 OCR 镜像沿用 `ph97/finexy-bookkeeping:ocr-1.0-amd64`，需要单独拉取；
 完全离线部署时，请同时准备 OCR 镜像包。加载后可使用同目录的 `compose.yaml` 启动。
+
+## 飞牛 NAS（fnOS）的 FPK 安装方式
+
+飞牛 NAS 可改用应用包安装，无需手写 compose：
+
+- 下载 [finexy-1.9.3-x86_64.fpk](https://github.com/SMTM-PH/finexy-ai-bookkeeping/releases/download/v1.9.3/finexy-1.9.3-x86_64.fpk)（仅 AMD64），并核对 [SHA256SUMS.txt](https://github.com/SMTM-PH/finexy-ai-bookkeeping/releases/download/v1.9.3/SHA256SUMS.txt)
+- 在 fnOS「应用中心 → 手动安装」上传 FPK 并选择存储空间，安装后启动一次
+- 数据目录 `/volN/@appdata/finexy/`、配置 `/volN/@appconf/finexy/finexy.ini` 在首次启动时创建
+- 桌面图标会在浏览器新标签页打开 `http://NAS的IP:8080/`
+- FPK 不含独立 OCR 容器，需要图片 OCR 时仍使用本目录的 Compose 方式
+- 覆盖升级前先备份数据；装过 `1.9.3-2`/`1.9.3-3` 历史测试构建时可能被判降级，需备份后卸载重装
+
+打包源与安装排错见 [packaging/fnos/README.md](../../packaging/fnos/README.md)。
 
 ## 从旧版本升级
 
 先备份现有 `data/`、`storage/`、`.env`，保持密钥和挂载路径不变，
-将记账镜像更新为 `1.9.2-amd64` 后执行：
+将记账镜像更新为 `1.9.3` 后执行：
 
 ```bash
 docker compose pull bookkeeping

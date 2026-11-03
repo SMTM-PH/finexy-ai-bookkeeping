@@ -171,7 +171,11 @@ export const useExchangeRatesStore = defineStore('exchangeRates', () => {
 
     function autoUpdateExchangeRatesData(): void {
         if (settingsStore.appSettings.autoUpdateExchangeRatesData) {
-            getLatestExchangeRates({ silent: true, force: false });
+            void getLatestExchangeRates({ silent: true, force: false }).catch(() => {
+                // Optional background refresh must not reject the app startup.
+                // Keep the last verified snapshot and its original timestamp;
+                // an explicit foreground refresh still receives its failure.
+            });
         }
     }
 

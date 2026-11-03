@@ -1,7 +1,6 @@
 package services
 
 import (
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -843,6 +842,14 @@ func (s *AccountService) MoveAccountToLedger(c core.Context, uid, accountId, tar
 	now := time.Now().Unix()
 
 	err = sourceDB.DoTransaction(c, func(sess *xorm.Session) error {
+		sortedIDs := append([]int64{}, accountIds...)
+		sort.Slice(sortedIDs, func(i, j int) bool { return sortedIDs[i] < sortedIDs[j] })
+		for _, id := range sortedIDs {
+			if _, err := sess.Where("uid=? AND account_id=?", root.Uid, id).SetExpr("updated_unix_time", "updated_unix_time").Update(new(models.Account)); err != nil {
+				return err
+			}
+		}
+
 		// Templates and savings-goal funds have their own ledger lifecycle. They
 		// must be removed or completed before the account can move.
 		var templateRefs []*models.TransactionTemplate
@@ -867,14 +874,12 @@ func (s *AccountService) MoveAccountToLedger(c core.Context, uid, accountId, tar
 		// A queued schedule keeps an immutable account snapshot even if its
 		// template has since been removed. Keep that queue valid by blocking the
 		// move until the occurrence is confirmed or otherwise gone.
-		var occurrences []*models.ScheduledOccurrence
-		if err := sess.In("status", []models.ScheduledOccurrenceStatus{models.ScheduledOccurrencePending, models.ScheduledOccurrenceDismissed}).Find(&occurrences); err != nil {
+		snapshots, err := pendingScheduledSnapshots(sess, root.Uid)
+		if err != nil {
 			return err
 		}
-		for _, occurrence := range occurrences {
-			var snapshot models.ScheduledOccurrenceSnapshot
-			if json.Unmarshal([]byte(occurrence.SnapshotJSON), &snapshot) == nil &&
-				(accountSet[snapshot.SourceAccountId] || accountSet[snapshot.DestinationAccountId]) {
+		for _, snapshot := range snapshots {
+			if accountSet[snapshot.SourceAccountId] || accountSet[snapshot.DestinationAccountId] {
 				return errs.ErrAccountLedgerMigrationBlocked
 			}
 		}
@@ -990,6 +995,17 @@ func (s *AccountService) DeleteAccount(c core.Context, uid int64, accountId int6
 	}
 
 	return db.DoTransaction(c, func(sess *xorm.Session) error {
+		ids := make([]int64, 0, len(locatedAccounts))
+		for _, account := range locatedAccounts {
+			ids = append(ids, account.AccountId)
+		}
+		sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+		for _, id := range ids {
+			if _, err := sess.Where("uid=? AND account_id=?", locatedAccounts[0].Uid, id).SetExpr("updated_unix_time", "updated_unix_time").Update(new(models.Account)); err != nil {
+				return err
+			}
+		}
+
 		var accountAndSubAccounts []*models.Account
 		err := sess.Where("deleted=? AND ledger_id=? AND ((account_id=? AND parent_account_id=?) OR parent_account_id=?)", false, ledgerId, accountId, models.LevelOneAccountParentId, accountId).Find(&accountAndSubAccounts)
 
@@ -1072,6 +1088,19 @@ func (s *AccountService) DeleteAccount(c core.Context, uid int64, accountId int6
 			return errs.ErrAccountInUseCannotBeDeleted
 		}
 
+		snapshots, err := pendingScheduledSnapshots(sess, accountAndSubAccounts[0].Uid)
+		if err != nil {
+			return err
+		}
+		accountSet := make(map[int64]bool, len(accountAndSubAccountIds))
+		for _, id := range accountAndSubAccountIds {
+			accountSet[id] = true
+		}
+		for _, snapshot := range snapshots {
+			if accountSet[snapshot.SourceAccountId] || accountSet[snapshot.DestinationAccountId] {
+				return errs.ErrAccountInUseCannotBeDeleted
+			}
+		}
 		deletedRows, err := sess.Cols("balance", "deleted", "deleted_unix_time").Where("deleted=? AND ledger_id=?", false, ledgerId).In("account_id", accountAndSubAccountIds).Update(updateModel)
 
 		if err != nil {
@@ -1134,6 +1163,14 @@ func (s *AccountService) DeleteSubAccount(c core.Context, uid int64, accountId i
 	}
 
 	return db.DoTransaction(c, func(sess *xorm.Session) error {
+		ids := []int64{account.AccountId, account.ParentAccountId}
+		sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+		for _, id := range ids {
+			if _, err := sess.Where("uid=? AND account_id=?", account.Uid, id).SetExpr("updated_unix_time", "updated_unix_time").Update(new(models.Account)); err != nil {
+				return err
+			}
+		}
+
 		subAccountsCount, err := sess.Where("deleted=? AND ledger_id=? AND parent_account_id=?", false, account.LedgerId, account.ParentAccountId).Count(&models.Account{})
 
 		if subAccountsCount <= 1 {
@@ -1178,6 +1215,15 @@ func (s *AccountService) DeleteSubAccount(c core.Context, uid int64, accountId i
 			return errs.ErrSubAccountInUseCannotBeDeleted
 		}
 
+		snapshots, err := pendingScheduledSnapshots(sess, account.Uid)
+		if err != nil {
+			return err
+		}
+		for _, snapshot := range snapshots {
+			if snapshot.SourceAccountId == accountId || snapshot.DestinationAccountId == accountId {
+				return errs.ErrSubAccountInUseCannotBeDeleted
+			}
+		}
 		deletedRows, err := sess.Cols("balance", "deleted", "deleted_unix_time").Where("deleted=? AND ledger_id=? AND account_id=?", false, account.LedgerId, accountId).Update(updateModel)
 
 		if err != nil {

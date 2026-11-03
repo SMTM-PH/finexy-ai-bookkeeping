@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "synthetic": true,
+  "amountUnit": "minor",
+  "timeUnit": "unix_seconds",
+  "timezone": "UTC",
+  "query": { "ledgerId": "11", "startDate": "2026-10-01", "endDate": "2026-10-31", "timezone": "UTC" },
+  "accounts": [
+    { "id": "100", "uid": "100", "ledgerId": "11", "type": 1, "currency": "CNY", "name": "=Source, \"CNY\"", "balance": "0" },
+    { "id": "101", "uid": "100", "ledgerId": "11", "type": 1, "currency": "USD", "name": "Synthetic dollar", "balance": "0" },
+    { "id": "110", "uid": "100", "ledgerId": "11", "type": 2, "currency": "---", "name": "Synthetic parent", "balance": "0" },
+    { "id": "111", "uid": "100", "ledgerId": "11", "type": 1, "parentId": "110", "currency": "CNY", "name": "Synthetic hidden history", "balance": "0", "hidden": true },
+    { "id": "112", "uid": "100", "ledgerId": "11", "type": 1, "currency": "CNY", "name": "Synthetic adjustment", "balance": "1000", "balanceTime": "1791633609" },
+    { "id": "200", "uid": "100", "ledgerId": "12", "type": 1, "currency": "CNY", "name": "Synthetic other ledger", "balance": "0" },
+    { "id": "300", "uid": "100", "ledgerId": "0", "type": 1, "currency": "CNY", "name": "Synthetic default", "balance": "0" },
+    { "id": "400", "uid": "200", "ledgerId": "0", "type": 1, "currency": "CNY", "name": "Synthetic foreign", "balance": "0", "databaseOnly": true }
+  ],
+  "categories": [
+    { "id": "1001", "uid": "100", "type": 2, "name": "Synthetic expense root" },
+    { "id": "1002", "uid": "100", "type": 2, "parentId": "1001", "name": "Synthetic expense leaf" },
+    { "id": "1003", "uid": "100", "type": 1, "parentId": "999999", "name": "Synthetic invalid parent", "databaseOnly": true },
+    { "id": "1004", "uid": "100", "type": 2, "name": "Synthetic second root" },
+    { "id": "1005", "uid": "100", "type": 2, "parentId": "1004", "name": "Synthetic expense leaf" },
+    { "id": "1010", "uid": "100", "type": 1, "name": "Synthetic income root" },
+    { "id": "1011", "uid": "100", "type": 1, "parentId": "1010", "name": "Synthetic income" },
+    { "id": "1020", "uid": "100", "type": 3, "name": "Synthetic transfer root" },
+    { "id": "1021", "uid": "100", "type": 3, "parentId": "1020", "name": "Synthetic transfer" },
+    { "id": "2001", "uid": "200", "type": 2, "name": "Synthetic foreign root", "databaseOnly": true },
+    { "id": "2002", "uid": "200", "type": 2, "parentId": "2001", "name": "Synthetic foreign leaf", "databaseOnly": true }
+  ],
+  "tags": [
+    { "id": "500", "uid": "100", "name": "+Synthetic alpha" },
+    { "id": "501", "uid": "100", "name": "Synthetic beta" },
+    { "id": "502", "uid": "100", "name": "Synthetic other ledger private" },
+    { "id": "503", "uid": "100", "name": "Synthetic unused private" },
+    { "id": "504", "uid": "200", "name": "Synthetic foreign tag", "databaseOnly": true }
+  ],
+  "transactions": [
+    { "id": "1", "ledgerId": "11", "type": 2, "categoryId": "1011", "accountId": "100", "amount": "10000", "transactionTime": "1791633601" },
+    { "id": "2", "ledgerId": "11", "type": 3, "categoryId": "1002", "accountId": "100", "amount": "1500", "transactionTime": "1791633602", "tagIds": ["500", "501"], "comment": "=SUM(1,2)\n\"quoted\",中文" },
+    { "id": "3", "ledgerId": "11", "type": 3, "categoryId": "1002", "accountId": "100", "amount": "-500", "transactionTime": "1791633603", "tagIds": ["500"] },
+    { "id": "4", "ledgerId": "11", "type": 3, "categoryId": "1005", "accountId": "111", "amount": "200", "transactionTime": "1791633604" },
+    { "id": "5", "ledgerId": "11", "type": 4, "categoryId": "1021", "accountId": "100", "amount": "700", "relatedId": "6", "relatedAccountId": "101", "relatedAccountAmount": "100", "transactionTime": "1791633605", "tagIds": ["500"] },
+    { "id": "6", "ledgerId": "11", "type": 5, "categoryId": "1021", "accountId": "101", "amount": "100", "relatedId": "5", "relatedAccountId": "100", "relatedAccountAmount": "700", "transactionTime": "1791633606", "tagIds": ["500", "501"] },
+    { "id": "7", "ledgerId": "11", "type": 4, "categoryId": "1021", "accountId": "100", "amount": "50", "transactionTime": "1791633607" },
+    { "id": "8", "ledgerId": "11", "type": 5, "categoryId": "1021", "accountId": "101", "amount": "30", "transactionTime": "1791633608" },
+    { "id": "9", "ledgerId": "11", "type": 1, "accountId": "112", "amount": "1000", "relatedAccountId": "112", "relatedAccountAmount": "1000", "transactionTime": "1791633609", "generatedByAccount": true },
+    { "id": "10", "ledgerId": "11", "type": 3, "categoryId": "1002", "accountId": "100", "amount": "999", "transactionTime": "1791633610", "hideAmount": true },
+    { "id": "11", "ledgerId": "12", "type": 3, "categoryId": "1002", "accountId": "200", "amount": "9999", "transactionTime": "1791633611", "tagIds": ["502"] },
+    { "id": "12", "ledgerId": "0", "type": 2, "categoryId": "1011", "accountId": "300", "amount": "123", "transactionTime": "1791633612" },
+    { "id": "14", "ledgerId": "11", "type": 3, "categoryId": "1002", "accountId": "100", "amount": "777", "transactionTime": "1793534400" }
+  ],
+  "expected": {
+    "detailIds": ["9", "8", "7", "5", "4", "3", "2", "1"],
+    "totals": [
+      { "currency": "CNY", "income": "10000", "expense": "1200", "net": "8800", "adjustment": "1000", "transferIn": "0", "transferOut": "750" },
+      { "currency": "USD", "income": "0", "expense": "0", "net": "0", "adjustment": "0", "transferIn": "130", "transferOut": "0" }
+    ],
+    "readableTagIds": ["500", "501"],
+    "tagCounts": { "500": 3, "501": 2, "none": 5 },
+    "categoryCounts": { "0": 1, "1002": 2, "1005": 1, "1011": 1, "1021": 3 },
+    "transfer": { "id": "5", "physicalIds": ["5", "6"], "sourceAmount": "700", "destinationAmount": "100", "tagIds": ["500", "501"] },
+    "adjustment": { "id": "9", "balanceTarget": "1000", "delta": "1000" }
+  },
+  "variants": {
+    "historicalAdjustment": {
+      "id": "9", "balanceTarget": "1000", "delta": "-400",
+      "totals": [
+        { "currency": "CNY", "income": "10000", "expense": "1200", "net": "8800", "adjustment": "-400", "transferIn": "0", "transferOut": "750" },
+        { "currency": "USD", "income": "0", "expense": "0", "net": "0", "adjustment": "0", "transferIn": "130", "transferOut": "0" }
+      ]
+    }
+  },
+  "cases": [
+    { "name": "types", "query": { "types": [3] }, "detailIds": ["4", "3", "2"] },
+    { "name": "account-either-leg", "query": { "accounts": { "mode": "include", "ids": ["101"] } }, "detailIds": ["8", "5"] },
+    { "name": "account-parent", "query": { "accounts": { "mode": "include", "ids": ["110"], "includeDescendants": true } }, "detailIds": ["4"] },
+    { "name": "exclude-parent", "query": { "accounts": { "mode": "exclude", "ids": ["110"], "includeDescendants": true } }, "detailIds": ["9", "8", "7", "5", "3", "2", "1"] },
+    { "name": "category-parent", "query": { "categories": { "mode": "include", "ids": ["1001"], "includeDescendants": true } }, "detailIds": ["3", "2"] },
+    { "name": "parent-not-expanded", "query": { "categories": { "mode": "include", "ids": ["1001"] } }, "detailIds": [] },
+    { "name": "uncategorized", "query": { "categories": { "mode": "include", "ids": ["0"], "includeDescendants": true } }, "detailIds": ["9"], "totals": [{ "currency": "CNY", "income": "0", "expense": "0", "net": "0", "adjustment": "1000", "transferIn": "0", "transferOut": "0" }] },
+    { "name": "exclude-uncategorized", "query": { "categories": { "mode": "exclude", "ids": ["0"], "includeDescendants": true } }, "detailIds": ["8", "7", "5", "4", "3", "2", "1"] },
+    { "name": "uncategorized-or-category", "query": { "categories": { "mode": "include", "ids": ["0", "1002"] } }, "detailIds": ["9", "3", "2"] },
+    { "name": "tags-any", "query": { "tags": [{ "mode": "any", "ids": ["500"] }] }, "detailIds": ["5", "3", "2"] },
+    { "name": "tags-all", "query": { "tags": [{ "mode": "all", "ids": ["500", "501"] }] }, "detailIds": ["5", "2"] },
+    { "name": "tags-not-any", "query": { "tags": [{ "mode": "notAny", "ids": ["500"] }] }, "detailIds": ["9", "8", "7", "4", "1"] },
+    { "name": "tags-not-all", "query": { "tags": [{ "mode": "notAll", "ids": ["500", "501"] }] }, "detailIds": ["9", "8", "7", "4", "3", "1"] },
+    { "name": "no-tags", "query": { "tags": [{ "mode": "none" }] }, "detailIds": ["9", "8", "7", "4", "1"] },
+    { "name": "tag-conjunction", "query": { "tags": [{ "mode": "any", "ids": ["500"] }, { "mode": "notAny", "ids": ["501"] }] }, "detailIds": ["3"] },
+    { "name": "currency-either-leg", "query": { "currencies": ["USD"] }, "detailIds": ["8", "5"], "totals": [{ "currency": "CNY", "income": "0", "expense": "0", "net": "0", "adjustment": "0", "transferIn": "0", "transferOut": "700" }, { "currency": "USD", "income": "0", "expense": "0", "net": "0", "adjustment": "0", "transferIn": "130", "transferOut": "0" }] },
+    { "name": "hidden-explicit", "query": { "hidden": "include" }, "detailIds": ["10", "9", "8", "7", "5", "4", "3", "2", "1"] },
+    { "name": "real-empty", "query": { "startDate": "2026-10-30", "endDate": "2026-10-30" }, "detailIds": [] },
+    { "name": "five-together", "query": { "startDate": "2026-10-10", "endDate": "2026-10-10", "types": [3], "accounts": { "mode": "include", "ids": ["100"] }, "categories": { "mode": "include", "ids": ["1001"], "includeDescendants": true }, "tags": [{ "mode": "all", "ids": ["500", "501"] }] }, "detailIds": ["2"] }
+  ]
+}

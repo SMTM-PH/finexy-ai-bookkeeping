@@ -1,11 +1,60 @@
 package models
 
 import (
+	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/utils"
 )
+
+// ValidateTransactionScheduleFrequency validates the submitted rule before
+// normalization. Invalid values must not be silently dropped into a new rule.
+func ValidateTransactionScheduleFrequency(kind TransactionScheduleFrequencyType, raw string) error {
+	if kind == TRANSACTION_SCHEDULE_FREQUENCY_TYPE_DISABLED {
+		if raw == "" {
+			return nil
+		}
+		return fmt.Errorf("disabled schedule must have an empty frequency")
+	}
+	parts := strings.Split(raw, ",")
+	for _, part := range parts {
+		value, err := strconv.ParseInt(part, 10, 64)
+		if err != nil || strconv.FormatInt(value, 10) != part {
+			return fmt.Errorf("invalid schedule frequency")
+		}
+		switch kind {
+		case TRANSACTION_SCHEDULE_FREQUENCY_TYPE_DAILY:
+			// Web uses 0 as the daily placeholder; existing clients also use 1.
+			// Neither value is an interval: DAILY always means every local day.
+			if len(parts) != 1 || (value != 0 && value != 1) {
+				return fmt.Errorf("invalid daily frequency")
+			}
+		case TRANSACTION_SCHEDULE_FREQUENCY_TYPE_WEEKLY:
+			if value < 0 || value > 6 {
+				return fmt.Errorf("invalid weekday")
+			}
+		case TRANSACTION_SCHEDULE_FREQUENCY_TYPE_MONTHLY:
+			if value == 0 || value < -31 || value > 31 {
+				return fmt.Errorf("invalid month day")
+			}
+		case TRANSACTION_SCHEDULE_FREQUENCY_TYPE_YEARLY:
+			month, day := value/100, value%100
+			date := time.Date(2000, time.Month(month), int(day), 0, 0, 0, 0, time.UTC)
+			if month < 1 || month > 12 || day < 1 || int64(date.Month()) != month || int64(date.Day()) != day {
+				return fmt.Errorf("invalid annual date")
+			}
+		case TRANSACTION_SCHEDULE_FREQUENCY_TYPE_EVERY_N_DAYS:
+			if len(parts) != 1 || value <= 0 {
+				return fmt.Errorf("invalid day interval")
+			}
+		default:
+			return fmt.Errorf("invalid schedule frequency type")
+		}
+	}
+	return nil
+}
 
 // TransactionTemplateType represents transaction template type in database
 type TransactionTemplateType byte
@@ -33,6 +82,7 @@ const (
 type TransactionTemplate struct {
 	TemplateId                 int64                            `xorm:"PK"`
 	Uid                        int64                            `xorm:"INDEX(IDX_transaction_template_uid_deleted_template_type_order) NOT NULL"`
+	LedgerId                   int64                            `xorm:"INDEX NOT NULL DEFAULT 0"`
 	Deleted                    bool                             `xorm:"INDEX(IDX_transaction_template_uid_deleted_template_type_order) INDEX(IDX_transaction_template_deleted_type_freqtype_scheduled_time) NOT NULL"`
 	TemplateType               TransactionTemplateType          `xorm:"INDEX(IDX_transaction_template_uid_deleted_template_type_order) INDEX(IDX_transaction_template_deleted_type_freqtype_scheduled_time) NOT NULL"`
 	Name                       string                           `xorm:"VARCHAR(64) NOT NULL"`
@@ -58,18 +108,34 @@ type TransactionTemplate struct {
 	DeletedUnixTime            int64
 }
 
+// TransactionTemplateCapabilitiesResponse is the authenticated retry contract.
+// A product version alone is insufficient to enable durable client replay.
+type TransactionTemplateCapabilitiesResponse struct {
+	CreationContractVersion int    `json:"creationContractVersion"`
+	DurableCreation         bool   `json:"durableCreation"`
+	PayloadBinding          bool   `json:"payloadBinding"`
+	DeletedReceipts         bool   `json:"deletedReceipts"`
+	MaxClientSessionIdBytes int    `json:"maxClientSessionIdBytes"`
+	SubmissionScope         string `json:"submissionScope"`
+	DurableCreatePath       string `json:"durableCreatePath"`
+	TemplateTypes           []int  `json:"templateTypes"`
+}
+
 // TransactionTemplateListRequest represents all parameters of transaction template list request
 type TransactionTemplateListRequest struct {
+	LedgerId     int64                   `form:"ledgerId,string" binding:"min=0"`
 	TemplateType TransactionTemplateType `form:"templateType"`
 }
 
 // TransactionTemplateGetRequest represents all parameters of transaction template getting request
 type TransactionTemplateGetRequest struct {
-	Id int64 `form:"id,string" binding:"required,min=1"`
+	LedgerId int64 `form:"ledgerId,string" binding:"min=0"`
+	Id       int64 `form:"id,string" binding:"required,min=1"`
 }
 
 // TransactionTemplateCreateRequest represents all parameters of transaction template creation request
 type TransactionTemplateCreateRequest struct {
+	LedgerId                   int64                             `json:"ledgerId,string" binding:"min=0"`
 	TemplateType               TransactionTemplateType           `json:"templateType"`
 	Name                       string                            `json:"name" binding:"required,notBlank,max=64"`
 	Type                       TransactionType                   `json:"type" binding:"required"`
@@ -86,17 +152,19 @@ type TransactionTemplateCreateRequest struct {
 	ScheduledStartDate         *string                           `json:"scheduledStartDate" binding:"omitempty"`
 	ScheduledEndDate           *string                           `json:"scheduledEndDate" binding:"omitempty"`
 	ScheduledTimezoneUtcOffset *int16                            `json:"utcOffset" binding:"omitempty,min=-720,max=840"`
-	ClientSessionId            string                            `json:"clientSessionId"`
+	ClientSessionId            string                            `json:"clientSessionId" binding:"max=128"`
 }
 
 // TransactionTemplateModifyNameRequest represents all parameters of transaction template name modification request
 type TransactionTemplateModifyNameRequest struct {
-	Id   int64  `json:"id,string" binding:"required,min=1"`
-	Name string `json:"name" binding:"required,notBlank,max=64"`
+	LedgerId int64  `json:"ledgerId,string" binding:"min=0"`
+	Id       int64  `json:"id,string" binding:"required,min=1"`
+	Name     string `json:"name" binding:"required,notBlank,max=64"`
 }
 
 // TransactionTemplateModifyRequest represents all parameters of transaction template modification request
 type TransactionTemplateModifyRequest struct {
+	LedgerId                   int64                             `json:"ledgerId,string" binding:"min=0"`
 	Id                         int64                             `json:"id,string" binding:"required,min=1"`
 	Name                       string                            `json:"name" binding:"required,notBlank,max=64"`
 	Type                       TransactionType                   `json:"type" binding:"required"`
@@ -117,12 +185,14 @@ type TransactionTemplateModifyRequest struct {
 
 // TransactionTemplateHideRequest represents all parameters of transaction template hiding request
 type TransactionTemplateHideRequest struct {
-	Id     int64 `json:"id,string" binding:"required,min=1"`
-	Hidden bool  `json:"hidden"`
+	LedgerId int64 `json:"ledgerId,string" binding:"min=0"`
+	Id       int64 `json:"id,string" binding:"required,min=1"`
+	Hidden   bool  `json:"hidden"`
 }
 
 // TransactionTemplateMoveRequest represents all parameters of transaction template moving request
 type TransactionTemplateMoveRequest struct {
+	LedgerId         int64                                        `json:"ledgerId,string" binding:"min=0"`
 	NewDisplayOrders []*TransactionTemplateNewDisplayOrderRequest `json:"newDisplayOrders" binding:"required,min=1"`
 }
 
@@ -134,7 +204,8 @@ type TransactionTemplateNewDisplayOrderRequest struct {
 
 // TransactionTemplateDeleteRequest represents all parameters of transaction template deleting request
 type TransactionTemplateDeleteRequest struct {
-	Id int64 `json:"id,string" binding:"required,min=1"`
+	LedgerId int64 `json:"ledgerId,string" binding:"min=0"`
+	Id       int64 `json:"id,string" binding:"required,min=1"`
 }
 
 type TransactionTemplateInfoResponse struct {
@@ -149,6 +220,7 @@ type TransactionTemplateInfoResponse struct {
 	NextScheduledTime      *int64                            `json:"nextScheduledTime,omitempty"`
 	DisplayOrder           int32                             `json:"displayOrder"`
 	Hidden                 bool                              `json:"hidden"`
+	Deleted                bool                              `json:"deleted,omitempty"`
 }
 
 // GetTagIds returns all tag ids of the transaction template
@@ -178,13 +250,16 @@ func (t *TransactionTemplate) ToTransactionTemplateInfoResponse(serverUtcOffset 
 		Name:                    t.Name,
 		DisplayOrder:            t.DisplayOrder,
 		Hidden:                  t.Hidden,
+		Deleted:                 t.Deleted,
 	}
 
 	if t.TemplateType == TRANSACTION_TEMPLATE_TYPE_SCHEDULE {
 		response.ScheduledFrequencyType = &t.ScheduledFrequencyType
 		response.ScheduledFrequency = &t.ScheduledFrequency
 		response.ScheduledAt = &t.ScheduledAt
-		response.NextScheduledTime = t.NextScheduledUnixTime(time.Now())
+		if !t.Deleted {
+			response.NextScheduledTime = t.NextScheduledUnixTime(time.Now())
+		}
 
 		templateTimeZone := time.FixedZone("Template Timezone", int(t.ScheduledTimezoneUtcOffset)*60)
 
@@ -277,6 +352,7 @@ func (t *TransactionTemplate) toTransactionInfoResponse(utcOffset int16) *Transa
 	}
 
 	return &TransactionInfoResponse{
+		LedgerId:             t.LedgerId,
 		Id:                   t.TemplateId,
 		TimeSequenceId:       utils.GetMinTransactionTimeFromUnixTime(t.CreatedUnixTime),
 		Type:                 t.Type,

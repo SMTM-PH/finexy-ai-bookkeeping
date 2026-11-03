@@ -40,6 +40,22 @@ var (
 	}
 )
 
+// TemplateCapabilitiesHandler advertises the durable contract independently of
+// the product version. It is a read-only authenticated capability, not a grant.
+func (a *TransactionTemplatesApi) TemplateCapabilitiesHandler(c *core.WebContext) (any, *errs.Error) {
+	c.Header("Cache-Control", "no-store")
+	types := []int{int(models.TRANSACTION_TEMPLATE_TYPE_NORMAL)}
+	if a.CurrentConfig().EnableScheduledTransaction {
+		types = append(types, int(models.TRANSACTION_TEMPLATE_TYPE_SCHEDULE))
+	}
+	return &models.TransactionTemplateCapabilitiesResponse{
+		CreationContractVersion: 1, DurableCreation: true, PayloadBinding: true,
+		DeletedReceipts: true, MaxClientSessionIdBytes: 128,
+		SubmissionScope: "owner-creator-ledger", TemplateTypes: types,
+		DurableCreatePath: "v1/transaction/templates/add_durable.json",
+	}, nil
+}
+
 // TemplateListHandler returns transaction template list of current user
 func (a *TransactionTemplatesApi) TemplateListHandler(c *core.WebContext) (any, *errs.Error) {
 	var templateListReq models.TransactionTemplateListRequest
@@ -60,7 +76,7 @@ func (a *TransactionTemplatesApi) TemplateListHandler(c *core.WebContext) (any, 
 	}
 
 	uid := c.GetCurrentUid()
-	templates, err := a.templates.GetAllTemplatesByUid(c, uid, templateListReq.TemplateType)
+	templates, err := a.templates.GetAllTemplatesInLedger(c, uid, templateListReq.LedgerId, templateListReq.TemplateType)
 
 	if err != nil {
 		log.Errorf(c, "[transaction_templates.TemplateListHandler] failed to get templates for user \"uid:%d\", because %s", uid, err.Error())
@@ -69,9 +85,11 @@ func (a *TransactionTemplatesApi) TemplateListHandler(c *core.WebContext) (any, 
 
 	templateResps := make(models.TransactionTemplateInfoResponseSlice, len(templates))
 	serverUtcOffset := utils.GetServerTimezoneOffsetMinutes()
+	canManage := canManageTemplates(c, uid, templateListReq.LedgerId)
 
 	for i := 0; i < len(templates); i++ {
 		templateResps[i] = templates[i].ToTransactionTemplateInfoResponse(serverUtcOffset)
+		templateResps[i].Editable = canManage
 	}
 
 	sort.Sort(templateResps)
@@ -90,7 +108,7 @@ func (a *TransactionTemplatesApi) TemplateGetHandler(c *core.WebContext) (any, *
 	}
 
 	uid := c.GetCurrentUid()
-	template, err := a.templates.GetTemplateByTemplateId(c, uid, templateGetReq.Id)
+	template, err := a.templates.GetTemplateInLedger(c, uid, templateGetReq.LedgerId, templateGetReq.Id)
 
 	if err != nil {
 		log.Errorf(c, "[transaction_templates.TemplateGetHandler] failed to get template \"id:%d\" for user \"uid:%d\", because %s", templateGetReq.Id, uid, err.Error())
@@ -103,14 +121,28 @@ func (a *TransactionTemplatesApi) TemplateGetHandler(c *core.WebContext) (any, *
 
 	serverUtcOffset := utils.GetServerTimezoneOffsetMinutes()
 	templateResp := template.ToTransactionTemplateInfoResponse(serverUtcOffset)
+	templateResp.Editable = canManageTemplates(c, uid, template.LedgerId)
 
 	return templateResp, nil
 }
 
 // TemplateCreateHandler saves a new transaction template by request parameters for current user
 func (a *TransactionTemplatesApi) TemplateCreateHandler(c *core.WebContext) (any, *errs.Error) {
+	return a.createTemplate(c, false)
+}
+
+// TemplateDurableCreateHandler requires a nonempty key. Older servers have no
+// such route, so a client never falls back to an unsafe legacy create endpoint.
+func (a *TransactionTemplatesApi) TemplateDurableCreateHandler(c *core.WebContext) (any, *errs.Error) {
+	return a.createTemplate(c, true)
+}
+
+func (a *TransactionTemplatesApi) createTemplate(c *core.WebContext, durable bool) (any, *errs.Error) {
 	var templateCreateReq models.TransactionTemplateCreateRequest
 	err := c.ShouldBindJSON(&templateCreateReq)
+	if durable && strings.TrimSpace(templateCreateReq.ClientSessionId) == "" {
+		return nil, errs.ErrParameterInvalid
+	}
 
 	if err != nil {
 		log.Warnf(c, "[transaction_templates.TemplateCreateHandler] parse request failed, because %s", err.Error())
@@ -138,6 +170,9 @@ func (a *TransactionTemplatesApi) TemplateCreateHandler(c *core.WebContext) (any
 			return nil, errs.ErrScheduledTransactionFrequencyInvalid
 		}
 
+		if err := models.ValidateTransactionScheduleFrequency(*templateCreateReq.ScheduledFrequencyType, *templateCreateReq.ScheduledFrequency); err != nil {
+			return nil, errs.ErrScheduledTransactionFrequencyInvalid
+		}
 		if *templateCreateReq.ScheduledFrequencyType == models.TRANSACTION_SCHEDULE_FREQUENCY_TYPE_DISABLED && *templateCreateReq.ScheduledFrequency != "" {
 			return nil, errs.ErrScheduledTransactionFrequencyInvalid
 		} else if *templateCreateReq.ScheduledFrequencyType != models.TRANSACTION_SCHEDULE_FREQUENCY_TYPE_DISABLED && *templateCreateReq.ScheduledFrequency == "" {
@@ -162,45 +197,17 @@ func (a *TransactionTemplatesApi) TemplateCreateHandler(c *core.WebContext) (any
 	}
 
 	uid := c.GetCurrentUid()
-
-	maxOrderId, err := a.templates.GetMaxDisplayOrder(c, uid, templateCreateReq.TemplateType)
-
-	if err != nil {
-		log.Errorf(c, "[transaction_templates.TemplateCreateHandler] failed to get max display order for user \"uid:%d\", because %s", uid, err.Error())
-		return nil, errs.Or(err, errs.ErrOperationFailed)
-	}
-
 	serverUtcOffset := utils.GetServerTimezoneOffsetMinutes()
-	template, err := a.createNewTemplateModel(uid, &templateCreateReq, maxOrderId+1)
+	// Live permission checks and next display order belong to the creation
+	// transaction; replay must not run new-only reads before acknowledging.
+	template, err := a.createNewTemplateModel(uid, &templateCreateReq, -1)
 
 	if err != nil {
 		log.Errorf(c, "[transaction_templates.TemplateCreateHandler] failed to create new template for user \"uid:%d\", because %s", uid, err.Error())
 		return nil, errs.Or(err, errs.ErrOperationFailed)
 	}
 
-	if a.CurrentConfig().EnableDuplicateSubmissionsCheck && templateCreateReq.ClientSessionId != "" {
-		found, remark := a.GetSubmissionRemark(duplicatechecker.DUPLICATE_CHECKER_TYPE_NEW_TEMPLATE, uid, templateCreateReq.ClientSessionId)
-
-		if found {
-			log.Infof(c, "[transaction_templates.TemplateCreateHandler] another template \"id:%s\" has been created for user \"uid:%d\"", remark, uid)
-			templateId, err := utils.StringToInt64(remark)
-
-			if err == nil {
-				template, err = a.templates.GetTemplateByTemplateId(c, uid, templateId)
-
-				if err != nil {
-					log.Errorf(c, "[transaction_templates.TemplateCreateHandler] failed to get existed template \"id:%d\" for user \"uid:%d\", because %s", templateId, uid, err.Error())
-					return nil, errs.Or(err, errs.ErrOperationFailed)
-				}
-
-				templateResp := template.ToTransactionTemplateInfoResponse(serverUtcOffset)
-
-				return templateResp, nil
-			}
-		}
-	}
-
-	err = a.templates.CreateTemplate(c, template)
+	err = a.templates.CreateTemplateIdempotent(c, uid, template, templateCreateReq.ClientSessionId)
 
 	if err != nil {
 		log.Errorf(c, "[transaction_templates.TemplateCreateHandler] failed to create template \"id:%d\" for user \"uid:%d\", because %s", template.TemplateId, uid, err.Error())
@@ -209,8 +216,8 @@ func (a *TransactionTemplatesApi) TemplateCreateHandler(c *core.WebContext) (any
 
 	log.Infof(c, "[transaction_templates.TemplateCreateHandler] user \"uid:%d\" has created a new template \"id:%d\" successfully", uid, template.TemplateId)
 
-	a.SetSubmissionRemarkIfEnable(duplicatechecker.DUPLICATE_CHECKER_TYPE_NEW_TEMPLATE, uid, templateCreateReq.ClientSessionId, utils.Int64ToString(template.TemplateId))
 	templateResp := template.ToTransactionTemplateInfoResponse(serverUtcOffset)
+	templateResp.Editable = !template.Deleted
 
 	return templateResp, nil
 }
@@ -231,7 +238,10 @@ func (a *TransactionTemplatesApi) TemplateModifyHandler(c *core.WebContext) (any
 	}
 
 	uid := c.GetCurrentUid()
-	template, err := a.templates.GetTemplateByTemplateId(c, uid, templateModifyReq.Id)
+	if _, _, err := services.Ledgers.GetLedgerWithAccess(c, uid, templateModifyReq.LedgerId, models.FamilyMemberRole.CanManage); err != nil {
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+	template, err := a.templates.GetTemplateInLedger(c, uid, templateModifyReq.LedgerId, templateModifyReq.Id)
 
 	if err != nil {
 		log.Errorf(c, "[transaction_templates.TemplateModifyHandler] failed to get template \"id:%d\" for user \"uid:%d\", because %s", templateModifyReq.Id, uid, err.Error())
@@ -249,6 +259,9 @@ func (a *TransactionTemplatesApi) TemplateModifyHandler(c *core.WebContext) (any
 			return nil, errs.ErrScheduledTransactionFrequencyInvalid
 		}
 
+		if err := models.ValidateTransactionScheduleFrequency(*templateModifyReq.ScheduledFrequencyType, *templateModifyReq.ScheduledFrequency); err != nil {
+			return nil, errs.ErrScheduledTransactionFrequencyInvalid
+		}
 		if *templateModifyReq.ScheduledFrequencyType == models.TRANSACTION_SCHEDULE_FREQUENCY_TYPE_DISABLED && *templateModifyReq.ScheduledFrequency != "" {
 			return nil, errs.ErrScheduledTransactionFrequencyInvalid
 		} else if *templateModifyReq.ScheduledFrequencyType != models.TRANSACTION_SCHEDULE_FREQUENCY_TYPE_DISABLED && *templateModifyReq.ScheduledFrequency == "" {
@@ -274,7 +287,9 @@ func (a *TransactionTemplatesApi) TemplateModifyHandler(c *core.WebContext) (any
 
 	newTemplate := &models.TransactionTemplate{
 		TemplateId:           template.TemplateId,
-		Uid:                  uid,
+		Uid:                  template.Uid,
+		LedgerId:             template.LedgerId,
+		TemplateType:         template.TemplateType,
 		Name:                 templateModifyReq.Name,
 		Type:                 templateModifyReq.Type,
 		CategoryId:           templateModifyReq.CategoryId,
@@ -346,7 +361,7 @@ func (a *TransactionTemplatesApi) TemplateModifyHandler(c *core.WebContext) (any
 		}
 	}
 
-	err = a.templates.ModifyTemplate(c, newTemplate)
+	err = a.templates.ModifyTemplateInLedger(c, uid, newTemplate)
 
 	if err != nil {
 		log.Errorf(c, "[transaction_templates.TemplateModifyHandler] failed to update template \"id:%d\" for user \"uid:%d\", because %s", templateModifyReq.Id, uid, err.Error())
@@ -375,8 +390,11 @@ func (a *TransactionTemplatesApi) TemplateHideHandler(c *core.WebContext) (any, 
 	}
 
 	uid := c.GetCurrentUid()
+	if _, _, err := services.Ledgers.GetLedgerWithAccess(c, uid, templateHideReq.LedgerId, models.FamilyMemberRole.CanManage); err != nil {
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
 
-	template, err := a.templates.GetTemplateByTemplateId(c, uid, templateHideReq.Id)
+	template, err := a.templates.GetTemplateInLedger(c, uid, templateHideReq.LedgerId, templateHideReq.Id)
 
 	if err != nil {
 		log.Errorf(c, "[transaction_templates.TemplateHideHandler] failed to get template \"id:%d\" for user \"uid:%d\", because %s", templateHideReq.Id, uid, err.Error())
@@ -387,7 +405,7 @@ func (a *TransactionTemplatesApi) TemplateHideHandler(c *core.WebContext) (any, 
 		return nil, errs.ErrScheduledTransactionNotEnabled
 	}
 
-	err = a.templates.HideTemplate(c, uid, []int64{templateHideReq.Id}, templateHideReq.Hidden)
+	err = a.templates.HideTemplateInLedger(c, uid, templateHideReq.LedgerId, []int64{templateHideReq.Id}, templateHideReq.Hidden)
 
 	if err != nil {
 		log.Errorf(c, "[transaction_templates.TemplateHideHandler] failed to hide template \"id:%d\" for user \"uid:%d\", because %s", templateHideReq.Id, uid, err.Error())
@@ -409,9 +427,12 @@ func (a *TransactionTemplatesApi) TemplateMoveHandler(c *core.WebContext) (any, 
 	}
 
 	uid := c.GetCurrentUid()
+	if _, _, err := services.Ledgers.GetLedgerWithAccess(c, uid, templateMoveReq.LedgerId, models.FamilyMemberRole.CanManage); err != nil {
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
 
 	if len(templateMoveReq.NewDisplayOrders) > 0 {
-		template, err := a.templates.GetTemplateByTemplateId(c, uid, templateMoveReq.NewDisplayOrders[0].Id)
+		template, err := a.templates.GetTemplateInLedger(c, uid, templateMoveReq.LedgerId, templateMoveReq.NewDisplayOrders[0].Id)
 
 		if err != nil {
 			log.Errorf(c, "[transaction_templates.TemplateMoveHandler] failed to get template \"id:%d\" for user \"uid:%d\", because %s", templateMoveReq.NewDisplayOrders[0].Id, uid, err.Error())
@@ -436,7 +457,7 @@ func (a *TransactionTemplatesApi) TemplateMoveHandler(c *core.WebContext) (any, 
 		templates[i] = template
 	}
 
-	err = a.templates.ModifyTemplateDisplayOrders(c, uid, templates)
+	err = a.templates.ModifyTemplateDisplayOrdersInLedger(c, uid, templateMoveReq.LedgerId, templates)
 
 	if err != nil {
 		log.Errorf(c, "[transaction_templates.TemplateMoveHandler] failed to move templates for user \"uid:%d\", because %s", uid, err.Error())
@@ -458,8 +479,11 @@ func (a *TransactionTemplatesApi) TemplateDeleteHandler(c *core.WebContext) (any
 	}
 
 	uid := c.GetCurrentUid()
+	if _, _, err := services.Ledgers.GetLedgerWithAccess(c, uid, templateDeleteReq.LedgerId, models.FamilyMemberRole.CanManage); err != nil {
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
 
-	template, err := a.templates.GetTemplateByTemplateId(c, uid, templateDeleteReq.Id)
+	template, err := a.templates.GetTemplateInLedger(c, uid, templateDeleteReq.LedgerId, templateDeleteReq.Id)
 
 	if err != nil {
 		log.Errorf(c, "[transaction_templates.TemplateDeleteHandler] failed to get template \"id:%d\" for user \"uid:%d\", because %s", templateDeleteReq.Id, uid, err.Error())
@@ -470,7 +494,7 @@ func (a *TransactionTemplatesApi) TemplateDeleteHandler(c *core.WebContext) (any
 		return nil, errs.ErrScheduledTransactionNotEnabled
 	}
 
-	err = a.templates.DeleteTemplate(c, uid, templateDeleteReq.Id)
+	err = a.templates.DeleteTemplateInLedger(c, uid, templateDeleteReq.LedgerId, templateDeleteReq.Id)
 
 	if err != nil {
 		log.Errorf(c, "[transaction_templates.TemplateDeleteHandler] failed to delete template \"id:%d\" for user \"uid:%d\", because %s", templateDeleteReq.Id, uid, err.Error())
@@ -484,6 +508,7 @@ func (a *TransactionTemplatesApi) TemplateDeleteHandler(c *core.WebContext) (any
 func (a *TransactionTemplatesApi) createNewTemplateModel(uid int64, templateCreateReq *models.TransactionTemplateCreateRequest, order int32) (*models.TransactionTemplate, error) {
 	template := &models.TransactionTemplate{
 		Uid:                  uid,
+		LedgerId:             templateCreateReq.LedgerId,
 		TemplateType:         templateCreateReq.TemplateType,
 		Name:                 templateCreateReq.Name,
 		Type:                 templateCreateReq.Type,
@@ -579,4 +604,15 @@ func (a *TransactionTemplatesApi) getOrderedFrequencyValues(frequencyValue strin
 	}
 
 	return sortedFrequencyValueBuilder.String()
+}
+
+func templateSubmissionScope(ledgerID int64, key string) string {
+	if key == "" || ledgerID == models.DefaultLedgerId {
+		return key
+	}
+	return utils.Int64ToString(ledgerID) + "/" + key
+}
+func canManageTemplates(c core.Context, actor, ledgerID int64) bool {
+	_, _, err := services.Ledgers.GetLedgerWithAccess(c, actor, ledgerID, models.FamilyMemberRole.CanManage)
+	return err == nil
 }

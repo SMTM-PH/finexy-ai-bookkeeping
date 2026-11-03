@@ -73,7 +73,7 @@ export enum AfterSaveAction {
     StayWithCurrentTransaction = 'stayWithCurrentTransaction'
 }
 
-export function useTransactionEditPageBase(type: TransactionEditPageType, initMode?: TransactionEditPageMode, transactionDefaultType?: number) {
+export function useTransactionEditPageBase(type: TransactionEditPageType, initMode?: TransactionEditPageMode, transactionDefaultType?: number, validateSelection?: (transaction: Transaction) => string | null) {
     const {
         tt,
         getAllTimezones,
@@ -347,6 +347,8 @@ export function useTransactionEditPageBase(type: TransactionEditPageType, initMo
     });
 
     const inputEmptyProblemMessage = computed<string | null>(() => {
+        const selectionProblem = validateSelection?.(transaction.value);
+        if (selectionProblem) return selectionProblem;
         if (transaction.value.type === TransactionType.Expense) {
             if (!transaction.value.expenseCategoryId || transaction.value.expenseCategoryId === '') {
                 return 'Transaction category cannot be blank';
@@ -452,6 +454,7 @@ export function useTransactionEditPageBase(type: TransactionEditPageType, initMo
             },
             setContextData
         );
+        if (newTransaction && setContextData) transaction.value.editable = newTransaction.editable;
     }
 
     function updateTransactionModelFromRecognizedResponse(response: RecognizedTransactionResponse): void {

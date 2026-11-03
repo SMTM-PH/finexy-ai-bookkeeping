@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "testSource": "android/app/src/qaAndroidTest/java/com/finexy/mobile/data/LedgerReportApiE2ETest.kt",
+  "testClass": "Lcom/finexy/mobile/data/LedgerReportApiE2ETest;",
+  "testMethods": [
+    "realFinancialQueriesPaginationPreviewAndCsvKeepOriginalLedgerAndIntegerMeaning",
+    "realFourRolesSnapshotMutationAndRevokedExportUseCurrentPermissions",
+    "capturedContextRejectsAnotherLedgerTokenServerAndLocalModeWithoutReturningOldResults"
+  ],
+  "revisions": {
+    "cfd79b0b15f1822e9ee0a54c1da83ee2abb95afa086741d70fe823c011f52fe8": {
+      "review": "Historical three-method source retained for reproducible build and failure evidence. This source had an incorrect currency-only totals assertion; accepting its compilation does not accept its HTTP results."
+    },
+    "79a17ba719cf99f5810467e0afa13a8a015d1fd174d28917e7ecc71bac7e3b31": {
+      "review": "The USD filter selects complete logical transfers and preserves both CNY outgoing and USD incoming totals, as independently specified by the shared currency-either-leg oracle. The three required test methods remain unchanged.",
+      "independentOracle": "testdata/ledger_report/v1.json#currency-either-leg"
+    }
+  }
+}

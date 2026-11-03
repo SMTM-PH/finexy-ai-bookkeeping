@@ -262,6 +262,9 @@ try {
     await page.getByRole('button', { name: '登录', exact: true }).click();
     await page.waitForURL(/#\/$/);
     await page.goto(`${base}/desktop#/user/settings?tab=securitySetting`, { waitUntil: 'networkidle' });
+    assert.equal(await page.getByRole('heading', { name: 'Agent 接入', exact: true }).count(), 0);
+    await page.getByRole('button').filter({ hasText: 'AI 设置' }).click();
+    await page.waitForURL(/tab=aiSetting/);
     await page.getByRole('heading', { name: 'Agent 接入', exact: true }).waitFor();
     const mcpSwitch = page.getByRole('switch', { name: '此账号的 MCP 接入' });
     await page.waitForFunction(() => !document.querySelector('[role="switch"]').disabled);
@@ -336,7 +339,12 @@ try {
     await page.goto(`${base}/desktop#/transaction/list`, { waitUntil: 'networkidle' });
     await page.getByRole('button', { name: '切换当前账本', exact: true }).click();
     await page.getByRole('option').filter({ hasText: 'Selected import ledger' }).click();
-    await page.getByRole('button', { name: '导入支付宝', exact: true }).click();
+    await page.getByRole('button', { name: '导入账单', exact: true }).click();
+    await page.getByRole('combobox', { name: '文件类型', exact: true }).locator('xpath=ancestor::div[contains(@class,"v-field")][1]').click();
+    const fileMenu = page.locator('.two-column-select-menu:visible');
+    await fileMenu.getByPlaceholder('查找文件类型').fill('支付宝 (App) 交易流水文件');
+    await fileMenu.locator('.primary-list-container .v-list-item').first().click();
+    await fileMenu.locator('.secondary-list-container').getByText('支付宝 (App) 交易流水文件', { exact: true }).click();
     await page.getByRole('dialog').getByText('账单将导入「Selected import ledger」', { exact: false }).waitFor();
     await page.evaluate(() => {
         const send = XMLHttpRequest.prototype.send;
@@ -361,7 +369,7 @@ try {
     const beforeGroupBalance = (await request(`v1/accounts/get.json?id=${otherAccount.id}&ledgerId=${ledger.id}`, a.token)).balance;
     assert.match(await sourceGroup.innerText(), /2 笔/);
     await sourceGroup.getByRole('button').click();
-    await categoryGroup.getByRole('button').click();
+    await categoryGroup.getByRole('button', { name: /^应用/ }).click();
     assert.equal(await sourceGroup.getByRole('button').isDisabled(), true, 'default mapping preserves already mapped rows');
     await mappingPanel.getByLabel('覆盖该组已映射项').check();
     assert.equal(await sourceGroup.getByRole('button').isDisabled(), false, 'overwrite requires explicit opt-in');
@@ -375,7 +383,7 @@ try {
     pass('grouped account/category mappings apply without posting; preserve existing mappings and require overwrite opt-in');
     await page.screenshot({ path: 'artifacts/agent-access/selected-ledger-import-final.png' });
     await page.getByRole('dialog').getByRole('button', { name: /取消/ }).click();
-    await page.goto(`${base}/desktop#/user/settings?tab=securitySetting`, { waitUntil: 'networkidle' });
+    await page.goto(`${base}/desktop#/user/settings?tab=aiSetting`, { waitUntil: 'networkidle' });
     await page.getByRole('heading', { name: 'Agent 接入', exact: true }).waitFor();
     pass('Web import entry and preview show the currently selected ledger');
 
@@ -384,6 +392,7 @@ try {
         await page.emulateMedia({ colorScheme: theme });
         await page.evaluate(value => { document.documentElement.style.zoom = value; }, zoom);
         await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        await page.waitForFunction(expectedZoom => Math.abs(document.querySelector('.agent-permission input').getBoundingClientRect().width / expectedZoom - 18) < 1, zoom);
         const checkbox = await page.locator('.agent-permission input').first().boundingBox();
         assert(Math.abs(checkbox.width / zoom - 18) < 1, `checkbox width ${checkbox.width}, zoom ${zoom}`);
         assert.equal(await page.locator('.agent-access').evaluate(el => el.scrollWidth <= el.clientWidth + 1), true);
@@ -402,7 +411,7 @@ try {
         await mobile.getByText('登录', { exact: true }).click();
     }
     await mobile.locator('a[href="/settings"]').click();
-    await mobile.locator('a[href="/user/agent-access"]').click();
+    await mobile.locator('a[href="/user/ai-settings"]').click();
     await mobile.getByRole('heading', { name: 'Agent 接入', exact: true }).waitFor();
     const mobileSwitch = mobile.getByRole('switch', { name: '此账号的 MCP 接入' });
     await mobileSwitch.click();

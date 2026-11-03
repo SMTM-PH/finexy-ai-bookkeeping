@@ -25,9 +25,9 @@
             <template v-if="rows.length">
                 <f7-block strong inset>
                     <p>共 {{ rows.length }} 笔，已选 {{ chosen.length }} 笔，待补全 {{ invalidCount }} 笔。</p>
-                    <p>未匹配的账户和末级分类须手动选择；可逐笔取消勾选。</p>
-                    <StatementMappingPanel :rows="rows" :accounts="accountsStore.allAccountsMap" :categories="categoriesStore.allTransactionCategoriesMap" :disabled="busy" />
-                    <f7-button fill :disabled="busy || !chosen.length || invalidCount > 0" @click="submit">确认导入 {{ chosen.length }} 笔</f7-button>
+                    <p>可一键关联分类建议，未匹配项按组补全；可逐笔取消勾选。</p>
+                    <StatementMappingPanel v-if="cacheMatchesLedger" :rows="rows" :accounts="accountsStore.allAccountsMap" :categories="categoriesStore.allTransactionCategoriesMap" :ledger-id="importLedgerId" :file-type="provider === 'alipay' ? 'alipay_app_csv' : 'wechat_pay_app'" :disabled="busy" @busy="mappingBusy = $event" />
+                    <f7-button fill :disabled="busy || mappingBusy || !chosen.length || invalidCount > 0" @click="submit">确认导入 {{ chosen.length }} 笔</f7-button>
                 </f7-block>
 
                 <f7-block-title>逐笔核对</f7-block-title>
@@ -85,8 +85,10 @@ const emit = defineEmits<{ imported: [] }>();
 const ledgersStore = useLedgersStore();
 const importLedgerId = ref('0');
 const importLedgerName = ref('默认个人账本');
+let previewGeneration = 0;
 watch(opened, value => {
-    if (value) { importLedgerId.value = ledgersStore.selectedLedgerId; importLedgerName.value = ledgersStore.selectedLedger.name; rows.value = []; }
+    ++previewGeneration;
+    if (value) { importLedgerId.value = ledgersStore.selectedLedgerId; importLedgerName.value = ledgersStore.selectedLedger.name; rows.value = []; message.value = ''; }
 });
 const accountsStore = useAccountsStore();
 const categoriesStore = useTransactionCategoriesStore();
@@ -98,13 +100,15 @@ const provider = ref<'alipay' | 'wechat'>('alipay');
 const file = ref<File | null>(null);
 const password = ref('');
 const busy = ref(false);
+const mappingBusy = ref(false);
 const message = ref('');
 const rows = ref<ImportTransaction[]>([]);
 const visibleCount = ref(25);
 const sessionId = ref(generateRandomUUID());
 
-const availableAccounts = computed(() => accountsStore.allVisiblePlainAccounts);
-const availableCategories = computed(() => Object.values(categoriesStore.allTransactionCategoriesMap).filter(category =>
+const cacheMatchesLedger = computed(() => accountsStore.accountListLedgerId === importLedgerId.value && categoriesStore.loadedLedgerId === importLedgerId.value);
+const availableAccounts = computed(() => accountsStore.accountListLedgerId === importLedgerId.value ? accountsStore.allVisiblePlainAccounts : []);
+const availableCategories = computed(() => categoriesStore.loadedLedgerId !== importLedgerId.value ? [] : Object.values(categoriesStore.allTransactionCategoriesMap).filter(category =>
     category.visible && category.parentId !== '0' && categoriesStore.allTransactionCategoriesMap[category.parentId]?.visible));
 const accountIds = computed(() => new Set(availableAccounts.value.map(account => account.id)));
 const chosen = computed(() => rows.value.filter(row => row.selected));
@@ -127,36 +131,47 @@ function ready(row: ImportTransaction): boolean {
 
 function selectProvider(value: 'alipay' | 'wechat'): void {
     if (busy.value) return;
+    ++previewGeneration;
     provider.value = value; file.value = null; password.value = ''; rows.value = []; message.value = '';
 }
 
 function close(): void {
+    ++previewGeneration;
     opened.value = false;
     password.value = '';
 }
 
 function selectFile(event: Event): void {
+    ++previewGeneration;
     file.value = (event.target as HTMLInputElement).files?.[0] ?? null;
     rows.value = []; message.value = ''; sessionId.value = generateRandomUUID();
 }
 
 async function parse(): Promise<void> {
     if (!file.value || busy.value) return;
+    if (ledgersStore.selectedLedgerId !== importLedgerId.value) { message.value = '账本已切换，请关闭后重新预览账单'; return; }
+    const generation = ++previewGeneration;
+    const ledgerId = importLedgerId.value;
+    const sourceFile = file.value;
+    const sourceProvider = provider.value;
     busy.value = true; message.value = '';
     try {
-        const [accounts] = await Promise.all([accountsStore.loadAllAccounts({ force: true, ledgerId: importLedgerId.value }).catch(error => {
+        const [accounts] = await Promise.all([accountsStore.loadAllAccounts({ force: true, ledgerId }).catch(error => {
             if (!error?.isUpToDate) throw error;
             return accountsStore.allAccounts;
-        }), categoriesStore.loadAllCategories({ force: true, ledgerId: importLedgerId.value }).catch(error => {
+        }), categoriesStore.loadAllCategories({ force: true, ledgerId }).catch(error => {
             if (!error?.isUpToDate) throw error;
         })]);
+        if (generation !== previewGeneration || ledgerId !== ledgersStore.selectedLedgerId) return;
         if (!accounts.length) throw new Error('请先创建当前账本账户');
-        const selectedFile = provider.value === 'alipay' && file.value.name.toLowerCase().endsWith('.zip')
-            ? await extractAlipayCsv(file.value, password.value) : file.value;
-        const type = provider.value === 'alipay' ? 'alipay_app_csv' : selectedFile.name.toLowerCase().endsWith('.xlsx') ? 'wechat_pay_app_xlsx' : 'wechat_pay_app_csv';
-        if (provider.value === 'alipay' && !selectedFile.name.toLowerCase().endsWith('.csv')) throw new Error('请选择支付宝 ZIP 或 CSV');
-        if (provider.value === 'wechat' && !/\.(xlsx|csv)$/i.test(selectedFile.name)) throw new Error('请选择微信支付 XLSX 或 CSV');
-        const response = await transactionsStore.parseImportTransaction({ ledgerId: importLedgerId.value, fileType: type, importFile: selectedFile });
+        const selectedFile = sourceProvider === 'alipay' && sourceFile.name.toLowerCase().endsWith('.zip')
+            ? await extractAlipayCsv(sourceFile, password.value) : sourceFile;
+        const type = sourceProvider === 'alipay' ? 'alipay_app_csv' : selectedFile.name.toLowerCase().endsWith('.xlsx') ? 'wechat_pay_app_xlsx' : 'wechat_pay_app_csv';
+        if (sourceProvider === 'alipay' && !selectedFile.name.toLowerCase().endsWith('.csv')) throw new Error('请选择支付宝 ZIP 或 CSV');
+        if (sourceProvider === 'wechat' && !/\.(xlsx|csv)$/i.test(selectedFile.name)) throw new Error('请选择微信支付 XLSX 或 CSV');
+        if (generation !== previewGeneration || ledgerId !== ledgersStore.selectedLedgerId) return;
+        const response = await transactionsStore.parseImportTransaction({ ledgerId, fileType: type, importFile: selectedFile });
+        if (generation !== previewGeneration || ledgerId !== ledgersStore.selectedLedgerId) return;
         rows.value = response.items.map((item, index) => {
             const row = ImportTransaction.of(item, index);
             row.selected = true;
@@ -165,32 +180,45 @@ async function parse(): Promise<void> {
         visibleCount.value = 25;
         message.value = rows.value.length ? `已解析 ${rows.value.length} 笔，请核对后导入` : '账单中没有可导入记录';
     } catch (error) {
+        if (generation !== previewGeneration || ledgerId !== ledgersStore.selectedLedgerId) return;
         message.value = `解析失败：${error instanceof Error ? error.message : '请检查文件格式与密码'}`;
     } finally { busy.value = false; }
 }
 
 function submit(): void {
-    if (busy.value || !chosen.value.length || invalidCount.value) return;
+    if (ledgersStore.selectedLedgerId !== importLedgerId.value) { message.value = '账本已切换，请关闭后重新预览账单'; return; }
+    if (busy.value || mappingBusy.value || !chosen.value.length || invalidCount.value) return;
     showConfirm(`确认将 ${chosen.value.length} 笔流水导入「${importLedgerName.value}」？重复导入会产生重复流水。`, () => void submitConfirmed());
 }
 
 async function submitConfirmed(): Promise<void> {
     if (ledgersStore.selectedLedgerId !== importLedgerId.value) { message.value = '账本已切换，请关闭后重新预览账单'; return; }
-    if (busy.value || !chosen.value.length || invalidCount.value) return;
+    if (busy.value || mappingBusy.value || !chosen.value.length || invalidCount.value) return;
+    const ledgerId = importLedgerId.value;
+    const ledgerName = importLedgerName.value;
+    const generation = previewGeneration;
     busy.value = true; message.value = '';
     try {
-        const count = await transactionsStore.importTransactions({ ledgerId: importLedgerId.value, transactions: chosen.value, clientSessionId: sessionId.value });
+        const count = await transactionsStore.importTransactions({ ledgerId, transactions: chosen.value, clientSessionId: sessionId.value });
+        if (generation !== previewGeneration || ledgerId !== ledgersStore.selectedLedgerId) return;
         accountsStore.updateAccountListInvalidState(true);
         transactionsStore.updateTransactionListInvalidState(true);
         overviewStore.updateTransactionOverviewInvalidState(true);
         statisticsStore.updateTransactionStatisticsInvalidState(true);
-        message.value = `已导入 ${count} 笔流水`;
+        message.value = `已向「${ledgerName}」导入 ${count} 笔流水`;
         rows.value = []; file.value = null; password.value = ''; sessionId.value = generateRandomUUID();
         emit('imported');
     } catch (error) {
+        if (generation !== previewGeneration) return;
         message.value = `导入失败：${error instanceof Error ? error.message : '请稍后重试'}`;
     } finally { busy.value = false; }
 }
+watch(() => ledgersStore.selectedLedgerId, () => {
+    if (!opened.value) return;
+    ++previewGeneration;
+    rows.value = [];
+    message.value = '账本已切换，请关闭后重新预览账单';
+});
 </script>
 
 <style scoped>

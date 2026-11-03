@@ -160,16 +160,20 @@ type LedgerDeletePreviewRequest struct {
 }
 
 type LedgerDeletePreviewResponse struct {
-	LedgerId               int64    `json:"ledgerId,string"`
-	LedgerName             string   `json:"ledgerName"`
-	ActiveMemberCount      int64    `json:"activeMemberCount"`
-	PendingInvitationCount int64    `json:"pendingInvitationCount"`
-	AccountCount           int64    `json:"accountCount"`
-	TransactionCount       int64    `json:"transactionCount"`
-	SavingsGoalCount       int64    `json:"savingsGoalCount"`
-	SavingsGoalFundCount   int64    `json:"savingsGoalFundCount"`
-	CanDelete              bool     `json:"canDelete"`
-	BlockingReasons        []string `json:"blockingReasons"`
+	LedgerId                 int64    `json:"ledgerId,string"`
+	LedgerName               string   `json:"ledgerName"`
+	ActiveMemberCount        int64    `json:"activeMemberCount"`
+	PendingInvitationCount   int64    `json:"pendingInvitationCount"`
+	AccountCount             int64    `json:"accountCount"`
+	TransactionCount         int64    `json:"transactionCount"`
+	SavingsGoalCount         int64    `json:"savingsGoalCount"`
+	SavingsGoalFundCount     int64    `json:"savingsGoalFundCount"`
+	MonthlyBudgetCount       int64    `json:"monthlyBudgetCount"`
+	TransactionTemplateCount int64    `json:"transactionTemplateCount"`
+	ScheduledOccurrenceCount int64    `json:"scheduledOccurrenceCount"`
+	AIReviewItemCount        int64    `json:"aiReviewItemCount"`
+	CanDelete                bool     `json:"canDelete"`
+	BlockingReasons          []string `json:"blockingReasons"`
 }
 
 // LedgerListRequest represents the parameters for listing visible ledgers.

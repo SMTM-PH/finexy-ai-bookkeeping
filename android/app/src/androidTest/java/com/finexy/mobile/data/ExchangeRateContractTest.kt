@@ -58,10 +58,10 @@ class ExchangeRateContractTest {
             seed.openHelper.writableDatabase; seed.close()
             android.database.sqlite.SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null,
                 android.database.sqlite.SQLiteDatabase.OPEN_READWRITE).use { old ->
-                old.execSQL("DROP TABLE exchange_rates"); old.version = 16
+                old.execSQL("DROP TABLE exchange_rates"); old.removeAIImageSchemaForTest(); old.version = 16
             }
             val migrated = Room.databaseBuilder(context, FinexyDatabase::class.java, name)
-                .addMigrations(FinexyDatabase.MIGRATION_16_17, FinexyDatabase.MIGRATION_17_18, FinexyDatabase.MIGRATION_18_19, FinexyDatabase.MIGRATION_19_20, FinexyDatabase.MIGRATION_20_21).build()
+                .addMigrations(FinexyDatabase.MIGRATION_16_17, FinexyDatabase.MIGRATION_17_18, FinexyDatabase.MIGRATION_18_19, FinexyDatabase.MIGRATION_19_20, FinexyDatabase.MIGRATION_20_21, FinexyDatabase.MIGRATION_21_22, FinexyDatabase.MIGRATION_22_23, FinexyDatabase.MIGRATION_23_24, FinexyDatabase.MIGRATION_24_25, FinexyDatabase.MIGRATION_25_26).build()
             try { assertTrue(migrated.dao().allExchangeRates().isEmpty()) } finally { migrated.close() }
         } finally { context.deleteDatabase(name) }
     }

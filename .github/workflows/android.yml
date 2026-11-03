@@ -1,18 +1,32 @@
 name: Android
 
 on:
+  workflow_call:
   push:
     paths:
       - "android/**"
       - ".github/workflows/android.yml"
+      - ".github/scripts/verify-android-*"
+      - ".github/scripts/android-report-candidate.py"
+      - ".github/scripts/tests/test_android_report_candidate.py"
+      - ".github/testdata/android-report-api-revisions.json"
+
   pull_request:
     paths:
       - "android/**"
       - ".github/workflows/android.yml"
+      - ".github/scripts/verify-android-*"
+      - ".github/scripts/android-report-candidate.py"
+      - ".github/scripts/tests/test_android_report_candidate.py"
+      - ".github/testdata/android-report-api-revisions.json"
+
+permissions:
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: android
@@ -23,8 +37,95 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: android-actions/setup-android@v4
-      - run: ./gradlew assembleDebug
+      - name: Verify Android candidate source and APK contracts
+        env:
+          FINEXY_REPORT_CANDIDATE_TEST_EVIDENCE: ${{ github.workspace }}/artifacts/android-candidate-contract/unit-fixtures
+        run: python3 ../.github/scripts/tests/test_android_report_candidate.py
+      - run: ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug :app:testDebugUnitTest
+      - name: Build and validate the isolated QA variant
+        run: ./gradlew -PfinexyIsolatedQa=true :app:assembleQa :app:assembleQaAndroidTest :app:lintQa :app:testQaUnitTest
       - uses: actions/upload-artifact@v4
         with:
-          name: finexy-mobile-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: finexy-mobile-qa-apk
+          path: |
+            android/app/build/outputs/apk/qa/app-qa.apk
+            android/app/build/outputs/apk/androidTest/qa/app-qa-androidTest.apk
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: finexy-mobile-validation-reports
+          path: |
+            android/app/build/reports/lint-results-debug.*
+            android/app/build/reports/lint-results-qa.*
+            android/app/build/reports/tests/testDebugUnitTest/**
+            android/app/build/reports/tests/testQaUnitTest/**
+            android/app/build/test-results/testDebugUnitTest/**
+            android/app/build/test-results/testQaUnitTest/**
+            artifacts/android-candidate-contract/**
+
+  device-tests:
+    name: Isolated Android instrumentation
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@v4
+        with:
+          name: finexy-mobile-qa-apk
+          path: android/app/build/outputs/apk
+      - name: Verify strict mandatory instrumentation parsers
+        run: |
+          python3 .github/scripts/verify-android-instrumentation.py --self-test --evidence-dir artifacts/first-iteration-android/protocol
+          python3 .github/scripts/verify-android-instrumentation.py --scope budget --self-test --evidence-dir artifacts/monthly-budget-android/protocol
+          python3 .github/scripts/verify-android-instrumentation.py --scope ai-review-navigation --self-test --evidence-dir artifacts/monthly-budget-android/ai-navigation-protocol
+          python3 .github/scripts/verify-android-instrumentation.py --scope budget-navigation --self-test --evidence-dir artifacts/monthly-budget-android/navigation-protocol
+      - name: Build disposable E2E service
+        run: docker build --build-arg SKIP_TESTS=true -t finexy-android-ci:${{ github.sha }} .
+      - name: Start isolated service with no mounts
+        run: |
+          docker run --rm -d --name finexy-android-ci-e2e -p 18086:8080 -e EBK_UUID_SERVER_ID=230 -e EBK_AUTH_ENABLE_REGISTER=true -e EBK_SERVER_ROOT_URL=http://10.0.2.2:18086/ finexy-android-ci:${{ github.sha }}
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:18086/healthz.json >/dev/null; then break; fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:18086/healthz.json | jq -e '.success == true'
+      - name: Start separate disposable monthly budget service
+        run: |
+          docker run --rm -d --name finexy-android-budget-e2e -p 18111:8080 -e EBK_UUID_SERVER_ID=232 -e EBK_AUTH_ENABLE_REGISTER=true -e EBK_SERVER_ROOT_URL=http://10.0.2.2:18111/ finexy-android-ci:${{ github.sha }}
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:18111/healthz.json >/dev/null; then break; fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:18111/healthz.json | jq -e '.success == true'
+      - name: Enable KVM on the disposable runner
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Validate on a fresh CI emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          avd-name: finexy-ci-disposable
+          force-avd-creation: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -port 5554
+          disable-animations: true
+          script: |
+            bash .github/scripts/verify-android-iteration.sh
+            bash .github/scripts/verify-android-budget.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: finexy-mobile-device-test-evidence
+          path: |
+            artifacts/first-iteration-android/**
+            artifacts/monthly-budget-android/**
+      - name: Clean up the disposable service
+        if: always()
+        run: docker rm -f finexy-android-ci-e2e finexy-android-budget-e2e || true
