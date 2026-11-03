@@ -23,12 +23,12 @@ uname -m
 
 飞牛 NAS 除了下面的 Compose 方式，也可以直接安装应用包：
 
-- 下载地址：[finexy-1.9.3-x86_64.fpk](https://github.com/SMTM-PH/finexy-ai-bookkeeping/releases/download/v1.9.3/finexy-1.9.3-x86_64.fpk)（约 27 MB，仅 AMD64）
-- 校验值：同目录 [SHA256SUMS.txt](https://github.com/SMTM-PH/finexy-ai-bookkeeping/releases/download/v1.9.3/SHA256SUMS.txt)，下载后执行 `sha256sum finexy-1.9.3-x86_64.fpk` 比对
+- 下载地址：[finexy-1.9.4-x86_64.fpk](https://github.com/SMTM-PH/finexy-ai-bookkeeping/releases/download/v1.9.4/finexy-1.9.4-x86_64.fpk)（约 27 MB，仅 AMD64）
+- 校验值：同目录 [SHA256SUMS.txt](https://github.com/SMTM-PH/finexy-ai-bookkeeping/releases/download/v1.9.4/SHA256SUMS.txt)，下载后执行 `sha256sum finexy-1.9.4-x86_64.fpk` 比对
 - 安装：fnOS「应用中心 → 手动安装」上传 FPK，选择存储空间；首次启动后数据目录 `/volN/@appdata/finexy/` 与配置 `/volN/@appconf/finexy/finexy.ini` 自动创建
 - 访问：点击桌面「Finexy 记账」图标，在浏览器新标签页打开 `http://NAS的IP:8080/`
 - 范围：FPK 只包含记账服务与 Web 资源，**不含独立 OCR 容器**，需要图片 OCR 时请用本文的 Compose 方式
-- 升级：覆盖安装前备份 `@appdata/finexy/data/`、`storage/` 与 `@appconf/finexy/finexy.ini`；若装过 `1.9.3-2`/`1.9.3-3` 历史测试构建，可能被判定为降级，需先备份再卸载重装
+- 升级：覆盖安装前备份 `@appdata/finexy/data/`、`storage/` 与 `@appconf/finexy/finexy.ini`；1.9.4 高于 `1.9.3` / `1.9.3-2` / `1.9.3-3`，理论上可直接覆盖安装，但 fnOS 版本比较规则官方未公开，升级前仍建议先备份
 
 打包源与故障说明见仓库 [packaging/fnos/README.md](../packaging/fnos/README.md)。
 
@@ -36,7 +36,7 @@ uname -m
 
 | 服务 | 公开镜像 |
 | --- | --- |
-| Finexy 记账服务 | `ph97/finexy-bookkeeping:1.9.3` |
+| Finexy 记账服务 | `ph97/finexy-bookkeeping:1.9.4` |
 | 本地 OCR 服务 | `ph97/finexy-bookkeeping:ocr-1.0-amd64` |
 
 两个镜像位于同一个公开仓库，通过不同标签区分，任何人都可以直接拉取。
@@ -77,7 +77,7 @@ chown -R 1000:1000 data log storage
 公开镜像不需要执行 `docker login`。在 NAS SSH 中验证镜像是否可读取：
 
 ```bash
-docker manifest inspect ph97/finexy-bookkeeping:1.9.3 >/dev/null
+docker manifest inspect ph97/finexy-bookkeeping:1.9.4 >/dev/null
 docker manifest inspect ph97/finexy-bookkeeping:ocr-1.0-amd64 >/dev/null
 ```
 
@@ -120,7 +120,7 @@ chmod 600 .env
 ```yaml
 services:
   bookkeeping:
-    image: ph97/finexy-bookkeeping:1.9.3
+    image: ph97/finexy-bookkeeping:1.9.4
     platform: linux/amd64
     restart: unless-stopped
     ports:
