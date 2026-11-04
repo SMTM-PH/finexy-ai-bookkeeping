@@ -68,22 +68,39 @@ try {
     console.log('PASS home original CNY/USD totals remain separate');
 
     await page.goto(`${base}/desktop#/statistics/transaction`, { waitUntil: 'networkidle' });
-    await page.getByLabel('收支小计币种', { exact: true }).selectOption('USD');
-    await page.waitForFunction(() => document.querySelector('.breakdown .donut')?.textContent?.includes('7.00'));
+    const reportPanel = page.getByTestId('ledger-report-panel');
+    await reportPanel.getByTestId('report-totals').waitFor();
+    await reportPanel.getByLabel('原币种筛选（可选）', { exact: true }).fill('USD');
+    await reportPanel.getByTestId('report-apply').click();
+    await page.waitForFunction(() => {
+        const totals = document.querySelector('[data-testid="report-totals"]');
+        return !!totals && totals.innerText.includes('USD') && !totals.innerText.includes('CNY');
+    });
+    const reportTotals = await reportPanel.getByTestId('report-totals').innerText();
+    assert.match(reportTotals, /USD\s+0\.00/, 'USD income stays zero');
+    assert.match(reportTotals, /USD\s+7\.00/, 'USD expense totals 7.00 in major units');
+    assert(!reportTotals.includes('CNY') && !reportTotals.includes('123.45'), 'selected original currency only, no cross-currency mixing');
+    await reportPanel.getByLabel('图表币种', { exact: true }).selectOption('USD');
+    await reportPanel.getByTestId('report-categories').waitFor();
+    assert.match(await reportPanel.getByTestId('report-categories').innerText(), /USD\s+7\.00/, 'chart follows the selected currency');
     await page.screenshot({ path: 'artifacts/first-iteration-20261003/desktop-usd-report.png', fullPage: true });
-    await page.getByRole('button', { name: '导出报表', exact: true }).click();
-    await page.getByRole('dialog').filter({ hasText: '确认导出报表' }).waitFor();
+    await reportPanel.getByRole('button', { name: '预览 CSV 导出', exact: true }).click();
+    const exportDialog = reportPanel.getByTestId('report-export-preview');
+    await exportDialog.waitFor();
     const downloadPromise = page.waitForEvent('download');
-    await page.getByRole('dialog').getByRole('button', { name: '确定', exact: true }).click();
+    await exportDialog.getByRole('checkbox', { name: '我已核对以上范围、笔数和金额', exact: true }).check();
+    await exportDialog.getByRole('button', { name: '确认并下载 CSV', exact: true }).click();
     const download = await downloadPromise;
     await mkdir('artifacts/desktop-currency', { recursive: true });
     const csvPath = 'artifacts/desktop-currency/synthetic-report.csv';
     await download.saveAs(csvPath);
     const csv = await readFile(csvPath, 'utf8');
-    assert.match(csv, /月份,币种,金额单位,收入,支出/);
-    assert.match(csv, /\d{4}-\d{2},USD,主货币单位,0\.00,7\.00/);
-    assert(!csv.includes(',700\n') && !csv.includes(',12345'), 'CSV uses major units and selected currency only');
-    console.log('PASS report chart, breakdown and confirmed CSV use USD without mixing or cents');
+    assert.match(csv, /report_version,snapshot_hash,/, 'snapshot CSV header');
+    assert.match(csv, /,source_currency,source_amount_minor,/, 'CSV carries the original currency and minor amount');
+    assert.match(csv, /,USD,700,/, 'USD row keeps its 700 minor units');
+    assert.match(csv, /,2,7\.00,/, 'USD row keeps 7.00 major units');
+    assert(!csv.includes('CNY') && !csv.includes('12345'), 'CSV contains only the filtered currency in major units, no other currency or raw cents');
+    console.log('PASS report totals, chart and confirmed CSV use USD without mixing or cents');
 
     await page.getByRole('button', { name: '切换当前账本', exact: true }).click();
     await page.getByRole('option').filter({ hasText: ledger.name }).click();
@@ -99,9 +116,14 @@ try {
     await page.goto(`${base}/desktop#/`, { waitUntil: 'networkidle' });
     await page.locator('.limit').waitFor();
     assert.match(await page.locator('.limit').innerText(), /未设置预算/);
-    await page.locator('.finance-tasks').getByText('账本周期计划', { exact: true }).waitFor();
-    assert.match(await page.locator('.finance-tasks').innerText(), /0 笔待确认/);
-    assert(!(await page.locator('.finance-tasks').innerText()).includes('AI 待复核'));
+    const pendingPanel = page.getByTestId('ledger-pending');
+    await pendingPanel.waitFor();
+    await page.waitForFunction(() => document.querySelector('[data-testid="ledger-pending"]')?.getAttribute('aria-busy') === 'false');
+    const pendingText = await pendingPanel.innerText();
+    assert(pendingText.includes(ledger.name), 'pending panel follows the selected ledger');
+    assert.match(pendingText, /0 项/, 'selected ledger has no pending entries');
+    assert.match(await page.getByTestId('pending-ai').innerText(), /AI 待复核[\s\S]*0 项/, 'no AI review entries for the selected ledger');
+    assert.match(await page.getByTestId('pending-periodic').innerText(), /周期待确认[\s\S]*0 项/, 'no periodic entries for the selected ledger');
     assert(!(await page.locator('main').innerText()).includes('待确认队列已清空'));
     console.log('PASS selected-ledger budget and owner plan management stay isolated from personal limits, queues and templates');
 
