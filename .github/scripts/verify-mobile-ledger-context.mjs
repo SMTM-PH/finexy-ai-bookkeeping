@@ -124,7 +124,7 @@ try {
     const writesBefore = requests.filter(item => item.method === 'POST').length;
     for (const path of ['/account/add', '/statistic/transaction', '/category/list', '/tag/list', '/template/add', '/schedule/list', '/user/data/management']) {
         await navigate(path);
-        await current().getByText('这是当前移动端的功能限制。账本成员权限仍由服务器核验。', { exact: true }).waitFor();
+        await current().getByText('当前移动版本支持此账本的收支、转账、流水管理、月度预算、模板、周期待确认和账本报告；账户管理和高级账户分析暂不支持。标签与附件遵守账本所有者边界。', { exact: true }).waitFor();
         assert.equal(await current().locator('textarea,input').count(), 0, `no editable default-ledger form at ${path}`);
     }
     assert.equal(requests.filter(item => item.method === 'POST').length, writesBefore);
@@ -194,7 +194,7 @@ try {
 
     await navigate('/transaction/add?noTransactionDraft=true&type=3');
     await current().locator('textarea').first().waitFor();
-    assert.equal(await current().getByText('这是当前移动端的功能限制。账本成员权限仍由服务器核验。').count(), 0);
+    assert.equal(await current().getByText('当前移动版本支持此账本的收支、转账、流水管理、月度预算、模板、周期待确认和账本报告；账户管理和高级账户分析暂不支持。标签与附件遵守账本所有者边界。').count(), 0);
     assert.equal(await page.getByText('checkmark_alt', { exact: true }).first().isVisible(), true);
     pass('default ledger retains its ordinary transaction form');
     assert.deepEqual(pageErrors, []);
