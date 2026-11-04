@@ -116,9 +116,14 @@ try {
     await page.goto(`${base}/desktop#/`, { waitUntil: 'networkidle' });
     await page.locator('.limit').waitFor();
     assert.match(await page.locator('.limit').innerText(), /未设置预算/);
-    await page.locator('.finance-tasks').getByText('账本周期计划', { exact: true }).waitFor();
-    assert.match(await page.locator('.finance-tasks').innerText(), /0 笔待确认/);
-    assert(!(await page.locator('.finance-tasks').innerText()).includes('AI 待复核'));
+    const pendingPanel = page.getByTestId('ledger-pending');
+    await pendingPanel.waitFor();
+    await page.waitForFunction(() => document.querySelector('[data-testid="ledger-pending"]')?.getAttribute('aria-busy') === 'false');
+    const pendingText = await pendingPanel.innerText();
+    assert(pendingText.includes(ledger.name), 'pending panel follows the selected ledger');
+    assert.match(pendingText, /0 项/, 'selected ledger has no pending entries');
+    assert.match(await page.getByTestId('pending-ai').innerText(), /AI 待复核[\s\S]*0 项/, 'no AI review entries for the selected ledger');
+    assert.match(await page.getByTestId('pending-periodic').innerText(), /周期待确认[\s\S]*0 项/, 'no periodic entries for the selected ledger');
     assert(!(await page.locator('main').innerText()).includes('待确认队列已清空'));
     console.log('PASS selected-ledger budget and owner plan management stay isolated from personal limits, queues and templates');
 
