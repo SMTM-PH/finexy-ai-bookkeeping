@@ -126,11 +126,25 @@ try {
     await panel.getByLabel('本月总额度', { exact: true }).fill('1600.00');
     await save(admin, a.id, 180000, 'USD', { [leaf.id]: 10000 });
     let conflictWrites = 0;
-    const countConflictWrite = request => { if (request.url().includes('/budget/monthly/set.json')) conflictWrites++; };
+    const countConflictWrite = request => { if (request.url().includes('/budget/monthly/set.json')) { conflictWrites++; console.log('BUDGET-POST', request.method(), request.url()); } };
     page.on('request', countConflictWrite);
+    page.on('response', response => { if (response.url().includes('/budget/monthly/set.json')) console.log('BUDGET-POST-RESP', response.status()); });
     const conflictResponse = page.waitForResponse(response => response.url().includes('/budget/monthly/set.json') && response.request().method() === 'POST');
     await panel.getByRole('button', { name: '保存本月额度', exact: true }).click();
-    assert.equal((await conflictResponse).status(), 409);
+    let conflictStatus;
+    try {
+        conflictStatus = (await conflictResponse).status();
+    } catch (error) {
+        console.log('BUDGET-CONFLICT-DIAG', JSON.stringify({
+            panelText: await panel.innerText(),
+            alerts: await panel.getByRole('alert').allInnerTexts(),
+            saveButtonDisabled: await panel.getByRole('button', { name: '保存本月额度', exact: true }).isDisabled(),
+            writes: conflictWrites,
+        }));
+        await page.screenshot({ path: `${output}/budget-conflict-failure.png`, fullPage: true });
+        throw error;
+    }
+    assert.equal(conflictStatus, 409);
     await panel.getByRole('alert').first().waitFor();
     assert.equal(await panel.getByLabel('本月总额度', { exact: true }).inputValue(), '1600.00');
     assert.equal(conflictWrites, 1, 'conflict cannot automatically retry a write');
