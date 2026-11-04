@@ -122,13 +122,21 @@ try {
     pass('selected ledger scopes overview, accounts, transaction history and detail');
 
     const writesBefore = requests.filter(item => item.method === 'POST').length;
-    for (const path of ['/account/add', '/statistic/transaction', '/category/list', '/tag/list', '/template/add', '/schedule/list', '/user/data/management']) {
+    for (const path of ['/account/add', '/category/list', '/tag/list', '/user/data/management']) {
         await navigate(path);
         await current().getByText('当前移动版本支持此账本的收支、转账、流水管理、月度预算、模板、周期待确认和账本报告；账户管理和高级账户分析暂不支持。标签与附件遵守账本所有者边界。', { exact: true }).waitFor();
         assert.equal(await current().locator('textarea,input').count(), 0, `no editable default-ledger form at ${path}`);
     }
     assert.equal(requests.filter(item => item.method === 'POST').length, writesBefore);
     pass('unsupported non-default deep links show a client limitation and issue no writes');
+
+    for (const path of ['/statistic/transaction', '/template/add', '/schedule/list']) {
+        await navigate(path);
+        assert.equal(await current().getByText('此账本的操作范围', { exact: true }).count(), 0, `supported mobile route ${path}`);
+    }
+    await navigate('/statistic/transaction');
+    await current().getByTestId('ledger-report-panel').waitFor();
+    pass('supported ledger routes stay available instead of showing the limitation');
 
     await navigate('/transaction/list');
     await current().getByText('Mobile separate expense', { exact: true }).waitFor();
