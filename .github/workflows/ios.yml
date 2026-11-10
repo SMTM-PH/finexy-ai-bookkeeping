@@ -1,0 +1,31 @@
+name: iOS development baseline
+
+on:
+  pull_request:
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Core API contract tests
+        run: swift test --package-path ios --scratch-path "$RUNNER_TEMP/finexy-ios-tests"
+      - name: Build iOS simulator app
+        run: >-
+          xcodebuild -project ios/Finexy.xcodeproj -scheme Finexy
+          -configuration Debug -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath "$RUNNER_TEMP/finexy-ios-derived"
+          CODE_SIGNING_ALLOWED=NO build

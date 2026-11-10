@@ -72,6 +72,7 @@ Finexy 是以**账本**为中心的自托管财务管理系统。你可以为个
 | Web / PWA | 完整桌面工作台，可通过浏览器访问或安装为 PWA |
 | Windows | Electron 安装版与便携版，连接自托管服务 |
 | Android | 原生 Kotlin + Jetpack Compose App，当前提供测试版 APK |
+| iOS（开发中） | 原生 SwiftUI 初始工程：登录、账本切换和流水读取；[开发说明](ios/README.md)，尚未发布安装包 |
 | Docker / NAS | AMD64 镜像，支持 Docker Compose、群晖和威联通 |
 | MCP | 可连接 Codex 等支持 MCP 的客户端进行记账和查询 |
 
