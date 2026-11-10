@@ -424,7 +424,9 @@ func startWebServer(c *core.CliContext) error {
 			apiV1Route.GET("/transactions/amounts.json", bindApi(api.Transactions.TransactionAmountsHandler, config))
 			apiV1Route.GET("/transactions/get.json", bindApi(api.Transactions.TransactionGetHandler, config))
 			apiV1Route.POST("/transactions/add.json", bindApi(api.Transactions.TransactionCreateHandler, config))
+			apiV1Route.POST("/transactions/add_durable.json", bindApi(api.Transactions.TransactionCreateDurableHandler, config))
 			apiV1Route.POST("/transactions/modify.json", bindApi(api.Transactions.TransactionModifyHandler, config))
+			apiV1Route.POST("/transactions/modify_preserving_metadata.json", bindApi(api.Transactions.TransactionModifyPreservingMetadataHandler, config))
 			apiV1Route.POST("/transactions/batch_update/category.json", bindApi(api.Transactions.TransactionBatchUpdateCategoriesHandler, config))
 			apiV1Route.POST("/transactions/batch_update/account.json", bindApi(api.Transactions.TransactionBatchUpdateAccountsHandler, config))
 			apiV1Route.POST("/transactions/batch_update/tag/add.json", bindApi(api.Transactions.TransactionBatchAddTagsHandler, config))
@@ -432,6 +434,7 @@ func startWebServer(c *core.CliContext) error {
 			apiV1Route.POST("/transactions/batch_update/tag/clear.json", bindApi(api.Transactions.TransactionBatchClearTagsHandler, config))
 			apiV1Route.POST("/transactions/move/all.json", bindApi(api.Transactions.TransactionMoveAllBetweenAccountsHandler, config))
 			apiV1Route.POST("/transactions/delete.json", bindApi(api.Transactions.TransactionDeleteHandler, config))
+			apiV1Route.POST("/transactions/delete_if_unchanged.json", bindApi(api.Transactions.TransactionDeleteIfUnchangedHandler, config))
 			apiV1Route.POST("/transactions/batch_delete.json", bindApi(api.Transactions.TransactionBatchDeleteHandler, config))
 
 			if config.EnableDataImport {

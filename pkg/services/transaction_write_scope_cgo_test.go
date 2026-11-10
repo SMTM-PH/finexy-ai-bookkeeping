@@ -11,6 +11,7 @@ import (
 
 	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/core"
 	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/datastore"
+	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/errs"
 	"github.com/SMTM-PH/finexy-ai-bookkeeping/pkg/models"
 )
 
@@ -522,4 +523,57 @@ func TestTransactionWriteScopeDefaultLegacyCompatibility(t *testing.T) {
 		require.Error(t, err, "legacy default-ledger deletion must not bypass the explicit ledger contract")
 		require.Equal(t, before, transactionWriteSnapshot(t))
 	})
+}
+
+func TestTransactionConditionalEditPreservesMetadataAndRejectsStaleSnapshot(t *testing.T) {
+	f := setupTransactionWriteFixture(t, 2, false)
+	transactionWriteSeedMetadata(t, f)
+	sess := occurrenceDB(t).NewSession(nil)
+	_, err := sess.ID(f.row.TransactionId).Cols("geo_latitude", "geo_longitude").
+		Update(&models.Transaction{GeoLatitude: 31.5, GeoLongitude: 120.25})
+	require.NoError(t, err)
+	require.NoError(t, sess.Close())
+	f.row = transactionWriteReadRow(t, f.row.TransactionId)
+
+	before := transactionWriteSnapshot(t)
+	context := transactionWriteContext(2)
+	token := f.row.EditToken()
+	require.Len(t, token, 64)
+	draft := f.edit()
+	draft.GeoLatitude, draft.GeoLongitude = 0, 0
+	draft.TransactionTime += 1000
+	snapshot := TransactionMetadataSnapshot{ExpectedEditToken: token}
+
+	err = Transactions.ModifyTransactionInLedger(context, 2, f.row.LedgerId, draft, false, 0,
+		nil, nil, nil, nil, snapshot)
+	require.NoError(t, err)
+	after := transactionWriteSnapshot(t)
+	current := transactionWriteReadRow(t, f.row.TransactionId)
+	require.Equal(t, draft.Amount, current.Amount)
+	require.Equal(t, draft.Comment, current.Comment)
+	require.Equal(t, f.row.GeoLatitude, current.GeoLatitude)
+	require.Equal(t, f.row.GeoLongitude, current.GeoLongitude)
+	require.Equal(t, before.pictures, after.pictures)
+	require.Len(t, after.tags, len(before.tags))
+	for i, index := range before.tags {
+		index.TransactionTime = current.TransactionTime
+		require.Equal(t, index, after.tags[i])
+	}
+
+	err = Transactions.ModifyTransactionInLedger(context, 2, f.row.LedgerId, f.edit(), false, 0,
+		nil, nil, nil, nil, snapshot)
+	require.ErrorIs(t, err, errs.ErrTransactionEditConflict)
+	require.Equal(t, after, transactionWriteSnapshot(t))
+
+	snapshot.ExpectedEditToken = current.EditToken()
+	err = Transactions.ModifyTransactionInLedger(context, 2, f.row.LedgerId, f.edit(), false, 0,
+		nil, []int64{transactionWriteExistingTag}, nil, nil, snapshot)
+	require.ErrorIs(t, err, errs.ErrParameterInvalid)
+	require.Equal(t, after, transactionWriteSnapshot(t))
+
+	err = Transactions.DeleteTransactionInLedger(context, 2, 1, f.row.LedgerId, f.row.TransactionId, token)
+	require.ErrorIs(t, err, errs.ErrTransactionEditConflict)
+	require.Equal(t, after, transactionWriteSnapshot(t))
+	require.NoError(t, Transactions.DeleteTransactionInLedger(context, 2, 1, f.row.LedgerId, f.row.TransactionId, current.EditToken()))
+	require.True(t, transactionWriteReadRow(t, f.row.TransactionId).Deleted)
 }

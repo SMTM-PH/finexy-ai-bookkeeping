@@ -22,6 +22,13 @@ final class AppSession: ObservableObject {
     @Published private(set) var hasLoaded = false
     @Published private(set) var nextCursor: String?
     @Published private(set) var lastReadAt: Date?
+    @Published private(set) var financialReadGeneration = UUID()
+    @Published private(set) var writeContextID = UUID()
+    @Published private(set) var ledgerRole: LedgerRole?
+    @Published private(set) var hasPendingCreation = false
+    @Published private(set) var pendingStorageError: String?
+    @Published private(set) var writeBusy = false
+    @Published private(set) var writeNotice: String?
     @Published var showAmounts = false
 
     private let store = KeychainStore()
@@ -30,13 +37,13 @@ final class AppSession: ObservableObject {
     private var authTask: Task<Void, Never>?
     private var dataTask: Task<Void, Never>?
     private var authGeneration = UUID()
-    private var dataGeneration = UUID()
     private var started = false
     private var needsRevalidation = false
     private var isInBackground = false
 
     var currentLedgerName: String { ledgers.first { $0.id == currentLedgerID }?.name ?? "账本待核验" }
     var displayName: String { user?.nickname.isEmpty == false ? user!.nickname : (user?.username ?? "") }
+    var canWrite: Bool { hasLoaded && ledgerRole?.canWrite == true }
 
     func start() {
         guard !started else { return }
@@ -47,6 +54,7 @@ final class AppSession: ObservableObject {
 
     func restore() {
         cancelAuthentication()
+        resetWriteContext()
         clearFinancialData()
         user = nil
         ledgers = []
@@ -173,6 +181,7 @@ final class AppSession: ObservableObject {
         self.user = user
         self.ledgers = ledgers
         currentLedgerID = ledgers.contains { $0.id == session.ledgerID } ? session.ledgerID : "0"
+        readPendingStatus()
         phase = .signedIn
         authError = nil
         needsRevalidation = false
@@ -180,7 +189,9 @@ final class AppSession: ObservableObject {
     }
 
     func chooseLedger(_ ledgerID: String) {
-        guard phase == .signedIn, ledgers.contains(where: { $0.id == ledgerID }) else { return }
+        guard phase == .signedIn, !writeBusy, ledgerID != currentLedgerID,
+              ledgers.contains(where: { $0.id == ledgerID }) else { return }
+        resetWriteContext()
         clearFinancialData()
         currentLedgerID = ledgerID
         showAmounts = false
@@ -190,15 +201,17 @@ final class AppSession: ObservableObject {
             do { try store.save(session) }
             catch { authError = "账本已切换，但未能保存此设备的选择。" }
         }
+        readPendingStatus()
         refresh()
     }
 
     @discardableResult
     func refresh() -> Task<Void, Never>? {
-        guard phase == .signedIn, let saved else { return nil }
+        guard phase == .signedIn, !writeBusy, let saved else { return nil }
         clearFinancialData()
+        readPendingStatus()
         dataBusy = true
-        let version = dataGeneration
+        let version = financialReadGeneration
         let ledgerID = currentLedgerID
         dataTask = Task { [weak self] in
             guard let self else { return }
@@ -208,11 +221,14 @@ final class AppSession: ObservableObject {
                 async let accountList = client.accounts(token: saved.token, ledgerID: ledgerID)
                 async let categoryList = client.categories(token: saved.token, ledgerID: ledgerID)
                 async let page = client.transactions(token: saved.token, ledgerID: ledgerID)
+                async let role = try? client.ledgerRole(token: saved.token, ledgerID: ledgerID)
                 let (verifiedBooks, accountRows, categoryRows, transactionPage) = try await (books, accountList, categoryList, page)
+                let verifiedRole = await role
                 try Task.checkCancellation()
-                guard self.dataGeneration == version else { return }
+                guard self.financialReadGeneration == version else { return }
                 guard verifiedBooks.contains(where: { $0.id == ledgerID }) else { throw SessionError.ledgerUnavailable }
                 self.ledgers = verifiedBooks
+                self.ledgerRole = verifiedRole
                 self.accounts = self.flattenAccounts(accountRows)
                 self.categories = self.flattenCategories(categoryRows)
                 self.transactions = self.unique(transactionPage.items)
@@ -220,19 +236,19 @@ final class AppSession: ObservableObject {
                 self.hasLoaded = true
                 self.lastReadAt = Date()
             } catch {
-                guard self.dataGeneration == version, !Task.isCancelled else { return }
+                guard self.financialReadGeneration == version, !Task.isCancelled else { return }
                 self.handleDataFailure(error)
             }
-            if self.dataGeneration == version { self.dataBusy = false }
+            if self.financialReadGeneration == version { self.dataBusy = false }
         }
         return dataTask
     }
 
     func loadMore() {
-        guard !dataBusy, phase == .signedIn, let saved, let cursor = nextCursor else { return }
+        guard !dataBusy, !writeBusy, phase == .signedIn, let saved, let cursor = nextCursor else { return }
         dataBusy = true
         dataError = nil
-        let version = dataGeneration
+        let version = financialReadGeneration
         let ledgerID = currentLedgerID
         dataTask = Task { [weak self] in
             guard let self else { return }
@@ -240,16 +256,164 @@ final class AppSession: ObservableObject {
                 let client = APIClient(server: try ServerAddress(rawValue: saved.server))
                 let page = try await client.transactions(token: saved.token, ledgerID: ledgerID, cursor: cursor)
                 try Task.checkCancellation()
-                guard self.dataGeneration == version else { return }
+                guard self.financialReadGeneration == version else { return }
                 self.transactions = self.unique(self.transactions + page.items)
                 self.nextCursor = page.nextTimeSequenceId.flatMap { $0 == "0" ? nil : $0 }
                 self.lastReadAt = Date()
             } catch {
-                guard self.dataGeneration == version, !Task.isCancelled else { return }
+                guard self.financialReadGeneration == version, !Task.isCancelled else { return }
                 self.handleDataFailure(error)
             }
-            if self.dataGeneration == version { self.dataBusy = false }
+            if self.financialReadGeneration == version { self.dataBusy = false }
         }
+    }
+
+    func monthlyReport(month: LedgerReportMonth, accountID: String? = nil, categoryID: String? = nil,
+                       types: [Int]? = nil, offset: Int = 0, snapshotHash: String? = nil) async throws -> LedgerReportSummary {
+        let context = try readContext()
+        let generation = financialReadGeneration
+        do {
+            let report = try await context.client.monthlyReport(
+                token: context.saved.token, ledgerID: context.ledgerID, month: month, accountID: accountID,
+                categoryID: categoryID, types: types, offset: offset, snapshotHash: snapshotHash)
+            try verifyContext(context.id)
+            guard financialReadGeneration == generation else { throw CancellationError() }
+            return report
+        } catch {
+            try verifyContext(context.id)
+            handleUnauthorized(error)
+            throw error
+        }
+    }
+
+    func transactionDetail(id: String, contextID: UUID) async throws -> TransactionDetail {
+        try verifyContext(contextID)
+        let context = try readContext()
+        do {
+            let detail = try await context.client.transaction(token: context.saved.token, ledgerID: context.ledgerID, id: id)
+            try verifyContext(contextID)
+            return detail
+        } catch {
+            try verifyContext(contextID)
+            handleUnauthorized(error)
+            throw error
+        }
+    }
+
+    func createTransaction(_ draft: TransactionDraft, contextID: UUID) async throws {
+        try await performWrite(contextID: contextID, notice: "流水已保存。") { context in
+            guard pendingStorageError == nil, !hasPendingCreation else { throw KeychainStore.StoreError.pendingExists }
+            try draft.validate(accounts: accounts, categories: categories, ledgerID: context.ledgerID)
+            let writeProtocol = try await context.client.requireDurableTransactionWrites(token: context.saved.token)
+            try verifyContext(context.id)
+            let request = TransactionCreateRequest(ledgerID: context.ledgerID, draft: draft,
+                                                   clientSessionID: UUID().uuidString, writeProtocol: writeProtocol)
+            try store.savePending(request, in: context.saved, ledgerID: context.ledgerID)
+            hasPendingCreation = true
+            try await sendCreation(request, in: context, firstAttempt: true)
+        }
+    }
+
+    func retryPendingCreation(contextID: UUID) async throws {
+        try await performWrite(contextID: contextID, notice: "原新增请求已确认。") { context in
+            guard let pending = try store.pending(in: context.saved, ledgerID: context.ledgerID),
+                  pending.ledgerID == context.ledgerID else { throw SessionError.pendingUnavailable }
+            try await sendCreation(pending, in: context, firstAttempt: false)
+        }
+    }
+
+    private func sendCreation(_ request: TransactionCreateRequest, in context: ReadContext, firstAttempt: Bool) async throws {
+        do {
+            _ = try await context.client.addTransaction(token: context.saved.token, request: request)
+        } catch {
+            if firstAttempt, (error as? APIError)?.isDefinitiveTransactionRejection == true {
+                try store.removePending(request, in: context.saved, ledgerID: context.ledgerID)
+            }
+            throw error
+        }
+        try store.removePending(request, in: context.saved, ledgerID: context.ledgerID)
+    }
+
+    func updateTransaction(_ detail: TransactionDetail, draft: TransactionDraft, contextID: UUID) async throws {
+        try await performWrite(contextID: contextID, notice: "流水已更新。") { context in
+            try draft.validate(accounts: accounts, categories: categories, ledgerID: context.ledgerID)
+            _ = try await context.client.modifyTransaction(token: context.saved.token, ledgerID: context.ledgerID,
+                                                           detail: detail, draft: draft)
+        }
+    }
+
+    func deleteTransaction(_ detail: TransactionDetail, contextID: UUID) async throws {
+        try await performWrite(contextID: contextID, notice: "流水已删除。") { context in
+            try await context.client.deleteTransaction(token: context.saved.token, ledgerID: context.ledgerID, detail: detail)
+        }
+    }
+
+    private struct ReadContext {
+        let id: UUID
+        let client: APIClient
+        let saved: SavedSession
+        let ledgerID: String
+    }
+
+    private func readContext() throws -> ReadContext {
+        guard phase == .signedIn, let saved else { throw CancellationError() }
+        return ReadContext(id: writeContextID, client: APIClient(server: try ServerAddress(rawValue: saved.server)),
+                           saved: saved, ledgerID: currentLedgerID)
+    }
+
+    private func verifyContext(_ id: UUID) throws {
+        try Task.checkCancellation()
+        guard id == writeContextID, phase == .signedIn else { throw CancellationError() }
+    }
+
+    private func performWrite(contextID: UUID, notice: String, action: (ReadContext) async throws -> Void) async throws {
+        try verifyContext(contextID)
+        guard canWrite, !writeBusy, !dataBusy else { throw SessionError.writeUnavailable }
+        let context = try readContext()
+        writeBusy = true
+        writeNotice = nil
+        do {
+            try await action(context)
+        } catch {
+            if writeContextID == context.id {
+                writeBusy = false
+                readPendingStatus()
+                handleUnauthorized(error)
+            }
+            throw error
+        }
+        guard writeContextID == context.id, phase == .signedIn else {
+            if saved?.server == context.saved.server, saved?.username == context.saved.username,
+               currentLedgerID == context.ledgerID {
+                readPendingStatus()
+            }
+            throw CancellationError()
+        }
+        writeBusy = false
+        writeNotice = notice
+        refresh()
+    }
+
+    private func readPendingStatus() {
+        guard let saved else { return }
+        do {
+            hasPendingCreation = try store.pending(in: saved, ledgerID: currentLedgerID) != nil
+            pendingStorageError = nil
+        } catch {
+            pendingStorageError = message(for: error)
+        }
+    }
+
+    private func resetWriteContext() {
+        writeContextID = UUID()
+        hasPendingCreation = false
+        pendingStorageError = nil
+        writeBusy = false
+        writeNotice = nil
+    }
+
+    private func handleUnauthorized(_ error: Error) {
+        if (error as? APIError)?.isUnauthorized == true { signOut(message: "登录已失效，请重新登录。") }
     }
 
     private func handleDataFailure(_ error: Error) {
@@ -260,6 +424,7 @@ final class AppSession: ObservableObject {
             transactions = []
             accounts = [:]
             categories = [:]
+            ledgerRole = nil
             nextCursor = nil
             hasLoaded = false
             lastReadAt = nil
@@ -269,6 +434,7 @@ final class AppSession: ObservableObject {
 
     func signOut(message: String? = nil) {
         cancelAuthentication()
+        resetWriteContext()
         clearFinancialData()
         saved = nil
         user = nil
@@ -289,6 +455,7 @@ final class AppSession: ObservableObject {
         // Invalidate login/2FA/restore too: a late background response must not
         // establish or persist a fresh session while the interface is hidden.
         cancelAuthentication()
+        resetWriteContext()
         clearFinancialData()
         showAmounts = false
         user = nil
@@ -312,12 +479,13 @@ final class AppSession: ObservableObject {
     }
 
     private func clearFinancialData() {
-        dataGeneration = UUID()
+        financialReadGeneration = UUID()
         dataTask?.cancel()
         dataTask = nil
         transactions = []
         accounts = [:]
         categories = [:]
+        ledgerRole = nil
         hasLoaded = false
         dataBusy = false
         dataError = nil
@@ -348,7 +516,7 @@ final class AppSession: ObservableObject {
         return result
     }
 
-    private func message(for error: Error) -> String {
+    func message(for error: Error) -> String {
         if let error = error as? APIError { return error.localizedDescription }
         if let error = error as? SessionError { return error.localizedDescription }
         if error is KeychainStore.StoreError { return error.localizedDescription }
@@ -360,11 +528,13 @@ final class AppSession: ObservableObject {
             default: return "无法连接服务器。请检查地址与网络后重试。"
             }
         }
+        if let error = error as? LocalizedError, let description = error.errorDescription { return description }
         return "未能读取服务器数据，请重试。"
     }
 
     private enum SessionError: LocalizedError {
         case insecureConsent, missingCredentials, identityChanged, invalidAuthentication, ledgerUnavailable
+        case pendingUnavailable, writeUnavailable
         var errorDescription: String? {
             switch self {
             case .insecureConsent: return "此地址使用 HTTP。请先确认明文传输提示，或改用 HTTPS。"
@@ -372,6 +542,8 @@ final class AppSession: ObservableObject {
             case .identityChanged: return "登录身份未通过核验，请重新登录。"
             case .invalidAuthentication: return "二步验证未完成，请重新登录。"
             case .ledgerUnavailable: return "此账本已不可访问。请切换账本或重试。"
+            case .pendingUnavailable: return "无法核对原新增请求，请重新读取当前账本。"
+            case .writeUnavailable: return "当前账本还不能写入。请核对账本权限和读取状态。"
             }
         }
     }

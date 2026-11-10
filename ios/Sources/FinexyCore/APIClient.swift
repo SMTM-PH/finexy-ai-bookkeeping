@@ -7,6 +7,8 @@ public enum APIError: Error, LocalizedError, Equatable, Sendable {
     case server(code: Int?, status: Int)
     case invalidCursor
     case ledgerMismatch
+    case unsupportedTransactionWrites
+    case transactionChanged
 
     public var isUnauthorized: Bool {
         switch self {
@@ -22,11 +24,17 @@ public enum APIError: Error, LocalizedError, Equatable, Sendable {
         case .invalidResponse: return "服务器返回的数据不完整或格式不受支持，请核对服务器地址与版本后重试。"
         case .invalidCursor: return "服务器分页信息异常，请刷新流水后重试。"
         case .ledgerMismatch: return "服务器返回的账本归属不一致，已停止显示数据。请重新选择账本。"
+        case .unsupportedTransactionWrites: return "记账需要 Finexy 服务端 1.9.4 或更新的正式版本。"
+        case .transactionChanged: return "此流水已发生变化。请重新打开详情核对后再操作。"
         case .httpStatus(let status):
             return Self.statusDescription(status)
         case .server(let code, let status):
             if let code, (201000...201002).contains(code) { return "账号或密码不正确，请核对后重试。" }
             if let code, (203000...203005).contains(code) { return "两步验证码或恢复码无效，请重新输入。" }
+            if code == 205042 { return APIError.transactionChanged.localizedDescription }
+            if code == 200004 { return "没有需要保存的更改。" }
+            if code == 205010 { return "此账户已有流水，无法新增期初余额。" }
+            if let code, (205017...205019).contains(code) { return "账本设置限制了此日期的写入，请核对记账时间。" }
             return Self.statusDescription(status)
         }
     }
@@ -139,12 +147,12 @@ public final class APIClient: @unchecked Sendable {
         return page
     }
 
-    private func validateLedgerID(_ id: String) throws {
+    func validateLedgerID(_ id: String) throws {
         guard Int64(id).map({ $0 >= 0 }) == true else { throw APIError.ledgerMismatch }
     }
 
-    private func request<Result: Decodable>(_ endpoint: String, method: String = "GET", token: String? = nil,
-                                             query: [String: String] = [:], body: [String: String]? = nil) async throws -> Result {
+    func request<Result: Decodable>(_ endpoint: String, method: String = "GET", token: String? = nil,
+                                     query: [String: String] = [:], body: (any Encodable)? = nil) async throws -> Result {
         let endpointURL = server.url.appendingPathComponent(endpoint)
         guard var components = URLComponents(url: endpointURL, resolvingAgainstBaseURL: false) else { throw APIError.invalidServerAddress }
         if !query.isEmpty { components.queryItems = query.keys.sorted().map { URLQueryItem(name: $0, value: query[$0]) } }

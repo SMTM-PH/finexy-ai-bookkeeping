@@ -156,6 +156,84 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(page.items.count, 1)
     }
 
+    func testMonthlyReportPreservesNaturalMonthScopeAndIntegerTotals() async throws {
+        let date = try XCTUnwrap(ISO8601DateFormatter().date(from: "2024-01-31T18:00:00Z"))
+        let zone = try XCTUnwrap(TimeZone(identifier: "Asia/Shanghai"))
+        let month = LedgerReportMonth(date: date, timeZone: zone)
+        XCTAssertEqual(month.startDate, "2024-02-01")
+        XCTAssertEqual(month.endDate, "2024-02-29")
+        XCTAssertEqual(month.moved(by: -2)?.startDate, "2023-12-01")
+
+        StubURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/finexy/api/v1/reports/query.json")
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer fixture")
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: self.bodyData(request)) as? [String: Any])
+            let query = try XCTUnwrap(body["query"] as? [String: Any])
+            XCTAssertEqual(query["ledgerId"] as? String, "9007199254740993")
+            XCTAssertEqual(query["startDate"] as? String, "2024-02-01")
+            XCTAssertEqual(query["endDate"] as? String, "2024-02-29")
+            XCTAssertEqual(query["timezone"] as? String, "Asia/Shanghai")
+            XCTAssertEqual(query["hidden"] as? String, "exclude")
+            XCTAssertEqual((query["accounts"] as? [String: Any])?["ids"] as? [String], ["23"])
+            return (200, Self.reportResponse())
+        }
+        let report = try await client.monthlyReport(token: "fixture", ledgerID: "9007199254740993", month: month, accountID: "23")
+        XCTAssertEqual(report.totals.first?.incomeMinor, 9_007_199_254_740_993)
+        XCTAssertEqual(report.details.first?.source?.amountMinor, 9_007_199_254_740_993)
+        XCTAssertEqual(report.matchedCount, 1)
+        XCTAssertNil(report.nextOffset)
+    }
+
+    func testMonthlyReportRejectsCrossLedgerIncompleteAndHiddenResponses() async throws {
+        let date = try XCTUnwrap(ISO8601DateFormatter().date(from: "2024-02-01T12:00:00Z"))
+        let zone = try XCTUnwrap(TimeZone(identifier: "Asia/Shanghai"))
+        let month = LedgerReportMonth(date: date, timeZone: zone)
+        let responses: [(Data, APIError)] = [
+            (Self.reportResponse(ledger: "42"), .ledgerMismatch),
+            (Self.reportResponse(complete: false), .invalidResponse),
+            (Self.reportResponse(hidden: true), .invalidResponse),
+        ]
+        for (data, expected) in responses {
+            StubURLProtocol.handler = { _ in (200, data) }
+            do {
+                _ = try await client.monthlyReport(token: "fixture", ledgerID: "9007199254740993", month: month, accountID: "23")
+                XCTFail("Expected report rejection")
+            } catch let error as APIError {
+                XCTAssertEqual(error, expected)
+            }
+        }
+    }
+
+    func testMonthlyReportContinuationRequiresTheSameSnapshot() async throws {
+        let date = try XCTUnwrap(ISO8601DateFormatter().date(from: "2024-02-01T12:00:00Z"))
+        let zone = try XCTUnwrap(TimeZone(identifier: "Asia/Shanghai"))
+        let month = LedgerReportMonth(date: date, timeZone: zone)
+        let hash = String(repeating: "f", count: 64)
+        StubURLProtocol.handler = { request in
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: self.bodyData(request)) as? [String: Any])
+            XCTAssertEqual(body["offset"] as? Int, 50)
+            XCTAssertEqual(body["expectedSnapshotHash"] as? String, hash)
+            return (200, Self.reportResponse(offset: 50, matchedCount: 51))
+        }
+        let page = try await client.monthlyReport(token: "fixture", ledgerID: "9007199254740993", month: month,
+                                                   accountID: "23", offset: 50, snapshotHash: hash)
+        XCTAssertEqual(page.matchedCount, 51)
+        XCTAssertEqual(page.details.count, 1)
+        XCTAssertNil(page.nextOffset)
+
+        StubURLProtocol.handler = { _ in
+            (200, Self.reportResponse(offset: 50, matchedCount: 51, hash: String(repeating: "a", count: 64)))
+        }
+        do {
+            _ = try await client.monthlyReport(token: "fixture", ledgerID: "9007199254740993", month: month,
+                                               accountID: "23", offset: 50, snapshotHash: hash)
+            XCTFail("Expected changed snapshot rejection")
+        } catch let error as APIError {
+            XCTAssertEqual(error, .invalidResponse)
+        }
+    }
+
     func testMoneyUsesHundredthsEvenForJPYAndInt64Extremes() {
         let locale = Locale(identifier: "en_US")
         XCTAssertEqual(MoneyFormatter.format(minorUnits: 12345, currency: "JPY", locale: locale), "JPY 123.45")
@@ -172,6 +250,155 @@ final class APIClientTests: XCTestCase {
         for invalid in ["example.test", "ftp://example.test", "https://user:password@example.test", "https://example.test?a=1", "https://example.test#settings", "https://example.test/../other", "https://example.test:0", "https://example.test:65536"] {
             XCTAssertThrowsError(try ServerAddress(rawValue: invalid))
         }
+    }
+
+    func testDurableCreationUsesStableStringIDsAndIntegerAmounts() async throws {
+        let draft = TransactionDraft(type: .transfer, categoryID: "44", time: 1794100000, utcOffset: 480,
+                                     sourceAccountID: "0", destinationAccountID: "9223372036854775807",
+                                     sourceAmount: 0, destinationAmount: 9_999_999_999_999)
+        StubURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/finexy/api/v1/systems/version.json")
+            return (200, Data(#"{"success":true,"result":{"version":"","transactionCreateProtocol":"durable-receipt-v1"}}"#.utf8))
+        }
+        let writeProtocol = try await client.requireDurableTransactionWrites(token: "fixture")
+        XCTAssertEqual(writeProtocol, .dedicated)
+        let original = TransactionCreateRequest(ledgerID: "42", draft: draft, clientSessionID: "ios-fixture-uuid",
+                                                writeProtocol: writeProtocol)
+        let persisted = try JSONDecoder().decode(TransactionCreateRequest.self, from: JSONEncoder().encode(original))
+        XCTAssertEqual(persisted, original)
+        StubURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/finexy/api/v1/transactions/add_durable.json")
+            XCTAssertEqual(request.httpMethod, "POST")
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: self.bodyData(request)) as? [String: Any])
+            XCTAssertEqual(body["ledgerId"] as? String, "42")
+            XCTAssertEqual(body["clientSessionId"] as? String, "ios-fixture-uuid")
+            XCTAssertEqual(body["destinationAccountId"] as? String, "9223372036854775807")
+            XCTAssertEqual(body["destinationAmount"] as? Int64, 9_999_999_999_999)
+            XCTAssertEqual(body["sourceAccountId"] as? String, "0")
+            XCTAssertEqual(body["sourceAmount"] as? Int, 0)
+            XCTAssertEqual(body["type"] as? Int, 4)
+            return (200, Self.transactionDetailResponse(ledger: "42", editable: false))
+        }
+        let first = try await client.addTransaction(token: "fixture", request: original)
+        let replay = try await client.addTransaction(token: "fixture", request: persisted)
+        XCTAssertEqual(first.id, replay.id)
+    }
+
+    func testOlderAndPrereleaseServersCannotReceiveCreationRequests() async {
+        let draft = TransactionDraft(type: .expense, categoryID: "11", time: 1794100000, utcOffset: 480,
+                                     sourceAccountID: "1", sourceAmount: -123)
+        let submission = TransactionCreateRequest(ledgerID: "0", draft: draft, clientSessionID: "ios-fixture-uuid",
+                                                  writeProtocol: .releaseCompatible)
+        for version in ["", "1.9.3", "1.9.4-rc.1"] {
+            StubURLProtocol.handler = { request in
+                XCTAssertEqual(request.url?.path, "/finexy/api/v1/systems/version.json")
+                return (200, Data("""
+                {"success":true,"result":{"version":"\(version)"}}
+                """.utf8))
+            }
+            do {
+                _ = try await client.addTransaction(token: "fixture", request: submission)
+                XCTFail("Expected unsupported server")
+            } catch let error as APIError {
+                XCTAssertEqual(error, .unsupportedTransactionWrites)
+                XCTAssertTrue(error.isDefinitiveTransactionRejection)
+            } catch { XCTFail("Unexpected error type") }
+        }
+        StubURLProtocol.handler = { _ in (200, Data(#"{"success":true,"result":{"version":"1.9.4"}}"#.utf8)) }
+        do { try await client.requireDurableTransactionWrites(token: "fixture") }
+        catch { XCTFail("Release supports durable add") }
+    }
+
+    func testConditionalEditPreservesUnmanagedFieldsByOmissionAndHandlesConflict() async throws {
+        let editToken = String(repeating: "a", count: 64)
+        StubURLProtocol.handler = { request in
+            if request.httpMethod == "GET" {
+                XCTAssertEqual(request.url?.path, "/finexy/api/v1/transactions/get.json")
+                let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+                XCTAssertEqual(query.first(where: { $0.name == "ledgerId" })?.value, "42")
+                return (200, Self.transactionDetailResponse(ledger: "42", editable: true, editToken: editToken))
+            }
+            XCTAssertEqual(request.url?.path, "/finexy/api/v1/transactions/modify_preserving_metadata.json")
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: self.bodyData(request)) as? [String: Any])
+            XCTAssertEqual(body["expectedEditToken"] as? String, editToken)
+            XCTAssertEqual(body["id"] as? String, "9223372036854775807")
+            XCTAssertEqual(body["sourceAmount"] as? Int, -123)
+            XCTAssertNil(body["tagIds"])
+            XCTAssertNil(body["pictureIds"])
+            XCTAssertNil(body["geoLocation"])
+            return (409, Data(#"{"success":false,"errorCode":205042,"result":false}"#.utf8))
+        }
+        let detail = try await client.transaction(token: "fixture", ledgerID: "42", id: "9223372036854775807")
+        XCTAssertTrue(detail.canEdit)
+        let draft = TransactionDraft(type: .expense, categoryID: "11", time: 1794100000, utcOffset: 480,
+                                     sourceAccountID: "1", sourceAmount: -123)
+        do {
+            _ = try await client.modifyTransaction(token: "fixture", ledgerID: "42", detail: detail, draft: draft)
+            XCTFail("Expected conflict")
+        } catch let error as APIError {
+            XCTAssertEqual(error.localizedDescription, APIError.transactionChanged.localizedDescription)
+            XCTAssertFalse(error.isAmbiguousTransactionWrite)
+        }
+    }
+
+    func testConditionalDeleteSendsTheObservedTokenWithoutLegacyFallback() async throws {
+        let editToken = String(repeating: "e", count: 64)
+        StubURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/finexy/api/v1/transactions/get.json")
+            return (200, Self.transactionDetailResponse(ledger: "42", editable: true, editToken: editToken))
+        }
+        let detail = try await client.transaction(token: "fixture", ledgerID: "42", id: "9223372036854775807")
+        StubURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/finexy/api/v1/transactions/delete_if_unchanged.json")
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: self.bodyData(request)) as? [String: String])
+            XCTAssertEqual(body, ["ledgerId": "42", "id": "9223372036854775807", "expectedEditToken": editToken])
+            return (404, Data())
+        }
+        do {
+            try await client.deleteTransaction(token: "fixture", ledgerID: "42", detail: detail)
+            XCTFail("Expected no route on an older node")
+        } catch let error as APIError {
+            XCTAssertEqual(error, .httpStatus(404))
+        }
+    }
+
+    func testOlderDetailsCanDeleteButCannotModifyAndRoleIsAuthoritative() async throws {
+        StubURLProtocol.handler = { request in
+            if request.url?.path.hasSuffix("member/list.json") == true {
+                return (200, Data(#"{"success":true,"result":[{"ledgerId":"42","role":1,"status":1},{"ledgerId":"42","role":4,"status":1,"isCurrentUser":true}]}"#.utf8))
+            }
+            if request.httpMethod == "POST" {
+                XCTAssertEqual(request.url?.path, "/finexy/api/v1/transactions/delete.json")
+                let body = try XCTUnwrap(JSONSerialization.jsonObject(with: self.bodyData(request)) as? [String: String])
+                XCTAssertEqual(body, ["ledgerId": "42", "id": "9223372036854775807"])
+                return (200, Data(#"{"success":true,"result":true}"#.utf8))
+            }
+            return (200, Self.transactionDetailResponse(ledger: "42", editable: true))
+        }
+        let viewer = try await client.ledgerRole(token: "fixture", ledgerID: "42")
+        XCTAssertEqual(viewer, .viewer)
+        XCTAssertFalse(viewer.canWrite)
+        let detail = try await client.transaction(token: "fixture", ledgerID: "42", id: "9223372036854775807")
+        XCTAssertFalse(detail.canEdit)
+        XCTAssertTrue(detail.canDelete)
+        try await client.deleteTransaction(token: "fixture", ledgerID: "42", detail: detail)
+    }
+
+    func testMoneyEntryParsesExactAmountsAndRejectsExcessPrecision() {
+        let locale = Locale(identifier: "de_DE")
+        XCTAssertEqual(MoneyFormatter.parseMinorUnits("−12,30", locale: locale), -1230)
+        XCTAssertEqual(MoneyFormatter.parseMinorUnits("12.3", locale: locale), 1230)
+        XCTAssertEqual(MoneyFormatter.parseMinorUnits("９９９９９９９９９９９,９９", locale: locale), 9_999_999_999_999)
+        for invalid in ["", ".", "0,001", "1.000,00", "100000000000", "2e1", "²"] {
+            XCTAssertNil(MoneyFormatter.parseMinorUnits(invalid, locale: locale), invalid)
+        }
+    }
+
+    private static func transactionDetailResponse(ledger: String, editable: Bool, editToken: String? = nil) -> Data {
+        let tokenField = editToken.map { ",\"editToken\":\"\($0)\"" } ?? ""
+        return Data("""
+        {"success":true,"result":{"id":"9223372036854775807","ledgerId":"\(ledger)","timeSequenceId":"9007199254740994","type":3,"time":1794100000,"utcOffset":480,"categoryId":"11","sourceAccountId":"1","sourceAmount":123,"hideAmount":false,"comment":"fixture","editable":\(editable)\(tokenField)}}
+        """.utf8)
     }
 
     private func bodyData(_ request: URLRequest) throws -> Data {
@@ -193,6 +420,19 @@ final class APIClientTests: XCTestCase {
     private static func transactionResponse(ledger: String, cursor: String) -> Data {
         Data("""
         {"success":true,"result":{"items":[{"id":"9223372036854775807","ledgerId":"\(ledger)","timeSequenceId":"9007199254740994","type":3,"time":1794100000,"utcOffset":480,"categoryId":"0","sourceAccountId":"1","sourceAmount":9223372036854775807,"hideAmount":true,"comment":"fixture"}],"nextTimeSequenceId":"\(cursor)","totalCount":1}}
+        """.utf8)
+    }
+
+    private static func reportResponse(ledger: String = "9007199254740993", complete: Bool = true, hidden: Bool = false,
+                                       offset: Int = 0, matchedCount: Int = 1, hash: String = String(repeating: "f", count: 64)) -> Data {
+        let money = #"{"currency":"JPY","income":"9007199254740993","expense":"0","net":"9007199254740993"}"#
+        return Data("""
+        {"success":true,"result":{
+          "query":{"ledgerId":"\(ledger)","startDate":"2024-02-01","endDate":"2024-02-29","timezone":"Asia/Shanghai","types":[1,2,3,4],"accounts":{"ids":["23"],"mode":"include","includeDescendants":false},"hidden":"exclude"},
+          "dataComplete":\(complete),"offset":\(offset),"returnedCount":1,"detailsComplete":\(offset == 0 && matchedCount == 1),"snapshotHash":"\(hash)","matchedCount":\(matchedCount),"nextOffset":null,
+          "details":[{"id":"42","type":2,"date":"2024-02-29","categoryId":"9","categoryName":"收入","source":{"accountId":"23","accountName":"现金","currency":"JPY","amount":"9007199254740993"},"destination":null,"hidden":\(hidden),"comment":"fixture","adjustment":"0"}],
+          "totals":[\(money)],"categories":[{"key":"9","name":"收入","count":\(matchedCount),"money":[\(money)]}]
+        }}
         """.utf8)
     }
 }

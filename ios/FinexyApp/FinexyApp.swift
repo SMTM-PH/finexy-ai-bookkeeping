@@ -16,23 +16,32 @@ struct FinexyApp: App {
             RootView()
                 .environmentObject(session)
                 .tint(FinexyStyle.action)
-                .accessibilityHidden(scenePhase != .active)
-                .overlay {
-                    if scenePhase != .active {
-                        ZStack {
-                            Color(.systemBackground).ignoresSafeArea()
-                            Label("Finexy", systemImage: "lock.fill").font(.title2.weight(.semibold))
-                        }
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("Finexy 隐私保护")
-                    }
-                }
+                .modifier(PrivacyShield())
                 .task { session.start() }
                 .onChange(of: scenePhase) { _, value in
                     if value == .background { session.protectInBackground() }
                     if value == .active { session.resumeIfNeeded() }
                 }
         }
+    }
+}
+
+struct PrivacyShield: ViewModifier {
+    @Environment(\.scenePhase) private var scenePhase
+
+    func body(content: Content) -> some View {
+        content
+            .accessibilityHidden(scenePhase != .active)
+            .overlay {
+                if scenePhase != .active {
+                    ZStack {
+                        Color(.systemBackground).ignoresSafeArea()
+                        Label("Finexy", systemImage: "lock.fill").font(.title2.weight(.semibold))
+                    }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Finexy 隐私保护")
+                }
+            }
     }
 }
 
@@ -61,8 +70,12 @@ private struct RootView: View {
             LoginView()
         case .signedIn:
             TabView {
+                OverviewView()
+                    .tabItem { Label("总览", systemImage: "chart.bar.xaxis") }
                 TransactionListView()
                     .tabItem { Label("流水", systemImage: "list.bullet.rectangle") }
+                AccountsView()
+                    .tabItem { Label("账户", systemImage: "wallet.bifold") }
                 SettingsView()
                     .tabItem { Label("设置", systemImage: "gearshape") }
             }
@@ -103,7 +116,7 @@ private struct LoginView: View {
             Form {
                 Section {
                     BrandMark().padding(.vertical, 8)
-                    Text("连接自己的服务器，查看当前账本。")
+                    Text("连接自己的服务器，查看账本并记录日常收支。")
                         .foregroundStyle(.secondary)
                 }
                 .listRowBackground(Color.clear)
@@ -180,7 +193,7 @@ private struct LoginView: View {
                             .disabled(session.authBusy)
                     }
                 } footer: {
-                    Text("登录凭据仅存入此设备的钥匙串，密码不会保存。本版支持查看流水；记账、AI 和离线同步将分阶段接入。")
+                    Text("登录凭据保存在此设备的钥匙串。密码仅用于本次登录。")
                 }
             }
             .disabled(session.authBusy)
@@ -249,12 +262,13 @@ private struct SettingsView: View {
                         .frame(minHeight: 44).disabled(session.dataBusy)
                 }
                 Section("iOS 开发版") {
-                    Text("已接入服务器登录、二步验证、账本切换和流水分页读取。")
-                    Text("本版暂不支持新增或编辑流水、AI/OCR、账单导入、预算和离线同步。现有账目可继续在 Web 或 Android 管理。")
+                    Text("支持流水记账、账户查询和月度报告。写入时需要连接服务器。")
+                    Text("账户设置、AI/OCR、账单导入和预算可在 Web 或 Android 使用。")
                         .foregroundStyle(.secondary)
                 }
                 Section {
-                    Button("退出登录", role: .destructive) { confirmSignOut = true }.frame(minHeight: 44)
+                    Button("退出登录", role: .destructive) { confirmSignOut = true }
+                        .frame(minHeight: 44).disabled(session.writeBusy)
                 }
             }
             .navigationTitle("设置")

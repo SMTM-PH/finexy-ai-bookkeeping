@@ -28,7 +28,7 @@
         <true/>
     </dict>
     <key>NSLocalNetworkUsageDescription</key>
-    <string>连接你配置的局域网 Finexy 服务器，读取当前账号的账本和流水。</string>
+    <string>连接你配置的局域网 Finexy 服务器，读取账本并提交你确认的记账操作。</string>
     <key>UIApplicationSceneManifest</key>
     <dict>
         <key>UIApplicationSupportsMultipleScenes</key>

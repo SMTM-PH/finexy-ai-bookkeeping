@@ -1,17 +1,19 @@
 # Finexy iOS
 
-原生 SwiftUI 客户端开发基线，复用 Finexy Go REST API。本轮从服务端读取数据，不修改账目。
+Finexy 原生 SwiftUI 客户端，连接自托管 Go 服务。当前开发版本为 0.2.0。
 
 ## 当前范围
 
 - 自托管服务器地址配置，支持反向代理子路径。
 - 账号密码登录、TOTP 和恢复码两步验证。
 - 系统钥匙串保存最终会话；冷启动重新核验用户与可访问账本。
-- 默认个人账本与其他账本切换、流水游标分页、流水详情、下拉刷新。
-- 真实账户币种、分类、转账双侧金额、退款与金额隐藏语义。
+- 默认个人账本与共享账本切换、流水分页和详情。记账权限来自当前账本的成员角色，修改与删除还核对单笔流水的权限。
+- 在线新增支出、收入、退款、收入冲回、账户间转账、外部转入和外部转出。默认个人账本可录入期初余额，受服务端账户状态限制。
+- 支持对符合条件的流水进行编辑和确认删除。外部转账可新增和查看。使用本分支服务端时，编辑保留已有标签、图片和位置，编辑与删除都会拒绝过期的流水详情。
+- 账户列表、余额及账户明细，支持按自然月浏览收支、分类和流水。报告按原币种计算并排除服务端标为隐藏的流水。
 - 原生深浅主题、系统字号、VoiceOver 标签、进入后台时隐私遮罩。
 
-这不是 Android 全功能的移植或已发布安装包。新增/编辑流水、离线写入与同步、账户管理、预算、报告、AI/OCR、附件、账本成员管理均未在 iOS 接入。当前没有服务端令牌自动续期，过期后重新登录；退出仅清除本设备会话，不宣称撤销所有设备令牌。
+新增需要提供持久写入回执的服务端。单版本部署的 Finexy 1.9.4 正式版也支持新增。编辑需要本分支新增的条件编辑接口。账户和分类管理、预算、AI/OCR、附件管理、账单导入、账本成员管理与离线同步仍可按对应平台的支持情况在 Web 或 Android 使用。会话过期后需重新登录，退出会移除此设备保存的会话。
 
 ## 工程
 
@@ -53,19 +55,9 @@ xcodebuild -project ios/Finexy.xcodeproj -scheme Finexy \
   -derivedDataPath /tmp/finexy-ios-derived CODE_SIGNING_ALLOWED=NO build
 ```
 
-本机已使用 Xcode 27.2 完成标准 XCTest 和 iOS Simulator 目标编译。当前 `simctl list runtimes` 为空，尚未安装 iOS 模拟器运行时，因此未启动 App 做设备界面验收。可在 Xcode 中下载 iOS Simulator 运行时，再选择 iPhone 模拟器运行。
+GitHub Actions 的 iOS 工作流运行核心测试和模拟器构建。真机签名、完整 VoiceOver 和系统适配验收、归档及商店发布需单独完成。
 
-首次设备验收须验证：普通/两步登录、恢复码、HTTP 同意、反向代理子路径、无权限与令牌失效、分页末页、快速切换账本与账号、隐藏金额、外部转账及跨币种、深浅主题、最大字号、横屏、VoiceOver、后台快照。本轮不声称这些设备场景已经验收。App 图标、正式签名、归档和发布仍待补齐。
-
-2026-11-08 本机验证记录：
-
-- `swift build --package-path ios --scratch-path /tmp/finexy-ios-core-build` 通过。
-- 完整 Xcode 环境中，`swift test --package-path ios --scratch-path /tmp/finexy-ios-xcode-tests` 通过，10 项 XCTest、0 失败。
-- 上述 `xcodebuild` 命令通过，`BUILD SUCCEEDED`，生成 arm64 / x86_64 模拟器 App：`/tmp/finexy-ios-derived/Build/Products/Debug-iphonesimulator/Finexy.app`。
-- 两个一次性本机 HTTP 服务验证跨源 302：默认及注入 session 均拒绝跳转，目标服务没有收到请求。未访问真实财务服务。
-- `AppSession.swift` 与 `KeychainStore.swift` 基于真实 macOS SDK 的类型检查通过；全部 App Swift 文件语法检查及工程/Info plist 格式检查通过。
-- 已加入独立的 `.github/workflows/ios.yml`，在 macOS runner 执行核心测试与 iOS 模拟器目标编译；尚未推送或触发远程 CI。
-- 本机完整日志保存在被 Git 忽略的 `artifacts/ios-native-baseline/`。
+2026-11-10 本机验证通过 19 项 Swift XCTest、启用 CGO 的 Go 全量测试、iOS Simulator 构建与无签名的 iOS Release 编译。iPhone 18 Pro（iOS 27.2）连接一次性本机 Go/SQLite 服务，完成登录、账本切换、月报与账户报告、金额隐私、只读权限，以及丢回包后跨进程恢复新增、编辑与删除。数据库核对确认重试仅入账一次，删除后余额恢复。服务端专项也验证了过期详情不能覆盖或删除其他客户端更新过的流水。
 
 ## 数据合同
 
@@ -73,6 +65,7 @@ xcodebuild -project ios/Finexy.xcodeproj -scheme Finexy \
 - ID 与游标保留字符串，金额使用 Int64；所有币种固定按 100 倍定点存储，不按 ISO 币种小数位改变缩放。
 - 默认账本 `0` 由客户端补入，服务端账本列表不包含它。每次读取明确传 `ledgerId`。
 - 只有成功 envelope 且存在完整 `result` 才能展示数据；失败不当成空账本或零余额。
-- 密码和 2FA challenge 不持久化，最终令牌只保存在 `WhenUnlockedThisDeviceOnly` 的钥匙串项中；不记录财务内容或令牌日志。
+- 密码和 2FA challenge 仅用于当前登录流程。最终令牌与已提交、待核对的新增请求分别保存在 `WhenUnlockedThisDeviceOnly` 钥匙串项。
+- 新增先保存不可变请求与稳定编号，再发送给服务器。结果未知时，返回同一服务器、账号和账本，使用“重试原请求”核对。保存成功后独立刷新流水和余额。
 
 接口依据：`pkg/models/auth_response.go`、`pkg/models/transaction.go`、`pkg/models/account.go`、`pkg/utils/api.go` 与现有 Android API 实现。界面遵循 `docs/UI_UX_DESIGN.md` 的品牌、状态、账本隔离及金额语义。

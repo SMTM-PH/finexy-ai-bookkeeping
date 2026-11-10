@@ -10,7 +10,7 @@ Finexy 包含 Go 服务端、Vue Web/PWA、Electron、OCR 和原生 Android。
 | --- | --- |
 | `pkg/`、`cmd/` | Go 服务端 |
 | `src/` | Vue Web/PWA |
-| `ios/` | 原生 SwiftUI 初始客户端、FinexyCore Swift 包；范围与验证限制见 `ios/README.md` |
+| `ios/` | 原生 SwiftUI 在线记账客户端、FinexyCore Swift 包；范围与服务端接口要求见 `ios/README.md` |
 | `desktop/`、`ocr-service/` | Electron、OCR |
 | `android/app/src/main/java/com/finexy/mobile/` | Android 界面；`data/` 为 API、Room、同步与备份 |
 | `android/app/src/androidTest/`、`android/app/src/debug/` | 自动化测试、非导出的测试宿主 |

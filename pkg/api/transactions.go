@@ -1200,6 +1200,9 @@ func (a *TransactionsApi) TransactionGetHandler(c *core.WebContext) (any, *errs.
 	}
 	transactionTagIds := allTransactionTagIds[transaction.TransactionId]
 	transactionResp := transaction.ToTransactionInfoResponse(transactionTagIds, transactionEditable)
+	if transactionEditable {
+		transactionResp.EditToken = transaction.EditToken()
+	}
 
 	if !transactionGetReq.TrimAccount {
 		if sourceAccount := accountMap[transaction.AccountId]; sourceAccount != nil {
@@ -1230,12 +1233,24 @@ func (a *TransactionsApi) TransactionGetHandler(c *core.WebContext) (any, *errs.
 
 // TransactionCreateHandler saves a new transaction by request parameters for current user
 func (a *TransactionsApi) TransactionCreateHandler(c *core.WebContext) (any, *errs.Error) {
+	return a.createTransaction(c, false)
+}
+
+// TransactionCreateDurableHandler requires a persistent receipt key.
+func (a *TransactionsApi) TransactionCreateDurableHandler(c *core.WebContext) (any, *errs.Error) {
+	return a.createTransaction(c, true)
+}
+
+func (a *TransactionsApi) createTransaction(c *core.WebContext, requireKey bool) (any, *errs.Error) {
 	var transactionCreateReq models.TransactionCreateRequest
 	err := c.ShouldBindJSON(&transactionCreateReq)
 
 	if err != nil {
 		log.Warnf(c, "[transactions.TransactionCreateHandler] parse request failed, because %s", err.Error())
 		return nil, errs.NewIncompleteOrIncorrectSubmissionError(err)
+	}
+	if requireKey && (transactionCreateReq.ClientSessionId == "" || len(transactionCreateReq.ClientSessionId) > 128) {
+		return nil, errs.ErrParameterInvalid
 	}
 
 	clientTimezone, err := c.GetClientTimezone()
@@ -1403,12 +1418,25 @@ func (a *TransactionsApi) TransactionCreateHandler(c *core.WebContext) (any, *er
 
 // TransactionModifyHandler saves an existed transaction by request parameters for current user
 func (a *TransactionsApi) TransactionModifyHandler(c *core.WebContext) (any, *errs.Error) {
+	return a.modifyTransaction(c, false)
+}
+
+// TransactionModifyPreservingMetadataHandler conditionally edits financial fields.
+func (a *TransactionsApi) TransactionModifyPreservingMetadataHandler(c *core.WebContext) (any, *errs.Error) {
+	return a.modifyTransaction(c, true)
+}
+
+func (a *TransactionsApi) modifyTransaction(c *core.WebContext, preserveMetadata bool) (any, *errs.Error) {
 	var transactionModifyReq models.TransactionModifyRequest
 	err := c.ShouldBindJSON(&transactionModifyReq)
 
 	if err != nil {
 		log.Warnf(c, "[transactions.TransactionModifyHandler] parse request failed, because %s", err.Error())
 		return nil, errs.NewIncompleteOrIncorrectSubmissionError(err)
+	}
+	if preserveMetadata != (transactionModifyReq.ExpectedEditToken != "") ||
+		(preserveMetadata && (len(transactionModifyReq.TagIds) > 0 || len(transactionModifyReq.PictureIds) > 0 || transactionModifyReq.GeoLocation != nil)) {
+		return nil, errs.ErrParameterInvalid
 	}
 
 	clientTimezone, err := c.GetClientTimezone()
@@ -1471,6 +1499,9 @@ func (a *TransactionsApi) TransactionModifyHandler(c *core.WebContext) (any, *er
 	if transaction.LedgerId != transactionModifyReq.LedgerId || (postingUid != uid && transaction.RecorderUid != uid) {
 		return nil, errs.ErrTransactionNotFound
 	}
+	if preserveMetadata && transaction.EditToken() != transactionModifyReq.ExpectedEditToken {
+		return nil, errs.ErrTransactionEditConflict
+	}
 
 	if transaction.Type == models.TRANSACTION_DB_TYPE_TRANSFER_IN {
 		log.Warnf(c, "[transactions.TransactionModifyHandler] cannot modify transaction \"id:%d\" for user \"uid:%d\", because transaction type is transfer in", transactionModifyReq.Id, uid)
@@ -1520,6 +1551,10 @@ func (a *TransactionsApi) TransactionModifyHandler(c *core.WebContext) (any, *er
 	}
 
 	transactionPictureIds := a.transactionPictures.GetTransactionPictureIds(transactionPictureInfos)
+	if preserveMetadata {
+		tagIds = transactionTagIds
+		pictureIds = transactionPictureIds
+	}
 	if postingUid != uid {
 		if !services.TransactionObjectIdsEqual(tagIds, transactionTagIds) {
 			return nil, errs.ErrTransactionTagNotFound
@@ -1550,7 +1585,10 @@ func (a *TransactionsApi) TransactionModifyHandler(c *core.WebContext) (any, *er
 		newTransaction.RelatedAccountAmount = transactionModifyReq.DestinationAmount
 	}
 
-	if transactionModifyReq.GeoLocation != nil {
+	if preserveMetadata {
+		newTransaction.GeoLongitude = transaction.GeoLongitude
+		newTransaction.GeoLatitude = transaction.GeoLatitude
+	} else if transactionModifyReq.GeoLocation != nil {
 		newTransaction.GeoLongitude = transactionModifyReq.GeoLocation.Longitude
 		newTransaction.GeoLatitude = transactionModifyReq.GeoLocation.Latitude
 	}
@@ -1641,7 +1679,7 @@ func (a *TransactionsApi) TransactionModifyHandler(c *core.WebContext) (any, *er
 	}
 
 	err = a.transactions.ModifyTransactionInLedger(c, uid, transactionModifyReq.LedgerId, newTransaction, changeToTransfer, len(transactionTagIds), addTransactionTagIds, removeTransactionTagIds, addTransactionPictureIds, removeTransactionPictureIds,
-		services.TransactionMetadataSnapshot{TagIds: tagIds, PictureIds: pictureIds})
+		services.TransactionMetadataSnapshot{TagIds: tagIds, PictureIds: pictureIds, ExpectedEditToken: transactionModifyReq.ExpectedEditToken})
 
 	if err != nil {
 		log.Errorf(c, "[transactions.TransactionModifyHandler] failed to update transaction \"id:%d\" for user \"uid:%d\", because %s", transactionModifyReq.Id, uid, err.Error())
@@ -2336,12 +2374,24 @@ func (a *TransactionsApi) TransactionMoveAllBetweenAccountsHandler(c *core.WebCo
 
 // TransactionDeleteHandler deletes an existed transaction by request parameters for current user
 func (a *TransactionsApi) TransactionDeleteHandler(c *core.WebContext) (any, *errs.Error) {
+	return a.deleteTransaction(c, false)
+}
+
+// TransactionDeleteIfUnchangedHandler deletes the version shown in detail.
+func (a *TransactionsApi) TransactionDeleteIfUnchangedHandler(c *core.WebContext) (any, *errs.Error) {
+	return a.deleteTransaction(c, true)
+}
+
+func (a *TransactionsApi) deleteTransaction(c *core.WebContext, conditional bool) (any, *errs.Error) {
 	var transactionDeleteReq models.TransactionDeleteRequest
 	err := c.ShouldBindJSON(&transactionDeleteReq)
 
 	if err != nil {
 		log.Warnf(c, "[transactions.TransactionDeleteHandler] parse request failed, because %s", err.Error())
 		return nil, errs.NewIncompleteOrIncorrectSubmissionError(err)
+	}
+	if conditional != (transactionDeleteReq.ExpectedEditToken != "") {
+		return nil, errs.ErrParameterInvalid
 	}
 
 	clientTimezone, err := c.GetClientTimezone()
@@ -2382,6 +2432,9 @@ func (a *TransactionsApi) TransactionDeleteHandler(c *core.WebContext) (any, *er
 	if transaction.LedgerId != transactionDeleteReq.LedgerId || (postingUid != uid && transaction.RecorderUid != uid) {
 		return nil, errs.ErrTransactionNotFound
 	}
+	if conditional && transaction.EditToken() != transactionDeleteReq.ExpectedEditToken {
+		return nil, errs.ErrTransactionEditConflict
+	}
 
 	if transaction.Type == models.TRANSACTION_DB_TYPE_TRANSFER_IN {
 		log.Warnf(c, "[transactions.TransactionDeleteHandler] cannot delete transaction \"id:%d\" for user \"uid:%d\", because transaction type is transfer in", transactionDeleteReq.Id, uid)
@@ -2401,7 +2454,7 @@ func (a *TransactionsApi) TransactionDeleteHandler(c *core.WebContext) (any, *er
 		return nil, errs.ErrCannotDeleteTransactionWithThisTransactionTime
 	}
 
-	err = a.transactions.DeleteTransactionInLedger(c, uid, postingUid, transactionDeleteReq.LedgerId, transactionDeleteReq.Id)
+	err = a.transactions.DeleteTransactionInLedger(c, uid, postingUid, transactionDeleteReq.LedgerId, transactionDeleteReq.Id, transactionDeleteReq.ExpectedEditToken)
 
 	if err != nil {
 		log.Errorf(c, "[transactions.TransactionDeleteHandler] failed to delete transaction \"id:%d\" for user \"uid:%d\", because %s", transactionDeleteReq.Id, uid, err.Error())

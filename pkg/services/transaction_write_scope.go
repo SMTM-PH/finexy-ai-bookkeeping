@@ -22,8 +22,9 @@ type transactionWriteScope struct {
 // TransactionMetadataSnapshot is the complete requested association set, used
 // to reject stale or changed private metadata without silently clearing it.
 type TransactionMetadataSnapshot struct {
-	TagIds     []int64
-	PictureIds []int64
+	TagIds            []int64
+	PictureIds        []int64
+	ExpectedEditToken string
 }
 
 // TransactionObjectIdsEqual compares association sets; their order is not part
@@ -61,6 +62,17 @@ func resolveTransactionWriteScope(c core.Context, actor, ownerUid, ledgerId int6
 	return &transactionWriteScope{actor: actor, ledger: ledger}, nil
 }
 
+// Lock in ledger-first order before reading a row for conditional writes.
+// A no-op update acquires a write lock on all supported providers.
+func (scope *transactionWriteScope) lockTransactionForConditionalWrite(sess *xorm.Session, id int64) error {
+	if err := authorizeImportLedger(sess, scope.actor, scope.ledger); err != nil {
+		return err
+	}
+	_, err := sess.ID(id).Where("uid=? AND ledger_id=? AND deleted=?", scope.ledger.OwnerUid, scope.ledger.LedgerId, false).
+		SetExpr("updated_unix_time", "updated_unix_time").Update(&models.Transaction{})
+	return err
+}
+
 // authorize uses the existing financial transaction, not another session.
 // The ledger/member lock and live account checks also cover stale API preflight.
 func (scope *transactionWriteScope) authorize(sess *xorm.Session, row *models.Transaction) error {
@@ -87,6 +99,12 @@ func (scope *transactionWriteScope) authorize(sess *xorm.Session, row *models.Tr
 }
 
 func (scope *transactionWriteScope) authorizeMetadataChanges(sess *xorm.Session, row *models.Transaction, addTags, removeTags, addPictures, removePictures []int64) error {
+	if scope.metadata != nil && scope.metadata.ExpectedEditToken != "" {
+		if len(addTags)+len(removeTags)+len(addPictures)+len(removePictures) > 0 {
+			return errs.ErrParameterInvalid
+		}
+		return nil
+	}
 	if scope.actor == scope.ledger.OwnerUid {
 		return nil
 	}

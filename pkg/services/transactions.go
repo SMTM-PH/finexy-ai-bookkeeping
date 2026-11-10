@@ -1127,7 +1127,13 @@ func (s *TransactionService) modifyTransaction(c core.Context, transaction *mode
 		}
 	}
 
+	preserveMetadata := scope.metadata != nil && scope.metadata.ExpectedEditToken != ""
 	err := s.UserDataDB(transaction.Uid).DoTransaction(c, func(sess *xorm.Session) error {
+		if preserveMetadata {
+			if err := scope.lockTransactionForConditionalWrite(sess, transaction.TransactionId); err != nil {
+				return err
+			}
+		}
 		// Get and verify current transaction
 		oldTransaction := &models.Transaction{}
 		has, err := sess.ID(transaction.TransactionId).Where("uid=? AND deleted=?", transaction.Uid, false).Get(oldTransaction)
@@ -1143,6 +1149,13 @@ func (s *TransactionService) modifyTransaction(c core.Context, transaction *mode
 		}
 		if transaction.Uid != oldTransaction.Uid || transaction.LedgerId != oldTransaction.LedgerId {
 			return errs.ErrTransactionNotFound
+		}
+		if preserveMetadata {
+			if oldTransaction.EditToken() != scope.metadata.ExpectedEditToken {
+				return errs.ErrTransactionEditConflict
+			}
+			transaction.GeoLatitude = oldTransaction.GeoLatitude
+			transaction.GeoLongitude = oldTransaction.GeoLongitude
 		}
 		if err := authorizeTransactionAccounts(sess, transaction); err != nil {
 			return err
@@ -1445,7 +1458,7 @@ func (s *TransactionService) modifyTransaction(c core.Context, transaction *mode
 					return err
 				}
 			}
-		} else if len(transactionTagIndexes) == 0 && currentTagIdsCount > 0 && modifyTransactionTime {
+		} else if (preserveMetadata || currentTagIdsCount > 0) && modifyTransactionTime {
 			tagIndexUpdateModel := &models.TransactionTagIndex{
 				TransactionTime: transaction.TransactionTime,
 			}
@@ -2114,10 +2127,16 @@ func (s *TransactionService) DeleteTransaction(c core.Context, uid int64, transa
 
 // DeleteTransactionInLedger verifies the actor, requested ledger and live row
 // in the same transaction that deletes associations and reverses balances.
-func (s *TransactionService) DeleteTransactionInLedger(c core.Context, actor, ownerUid, ledgerId, transactionId int64) error {
+func (s *TransactionService) DeleteTransactionInLedger(c core.Context, actor, ownerUid, ledgerId, transactionId int64, expectedEditToken ...string) error {
 	scope, err := resolveTransactionWriteScope(c, actor, ownerUid, ledgerId)
 	if err != nil {
 		return err
+	}
+	if len(expectedEditToken) > 1 {
+		return errs.ErrParameterInvalid
+	}
+	if len(expectedEditToken) == 1 && expectedEditToken[0] != "" {
+		scope.metadata = &TransactionMetadataSnapshot{ExpectedEditToken: expectedEditToken[0]}
 	}
 	return s.deleteTransaction(c, ownerUid, transactionId, scope)
 }
@@ -2144,7 +2163,13 @@ func (s *TransactionService) deleteTransaction(c core.Context, uid int64, transa
 		DeletedUnixTime: now,
 	}
 
+	conditional := scope.metadata != nil && scope.metadata.ExpectedEditToken != ""
 	return s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
+		if conditional {
+			if err := scope.lockTransactionForConditionalWrite(sess, transactionId); err != nil {
+				return err
+			}
+		}
 		// Get and verify current transaction
 		oldTransaction := &models.Transaction{}
 		has, err := sess.ID(transactionId).Where("uid=? AND deleted=?", uid, false).Get(oldTransaction)
@@ -2156,6 +2181,9 @@ func (s *TransactionService) deleteTransaction(c core.Context, uid int64, transa
 		}
 		if err := scope.authorize(sess, oldTransaction); err != nil {
 			return err
+		}
+		if conditional && oldTransaction.EditToken() != scope.metadata.ExpectedEditToken {
+			return errs.ErrTransactionEditConflict
 		}
 		if oldTransaction.SavingsGoalFundId > 0 {
 			return errs.ErrTransactionTypeInvalid

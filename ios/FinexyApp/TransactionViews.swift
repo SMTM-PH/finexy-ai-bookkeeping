@@ -4,6 +4,9 @@ import SwiftUI
 struct TransactionListView: View {
     @EnvironmentObject private var session: AppSession
     @State private var showLedgers = false
+    @State private var showEditor = false
+    @State private var confirmRetry = false
+    @State private var retryError: String?
     @State private var path: [String] = []
 
     var body: some View {
@@ -21,7 +24,10 @@ struct TransactionListView: View {
                             Image(systemName: "chevron.down").accessibilityHidden(true)
                         }
                         .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .disabled(session.writeBusy)
                     .accessibilityLabel("切换账本，当前为" + session.currentLedgerName)
                     Text("全部日期 · 已读取 \(session.transactions.count) 笔")
                         .font(.footnote).foregroundStyle(.secondary)
@@ -31,6 +37,31 @@ struct TransactionListView: View {
                     }
                 }
 
+                if let notice = session.writeNotice {
+                    Section { Label(notice, systemImage: "checkmark.circle") }
+                }
+                if let storageError = session.pendingStorageError {
+                    Section {
+                        InlineError(message: storageError)
+                        Button("重新读取当前账本") { session.refresh() }.frame(minHeight: 44)
+                    }
+                } else if session.hasPendingCreation {
+                    Section {
+                        Label("有一笔新增流水待核对", systemImage: "exclamationmark.circle")
+                        Text("服务器可能已收到原请求。核对时会使用原账本和原请求编号。")
+                            .font(.footnote).foregroundStyle(.secondary)
+                        if let retryError { InlineError(message: retryError) }
+                        if session.writeBusy {
+                            ProgressView("正在核对原请求…").frame(minHeight: 44)
+                        } else if session.canWrite {
+                            Button("重试原请求") { confirmRetry = true }
+                                .frame(minHeight: 44)
+                                .disabled(session.dataBusy)
+                        } else if session.ledgerRole != nil {
+                            Text("需要恢复此账本的记账权限后才能核对。").font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
+                }
                 if let error = session.dataError {
                     Section {
                         InlineError(message: error)
@@ -41,11 +72,24 @@ struct TransactionListView: View {
                         if session.dataBusy { ProgressView("正在读取当前账本…").frame(minHeight: 80) }
                         else { Button("读取当前账本") { session.refresh() }.frame(minHeight: 44) }
                     }
-                } else if session.transactions.isEmpty {
+                }
+                if session.hasLoaded && session.ledgerRole == nil {
                     Section {
-                        ContentUnavailableView("当前账本暂无流水", systemImage: "tray", description: Text("可在 Web 或 Android 记录账目，再下拉刷新。"))
+                        InlineError(message: "暂时无法核验此账本的记账权限。")
+                        Button("重新核验权限") { session.refresh() }.frame(minHeight: 44)
                     }
-                } else {
+                }
+                if session.hasLoaded && session.transactions.isEmpty {
+                    Section {
+                        ContentUnavailableView {
+                            Label("当前账本暂无流水", systemImage: "tray")
+                        } description: {
+                            Text(session.canWrite ? "在此账本记录第一笔流水。" : "有记账权限的成员可以添加流水。")
+                        } actions: {
+                            if allowsCreation { Button("新增流水") { showEditor = true }.frame(minHeight: 44) }
+                        }
+                    }
+                } else if session.hasLoaded {
                     Section("流水") {
                         ForEach(session.transactions) { transaction in
                             NavigationLink(value: transaction.id) {
@@ -66,12 +110,20 @@ struct TransactionListView: View {
             }
             .navigationTitle("流水")
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
                     Button { session.showAmounts.toggle() } label: {
                         Image(systemName: session.showAmounts ? "eye" : "eye.slash")
                             .frame(minWidth: 44, minHeight: 44)
                     }
                     .accessibilityLabel(session.showAmounts ? "隐藏金额与备注" : "显示金额与备注")
+                    if session.canWrite {
+                        Button { showEditor = true } label: {
+                            Image(systemName: "plus").frame(minWidth: 44, minHeight: 44)
+                        }
+                        .accessibilityLabel("新增流水")
+                        .accessibilityIdentifier("transaction.add")
+                        .disabled(!allowsCreation)
+                    }
                 }
             }
             .refreshable { await session.refresh()?.value }
@@ -83,13 +135,38 @@ struct TransactionListView: View {
                 }
             }
             .sheet(isPresented: $showLedgers) { LedgerPickerView() }
-            .onChange(of: session.currentLedgerID) { _, _ in path = [] }
+            .sheet(isPresented: $showEditor) { TransactionEditorView(contextID: session.writeContextID) }
+            .confirmationDialog("核对此账本的原新增请求？", isPresented: $confirmRetry, titleVisibility: .visible) {
+                Button("重试原请求") {
+                    let contextID = session.writeContextID
+                    Task {
+                        retryError = nil
+                        do { try await session.retryPendingCreation(contextID: contextID) }
+                        catch is CancellationError { return }
+                        catch { retryError = session.message(for: error) }
+                    }
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("将在「\(session.currentLedgerName)」使用已保存的原请求。")
+            }
+            .onChange(of: session.currentLedgerID) { _, _ in
+                path = []
+                showEditor = false
+                confirmRetry = false
+                retryError = nil
+            }
             .onChange(of: session.hasLoaded) { _, loaded in if !loaded { path = [] } }
         }
     }
+
+    private var allowsCreation: Bool {
+        session.canWrite && !session.dataBusy && !session.writeBusy &&
+            !session.hasPendingCreation && session.pendingStorageError == nil
+    }
 }
 
-private struct LedgerPickerView: View {
+struct LedgerPickerView: View {
     @EnvironmentObject private var session: AppSession
     @Environment(\.dismiss) private var dismiss
     @State private var search = ""
@@ -121,6 +198,7 @@ private struct LedgerPickerView: View {
                         }
                         .frame(minHeight: 44)
                     }
+                    .disabled(session.writeBusy)
                     .accessibilityLabel(ledger.name + (ledger.id == session.currentLedgerID ? "，正在使用" : "，切换到此账本"))
                 }
                 if filtered.isEmpty {
@@ -141,6 +219,7 @@ private struct LedgerPickerView: View {
                 }
             }
         }
+        .modifier(PrivacyShield())
     }
 }
 
@@ -169,13 +248,24 @@ private struct TransactionRow: View {
     }
 }
 
-private struct TransactionDetailView: View {
+struct TransactionDetailView: View {
     @EnvironmentObject private var session: AppSession
+    @Environment(\.dismiss) private var dismiss
+    @State private var detail: TransactionDetail?
+    @State private var isLoadingActions = false
+    @State private var error: String?
+    @State private var resultUnknown = false
+    @State private var showEditor = false
+    @State private var confirmDisclosure = false
+    @State private var confirmDelete = false
+
     let transaction: TransactionRecord
 
-    private var privateContent: Bool { transaction.hideAmount || !session.showAmounts }
+    private var displayedTransaction: TransactionRecord { detail?.record ?? transaction }
+    private var privateContent: Bool { displayedTransaction.hideAmount || !session.showAmounts }
 
     var body: some View {
+        let transaction = displayedTransaction
         List {
             Section {
                 Label(TransactionPresentation.typeName(transaction), systemImage: TransactionPresentation.symbol(transaction))
@@ -202,12 +292,122 @@ private struct TransactionDetailView: View {
             }
             Section {
                 if transaction.hideAmount { Text("此流水在服务器设置为隐藏金额。") }
-                Text("当前 iOS 版本仅支持查看流水。编辑和删除请使用 Web 或 Android。")
             }
             .font(.footnote).foregroundStyle(.secondary)
+            if session.canWrite && transaction.editable == true {
+                Section("操作") { writeActions }
+            }
         }
         .navigationTitle("流水详情")
         .navigationBarTitleDisplayMode(.inline)
+        .task(id: transaction.id) { await loadActions() }
+        .sheet(isPresented: $showEditor) {
+            if let detail {
+                TransactionEditorView(contextID: session.writeContextID, detail: detail)
+            }
+        }
+        .alert("编辑时显示隐藏金额和备注？", isPresented: $confirmDisclosure) {
+            Button("显示并编辑") { showEditor = true }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("原始内容会在编辑表单中显示。")
+        }
+        .alert("删除这笔流水？", isPresented: $confirmDelete) {
+            Button("删除流水", role: .destructive) {
+                guard let detail else { return }
+                let contextID = session.writeContextID
+                Task { await delete(detail, contextID: contextID) }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("将从「\(session.currentLedgerName)」删除这笔流水，相关账户余额会重新计算。")
+        }
+    }
+
+    @ViewBuilder
+    private var writeActions: some View {
+        if let error { InlineError(message: error) }
+        if resultUnknown {
+            Button("返回并重新读取流水") {
+                dismiss()
+                session.refresh()
+            }
+            .frame(minHeight: 44)
+        } else if isLoadingActions {
+            ProgressView("正在核对流水操作权限…").frame(minHeight: 44)
+        } else if let detail {
+            if detail.canEdit, TransactionDraft(record: detail.record) != nil {
+                Button("编辑流水") {
+                    if privateContent { confirmDisclosure = true }
+                    else { showEditor = true }
+                }
+                .frame(minHeight: 44)
+                .accessibilityIdentifier("transaction.edit")
+                .disabled(session.writeBusy || session.dataBusy)
+            } else if detail.editable {
+                Text("编辑需要支持安全修改的新版 Finexy 服务端。").font(.footnote).foregroundStyle(.secondary)
+            }
+            if detail.canDelete {
+                Button("删除流水", role: .destructive) { confirmDelete = true }
+                    .frame(minHeight: 44)
+                    .accessibilityIdentifier("transaction.delete")
+                    .disabled(session.writeBusy || session.dataBusy)
+            }
+            if !detail.editable {
+                Text("服务器当前未授予对此流水的写入权限。").font(.footnote).foregroundStyle(.secondary)
+            }
+        } else if isExternalTransfer {
+            Text("当前版本可以新增和查看外部转账。").font(.footnote).foregroundStyle(.secondary)
+        } else if error != nil {
+            Button("重新核对操作权限") { Task { await loadActions() } }.frame(minHeight: 44)
+        }
+    }
+
+    private var isExternalTransfer: Bool {
+        transaction.type == 4 &&
+            (transaction.sourceAccountId == "0" || transaction.destinationAccountId == nil || transaction.destinationAccountId == "0")
+    }
+
+    private func loadActions() async {
+        guard session.canWrite, transaction.editable == true, !isExternalTransfer, !isLoadingActions else { return }
+        let contextID = session.writeContextID
+        isLoadingActions = true
+        error = nil
+        defer { isLoadingActions = false }
+        do {
+            detail = try await session.transactionDetail(id: transaction.id, contextID: contextID)
+        } catch is CancellationError {
+            return
+        } catch {
+            self.error = session.message(for: error)
+        }
+    }
+
+    private func delete(_ detail: TransactionDetail, contextID: UUID) async {
+        error = nil
+        do {
+            try await session.deleteTransaction(detail, contextID: contextID)
+            dismiss()
+        } catch is CancellationError {
+            return
+        } catch {
+            if error is URLError || (error as? APIError)?.isAmbiguousTransactionWrite == true {
+                resultUnknown = true
+                self.error = "未能确认删除结果。请重新读取流水并核对。"
+            } else {
+                if (error as? APIError)?.isTransactionConflict == true { resultUnknown = true }
+                self.error = session.message(for: error)
+            }
+        }
+    }
+}
+
+extension APIError {
+    var isTransactionConflict: Bool {
+        switch self {
+        case .transactionChanged, .server(205042, 409): return true
+        default: return false
+        }
     }
 }
 

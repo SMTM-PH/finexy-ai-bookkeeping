@@ -32,6 +32,7 @@ public struct Account: Codable, Identifiable, Sendable {
     public let ledgerId: String
     public let name: String
     public let parentId: String
+    public let type: Int?
     public let currency: String
     public let balance: Int64
     public let hidden: Bool
@@ -70,6 +71,7 @@ public struct TransactionRecord: Codable, Identifiable, Sendable {
     public let destinationAmount: Int64?
     public let hideAmount: Bool
     public let comment: String
+    public let editable: Bool?
 }
 
 public struct TransactionPage: Codable, Sendable {

@@ -1,6 +1,9 @@
 package models
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -207,6 +210,8 @@ type TransactionModifyRequest struct {
 	PictureIds           []string                       `json:"pictureIds"`
 	Comment              string                         `json:"comment" binding:"max=255"`
 	GeoLocation          *TransactionGeoLocationRequest `json:"geoLocation" binding:"omitempty"`
+	// Opts into conditional editing that preserves tags, pictures and location.
+	ExpectedEditToken string `json:"expectedEditToken" binding:"omitempty,len=64,hexadecimal"`
 }
 
 // TransactionImportRequest represents all parameters of transaction import request
@@ -397,8 +402,9 @@ type TransactionMoveBetweenAccountsRequest struct {
 
 // TransactionDeleteRequest represents all parameters of transaction deleting request
 type TransactionDeleteRequest struct {
-	LedgerId int64 `json:"ledgerId,string" binding:"omitempty,min=1"`
-	Id       int64 `json:"id,string" binding:"required,min=1"`
+	LedgerId          int64  `json:"ledgerId,string" binding:"omitempty,min=1"`
+	Id                int64  `json:"id,string" binding:"required,min=1"`
+	ExpectedEditToken string `json:"expectedEditToken" binding:"omitempty,len=64,hexadecimal"`
 }
 
 // TransactionBatchDeleteRequest represents all parameters of transaction batch deleting request
@@ -445,6 +451,18 @@ type TransactionInfoResponse struct {
 	Comment              string                                   `json:"comment"`
 	GeoLocation          *TransactionGeoLocationResponse          `json:"geoLocation,omitempty"`
 	Editable             bool                                     `json:"editable"`
+	EditToken            string                                   `json:"editToken,omitempty"`
+}
+
+// EditToken identifies the precise persisted row shown in transaction detail.
+// It changes for same-second writes that update editable fields as well.
+func (t *Transaction) EditToken() string {
+	encoded, err := json.Marshal(t)
+	if err != nil {
+		return ""
+	}
+	hash := sha256.Sum256(encoded)
+	return hex.EncodeToString(hash[:])
 }
 
 // TransactionCountResponse represents transaction count response

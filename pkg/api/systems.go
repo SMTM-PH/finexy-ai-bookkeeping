@@ -19,6 +19,7 @@ func (a *SystemsApi) VersionHandler(c *core.WebContext) (any, *errs.Error) {
 
 	result["version"] = core.Version
 	result["commitHash"] = core.CommitHash
+	result["transactionCreateProtocol"] = "durable-receipt-v1"
 
 	if core.BuildTime != "" {
 		result["buildTime"] = core.BuildTime
